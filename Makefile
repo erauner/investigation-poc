@@ -1,19 +1,32 @@
 .PHONY: install test run kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-setup kind-smoke-loop kind-down
 
+PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
 KIND_CONTEXT ?= kind-$(KIND_CLUSTER_NAME)
 KAGENT_NAMESPACE ?= kagent
 KAGENT_VERSION ?= 0.7.5
 
 install:
-	python3 -m pip install --upgrade pip
-	python3 -m pip install -e .[dev]
+	@if command -v uv >/dev/null 2>&1; then \
+		uv sync --extra dev; \
+	else \
+		$(PYTHON) -m pip install --upgrade pip; \
+		$(PYTHON) -m pip install -e .[dev]; \
+	fi
 
 test:
-	pytest -q
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run --extra dev pytest -q; \
+	else \
+		$(PYTHON) -m pytest -q; \
+	fi
 
 run:
-	uvicorn investigation_service.main:app --host 0.0.0.0 --port 8080 --reload
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run uvicorn investigation_service.main:app --host 0.0.0.0 --port 8080 --reload; \
+	else \
+		$(PYTHON) -m uvicorn investigation_service.main:app --host 0.0.0.0 --port 8080 --reload; \
+	fi
 
 kagent-smoke-apply:
 	@./scripts/smoke-workload.sh apply

@@ -9,6 +9,8 @@ make install
 make run
 ```
 
+`make` targets prefer `uv` when installed, with a `pip/python` fallback.
+
 By default, Prometheus is read from `http://localhost:9090`.
 Override if needed:
 
