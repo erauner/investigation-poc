@@ -1,11 +1,5 @@
-@Library('homelab-jenkins-library@main') _
-
 pipeline {
-    agent {
-        kubernetes {
-            yaml homelab.podTemplate('default')
-        }
-    }
+    agent any
 
     stages {
         stage('Install') {
@@ -24,14 +18,6 @@ pipeline {
                     set -euo pipefail
                     pytest -q
                 '''
-            }
-        }
-    }
-
-    post {
-        failure {
-            script {
-                homelab.notifyDiscord(status: 'FAILURE')
             }
         }
     }
