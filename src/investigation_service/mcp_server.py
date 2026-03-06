@@ -14,9 +14,23 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def collect_workload_context(namespace: str, target: str) -> dict:
+def collect_workload_context(
+    namespace: str,
+    target: str,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+) -> dict:
     """Collect structured workload context (state, events, logs, metrics, findings)."""
-    response = collect_workload_context_impl(CollectContextRequest(namespace=namespace, target=target))
+    response = collect_workload_context_impl(
+        CollectContextRequest(
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+        )
+    )
     return response.model_dump(mode="json")
 
 

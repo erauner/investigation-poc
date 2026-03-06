@@ -1,7 +1,7 @@
 from .models import Finding
 
 
-def derive_findings(object_state: dict, events: list[str], logs: str, metrics: dict) -> list[Finding]:
+def _derive_workload_findings(object_state: dict, events: list[str], logs: str, metrics: dict) -> list[Finding]:
     findings: list[Finding] = []
 
     if object_state.get("error"):
@@ -45,6 +45,50 @@ def derive_findings(object_state: dict, events: list[str], logs: str, metrics: d
             )
         )
 
+    restart_rate = metrics.get("pod_restart_rate")
+    if restart_rate is not None and restart_rate > 0:
+        findings.append(
+            Finding(
+                severity="warning",
+                source="prometheus",
+                title="Pod Restarts Increasing",
+                evidence=f"Restart rate over lookback window: {restart_rate:.4f}/s",
+            )
+        )
+
+    return findings
+
+
+def _derive_service_findings(metrics: dict) -> list[Finding]:
+    findings: list[Finding] = []
+
+    error_rate = metrics.get("service_error_rate")
+    if error_rate is not None and error_rate > 0:
+        findings.append(
+            Finding(
+                severity="warning",
+                source="prometheus",
+                title="Service Returning 5xx Responses",
+                evidence=f"5xx request rate over lookback window: {error_rate:.4f}/s",
+            )
+        )
+
+    p95_latency = metrics.get("service_latency_p95_seconds")
+    if p95_latency is not None and p95_latency > 1.0:
+        findings.append(
+            Finding(
+                severity="warning",
+                source="prometheus",
+                title="High Service Latency",
+                evidence=f"p95 latency is {p95_latency:.3f}s",
+            )
+        )
+
+    return findings
+
+
+def _derive_pipeline_findings(metrics: dict) -> list[Finding]:
+    findings: list[Finding] = []
     spans = metrics.get("accepted_spans_per_sec")
     if spans is None or spans <= 0:
         findings.append(
@@ -55,6 +99,19 @@ def derive_findings(object_state: dict, events: list[str], logs: str, metrics: d
                 evidence="Prometheus shows no recent accepted spans",
             )
         )
+    return findings
+
+
+def derive_findings(profile: str, object_state: dict, events: list[str], logs: str, metrics: dict) -> list[Finding]:
+    findings: list[Finding] = []
+
+    if profile == "service":
+        findings.extend(_derive_service_findings(metrics))
+    elif profile == "otel-pipeline":
+        findings.extend(_derive_pipeline_findings(metrics))
+    else:
+        findings.extend(_derive_workload_findings(object_state, events, logs, metrics))
+        findings.extend(_derive_pipeline_findings(metrics))
 
     if not findings:
         findings.append(

@@ -18,7 +18,15 @@ def collect_context(req: CollectContextRequest) -> CollectedContextResponse:
 
 @app.post("/investigate", response_model=InvestigationResponse)
 def investigate(req: InvestigateRequest) -> InvestigationResponse:
-    context = collect_workload_context(CollectContextRequest(namespace=req.namespace, target=req.target))
+    context = collect_workload_context(
+        CollectContextRequest(
+            namespace=req.namespace,
+            target=req.target,
+            profile=req.profile,
+            service_name=req.service_name,
+            lookback_minutes=req.lookback_minutes,
+        )
+    )
 
     critical = [f for f in context.findings if f.severity == "critical"]
     if critical:
@@ -30,9 +38,11 @@ def investigate(req: InvestigateRequest) -> InvestigationResponse:
 
     evidence = [
         f"Target: {context.target.kind}/{context.target.name} in namespace {context.target.namespace}",
+        f"Profile: {req.profile}",
         f"K8s object: {context.object_state}",
         f"Top findings: {[f.title for f in context.findings]}",
         f"Prometheus metrics: {context.metrics}",
+        f"Limitations: {context.limitations}",
     ]
 
     return InvestigationResponse(diagnosis=diagnosis, evidence=evidence, recommendation=recommendation)

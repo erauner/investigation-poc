@@ -11,3 +11,12 @@ def get_log_tail_lines() -> int:
         return int(raw)
     except ValueError:
         return 200
+
+
+def get_default_lookback_minutes() -> int:
+    raw = os.getenv("DEFAULT_LOOKBACK_MINUTES", "15")
+    try:
+        value = int(raw)
+    except ValueError:
+        return 15
+    return min(max(value, 1), 240)

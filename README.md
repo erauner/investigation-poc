@@ -29,7 +29,13 @@ make test
 ```bash
 curl -s localhost:8080/investigate \
   -H 'content-type: application/json' \
-  -d '{"namespace":"default","target":"pod/api-7d4c"}' | jq
+  -d '{
+    "namespace":"default",
+    "target":"deployment/api",
+    "profile":"service",
+    "service_name":"api",
+    "lookback_minutes":15
+  }' | jq
 ```
 
 ## Kubernetes deployment (MCP default)
