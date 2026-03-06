@@ -57,6 +57,11 @@ class CollectServiceContextRequest(BaseModel):
     lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
 
 
+class FindUnhealthyWorkloadsRequest(BaseModel):
+    namespace: str = Field(..., description="Kubernetes namespace")
+    limit: int = Field(default=5, ge=1, le=20, description="Maximum number of unhealthy workloads to return")
+
+
 class InvestigateRequest(BaseModel):
     namespace: str = Field(..., description="Kubernetes namespace")
     target: str = Field(..., description="Target in form pod/name, deployment/name, service/name, or plain name")
@@ -81,6 +86,24 @@ class CollectedContextResponse(BaseModel):
     findings: list[Finding]
     limitations: list[str] = Field(default_factory=list)
     enrichment_hints: list[str] = Field(default_factory=list)
+
+
+class UnhealthyWorkloadCandidate(BaseModel):
+    target: str
+    namespace: str
+    kind: Literal["pod"]
+    name: str
+    phase: str | None = None
+    reason: str | None = None
+    restart_count: int = 0
+    ready: bool = False
+    summary: str
+
+
+class UnhealthyWorkloadsResponse(BaseModel):
+    namespace: str
+    candidates: list[UnhealthyWorkloadCandidate]
+    limitations: list[str] = Field(default_factory=list)
 
 
 class RootCauseReport(BaseModel):

@@ -6,8 +6,10 @@ from .models import (
     CollectNodeContextRequest,
     CollectServiceContextRequest,
     CollectedContextResponse,
+    FindUnhealthyWorkloadsRequest,
     InvestigateRequest,
     InvestigationResponse,
+    UnhealthyWorkloadsResponse,
 )
 from .tools import (
     build_root_cause_report,
@@ -15,6 +17,7 @@ from .tools import (
     collect_node_context,
     collect_service_context,
     collect_workload_context,
+    find_unhealthy_workloads,
     normalize_alert_input,
 )
 
@@ -49,6 +52,11 @@ def collect_node(req: CollectNodeContextRequest) -> CollectedContextResponse:
 @app.post("/tools/collect_service_context", response_model=CollectedContextResponse)
 def collect_service(req: CollectServiceContextRequest) -> CollectedContextResponse:
     return collect_service_context(req)
+
+
+@app.post("/tools/find_unhealthy_workloads", response_model=UnhealthyWorkloadsResponse)
+def find_unhealthy(req: FindUnhealthyWorkloadsRequest) -> UnhealthyWorkloadsResponse:
+    return find_unhealthy_workloads(req)
 
 
 @app.post("/investigate", response_model=InvestigationResponse)

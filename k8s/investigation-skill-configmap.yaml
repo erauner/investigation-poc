@@ -15,9 +15,11 @@ data:
     Rules:
     - Prefer tools over guessing.
     - For alert-shaped input, call normalize_alert_input first.
+    - For vague workload requests like "investigate the unhealthy pod in namespace X", call find_unhealthy_workloads first to get a concrete target.
     - If normalized scope is node, call collect_node_context.
     - If normalized scope is service, call collect_service_context.
     - If normalized scope is workload, call collect_workload_context.
+    - After find_unhealthy_workloads returns candidates, pick the highest-signal unhealthy target and call collect_workload_context with that concrete target.
     - Keep collect_alert_context only as a compatibility fallback when normalization cannot be separated.
     - Start with read-only inspection.
     - Use built-in Kubernetes tools only to clarify gaps after the first collector call.

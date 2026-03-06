@@ -7,11 +7,13 @@ from .models import (
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
+    FindUnhealthyWorkloadsRequest,
 )
 from .tools import collect_alert_context as collect_alert_context_impl
 from .tools import collect_node_context as collect_node_context_impl
 from .tools import collect_service_context as collect_service_context_impl
 from .tools import collect_workload_context as collect_workload_context_impl
+from .tools import find_unhealthy_workloads as find_unhealthy_workloads_impl
 from .tools import normalize_alert_input as normalize_alert_input_impl
 
 mcp = FastMCP(
@@ -125,6 +127,15 @@ def collect_service_context(
             target=target,
             lookback_minutes=lookback_minutes,
         )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def find_unhealthy_workloads(namespace: str, limit: int = 5) -> dict:
+    """List concrete unhealthy pod targets in a namespace for vague workload requests."""
+    response = find_unhealthy_workloads_impl(
+        FindUnhealthyWorkloadsRequest(namespace=namespace, limit=limit)
     )
     return response.model_dump(mode="json")
 

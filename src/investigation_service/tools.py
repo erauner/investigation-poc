@@ -1,16 +1,25 @@
 import re
 
 from .analysis import derive_findings
-from .k8s_adapter import get_k8s_object, get_pod_logs, get_related_events, resolve_runtime_target, resolve_target
+from .k8s_adapter import (
+    find_unhealthy_workloads as find_unhealthy_workloads_impl,
+    get_k8s_object,
+    get_pod_logs,
+    get_related_events,
+    resolve_runtime_target,
+    resolve_target,
+)
 from .models import (
     CollectAlertContextRequest,
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
+    FindUnhealthyWorkloadsRequest,
     CollectedContextResponse,
     NormalizedInvestigationRequest,
     RootCauseReport,
     ScopeType,
+    UnhealthyWorkloadsResponse,
 )
 from .prom_adapter import collect_metrics_for_scope
 from .settings import get_default_lookback_minutes, get_log_tail_lines
@@ -220,6 +229,10 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
 
 def collect_workload_context(req: CollectContextRequest) -> CollectedContextResponse:
     return _collect_context(req)
+
+
+def find_unhealthy_workloads(req: FindUnhealthyWorkloadsRequest) -> UnhealthyWorkloadsResponse:
+    return find_unhealthy_workloads_impl(namespace=req.namespace, limit=req.limit)
 
 
 def collect_node_context(req: CollectNodeContextRequest) -> CollectedContextResponse:

@@ -29,6 +29,7 @@ spec:
           kind: RemoteMCPServer
           toolNames:
             - normalize_alert_input
+            - find_unhealthy_workloads
             - collect_node_context
             - collect_service_context
             - collect_workload_context

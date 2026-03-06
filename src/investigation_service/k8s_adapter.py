@@ -1,7 +1,7 @@
 import json
 import subprocess
 
-from .models import TargetRef
+from .models import TargetRef, UnhealthyWorkloadCandidate, UnhealthyWorkloadsResponse
 
 
 def resolve_target(namespace: str, target: str) -> TargetRef:
@@ -180,6 +180,85 @@ def _top_pods_for_node(node_name: str, limit: int = 5) -> list[dict]:
 
 def get_top_pods_for_node(node_name: str, limit: int = 5) -> list[dict]:
     return _top_pods_for_node(node_name=node_name, limit=limit)
+
+
+def find_unhealthy_workloads(namespace: str, limit: int = 5) -> UnhealthyWorkloadsResponse:
+    ok, pods_json = _run_kubectl(["-n", namespace, "get", "pods", "-o", "json"])
+    if not ok:
+        return UnhealthyWorkloadsResponse(
+            namespace=namespace,
+            candidates=[],
+            limitations=[f"pod query failed: {pods_json}"],
+        )
+
+    try:
+        items = json.loads(pods_json).get("items", [])
+    except json.JSONDecodeError:
+        return UnhealthyWorkloadsResponse(
+            namespace=namespace,
+            candidates=[],
+            limitations=["pod query returned invalid json"],
+        )
+
+    candidates: list[tuple[int, UnhealthyWorkloadCandidate]] = []
+    for item in items:
+        metadata = item.get("metadata", {})
+        status = item.get("status", {})
+        container_statuses = status.get("containerStatuses", []) or []
+        total_restarts = sum(container.get("restartCount", 0) for container in container_statuses)
+        ready = all(container.get("ready", False) for container in container_statuses) if container_statuses else False
+        waiting_reasons = [
+            container.get("state", {}).get("waiting", {}).get("reason")
+            for container in container_statuses
+            if container.get("state", {}).get("waiting", {}).get("reason")
+        ]
+        terminated_reasons = [
+            container.get("lastState", {}).get("terminated", {}).get("reason")
+            for container in container_statuses
+            if container.get("lastState", {}).get("terminated", {}).get("reason")
+        ]
+        phase = status.get("phase")
+        reason = status.get("reason") or next(iter(waiting_reasons), None) or next(iter(terminated_reasons), None)
+
+        unhealthy_score = 0
+        if "CrashLoopBackOff" in waiting_reasons:
+            unhealthy_score = 100
+        elif phase in {"Failed", "Pending"}:
+            unhealthy_score = 80
+        elif not ready and container_statuses:
+            unhealthy_score = 60
+        elif total_restarts > 0:
+            unhealthy_score = 40
+
+        if unhealthy_score == 0:
+            continue
+
+        name = metadata.get("name", "")
+        summary = reason or phase or "unhealthy"
+        if total_restarts > 0:
+            summary = f"{summary}; restarts={total_restarts}"
+        candidates.append(
+            (
+                unhealthy_score,
+                UnhealthyWorkloadCandidate(
+                    target=f"pod/{name}",
+                    namespace=namespace,
+                    kind="pod",
+                    name=name,
+                    phase=phase,
+                    reason=reason,
+                    restart_count=total_restarts,
+                    ready=ready,
+                    summary=summary,
+                ),
+            )
+        )
+
+    candidates.sort(key=lambda item: (item[0], item[1].restart_count), reverse=True)
+    return UnhealthyWorkloadsResponse(
+        namespace=namespace,
+        candidates=[candidate for _, candidate in candidates[:limit]],
+    )
 
 
 def get_related_events(target: TargetRef, limit: int = 20) -> list[str]:

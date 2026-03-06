@@ -1,12 +1,16 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from investigation_service.analysis import derive_findings
+from investigation_service.k8s_adapter import find_unhealthy_workloads as find_unhealthy_workloads_impl
 from investigation_service.main import app
 from investigation_service.models import (
     CollectAlertContextRequest,
     CollectedContextResponse,
     Finding,
     TargetRef,
+    UnhealthyWorkloadsResponse,
 )
 from investigation_service.tools import normalize_alert_input
 
@@ -238,6 +242,80 @@ def test_collect_service_context_route_returns_context(monkeypatch) -> None:
         "kind": "service",
         "name": "kagent-controller",
     }
+
+
+def test_find_unhealthy_workloads_route_returns_candidates(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.find_unhealthy_workloads",
+        lambda _req: UnhealthyWorkloadsResponse(
+            namespace="kagent-smoke",
+            candidates=[
+                {
+                    "target": "pod/crashy-abc123",
+                    "namespace": "kagent-smoke",
+                    "kind": "pod",
+                    "name": "crashy-abc123",
+                    "phase": "Running",
+                    "reason": "CrashLoopBackOff",
+                    "restart_count": 7,
+                    "ready": False,
+                    "summary": "CrashLoopBackOff; restarts=7",
+                }
+            ],
+            limitations=[],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/find_unhealthy_workloads",
+        json={"namespace": "kagent-smoke", "limit": 3},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["namespace"] == "kagent-smoke"
+    assert body["candidates"][0]["target"] == "pod/crashy-abc123"
+    assert body["candidates"][0]["reason"] == "CrashLoopBackOff"
+
+
+def test_find_unhealthy_workloads_prefers_crashlooping_pods(monkeypatch) -> None:
+    pods_payload = {
+        "items": [
+            {
+                "metadata": {"name": "whoami-123", "namespace": "kagent-smoke"},
+                "status": {
+                    "phase": "Running",
+                    "containerStatuses": [{"ready": True, "restartCount": 0, "state": {"running": {}}}],
+                },
+            },
+            {
+                "metadata": {"name": "crashy-abc123", "namespace": "kagent-smoke"},
+                "status": {
+                    "phase": "Running",
+                    "containerStatuses": [
+                        {
+                            "ready": False,
+                            "restartCount": 12,
+                            "state": {"waiting": {"reason": "CrashLoopBackOff"}},
+                        }
+                    ],
+                },
+            },
+        ]
+    }
+
+    monkeypatch.setattr(
+        "investigation_service.k8s_adapter._run_kubectl",
+        lambda _args: (True, json.dumps(pods_payload)),
+    )
+
+    response = find_unhealthy_workloads_impl(namespace="kagent-smoke", limit=5)
+
+    assert response.limitations == []
+    assert len(response.candidates) == 1
+    assert response.candidates[0].target == "pod/crashy-abc123"
+    assert response.candidates[0].reason == "CrashLoopBackOff"
 
 
 def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
