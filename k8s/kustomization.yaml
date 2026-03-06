@@ -6,5 +6,6 @@ resources:
   - role.yaml
   - rolebinding.yaml
   - configmap.yaml
+  - investigation-skill-configmap.yaml
   - deployment.yaml
   - service.yaml
