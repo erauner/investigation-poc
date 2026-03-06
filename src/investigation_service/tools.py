@@ -51,6 +51,8 @@ def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextReques
     labels = req.labels
     annotations = req.annotations
     target = req.target or (f"node/{req.node_name}" if req.node_name else None)
+    if not target and req.service_name:
+        target = f"service/{req.service_name}"
     if not target:
         target = _infer_target_from_text(
             _first_non_empty(

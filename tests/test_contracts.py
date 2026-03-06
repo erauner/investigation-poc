@@ -110,6 +110,21 @@ def test_collect_alert_context_infers_service_profile() -> None:
     assert normalized.service_name == "kagent-controller"
 
 
+def test_collect_alert_context_accepts_explicit_service_name() -> None:
+    normalized = _infer_alert_inputs(
+        CollectAlertContextRequest(
+            alertname="EnvoyHighErrorRate",
+            namespace="kagent",
+            service_name="kagent-controller",
+        )
+    )
+
+    assert normalized.namespace == "kagent"
+    assert normalized.target == "service/kagent-controller"
+    assert normalized.profile == "service"
+    assert normalized.service_name == "kagent-controller"
+
+
 def test_collect_alert_context_infers_node_target_from_summary() -> None:
     normalized = _infer_alert_inputs(
         CollectAlertContextRequest(
