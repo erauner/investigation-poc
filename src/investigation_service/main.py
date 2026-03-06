@@ -1,7 +1,13 @@
 from fastapi import FastAPI
 
-from .models import CollectContextRequest, CollectedContextResponse, InvestigateRequest, InvestigationResponse
-from .tools import collect_workload_context
+from .models import (
+    CollectAlertContextRequest,
+    CollectContextRequest,
+    CollectedContextResponse,
+    InvestigateRequest,
+    InvestigationResponse,
+)
+from .tools import collect_alert_context, collect_workload_context
 
 app = FastAPI(title="Investigation Service", version="0.2.0")
 
@@ -14,6 +20,11 @@ def healthz() -> dict:
 @app.post("/tools/collect_workload_context", response_model=CollectedContextResponse)
 def collect_context(req: CollectContextRequest) -> CollectedContextResponse:
     return collect_workload_context(req)
+
+
+@app.post("/tools/collect_alert_context", response_model=CollectedContextResponse)
+def collect_alert(req: CollectAlertContextRequest) -> CollectedContextResponse:
+    return collect_alert_context(req)
 
 
 @app.post("/investigate", response_model=InvestigationResponse)

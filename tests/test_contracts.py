@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 
 from investigation_service.main import app
-from investigation_service.models import CollectedContextResponse, Finding, TargetRef
+from investigation_service.models import CollectAlertContextRequest, CollectedContextResponse, Finding, TargetRef
+from investigation_service.tools import _infer_alert_inputs
 
 
 def test_collect_context_accepts_profile_fields(monkeypatch) -> None:
@@ -78,3 +79,74 @@ def test_investigate_includes_limitations(monkeypatch) -> None:
     assert response.status_code == 200
     evidence = response.json()["evidence"]
     assert any("Limitations:" in item for item in evidence)
+
+
+def test_collect_alert_context_infers_target(monkeypatch) -> None:
+    normalized = _infer_alert_inputs(
+        CollectAlertContextRequest(
+            alertname="PodCrashLooping",
+            labels={"namespace": "kagent-smoke", "pod": "api-123"},
+        )
+    )
+
+    assert normalized.namespace == "kagent-smoke"
+    assert normalized.target == "pod/api-123"
+    assert normalized.profile == "workload"
+    assert normalized.service_name is None
+
+
+def test_collect_alert_context_infers_service_profile() -> None:
+    normalized = _infer_alert_inputs(
+        CollectAlertContextRequest(
+            alertname="EnvoyHighErrorRate",
+            labels={"namespace": "kagent", "service": "kagent-controller"},
+        )
+    )
+
+    assert normalized.namespace == "kagent"
+    assert normalized.target == "service/kagent-controller"
+    assert normalized.profile == "service"
+    assert normalized.service_name == "kagent-controller"
+
+
+def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
+    def fake_collect(_req):
+        return CollectedContextResponse(
+            target=TargetRef(namespace="kagent-smoke", kind="pod", name="api-123"),
+            object_state={"namespace": "kagent-smoke", "kind": "pod", "name": "api-123"},
+            events=["BackOff restarting failed container"],
+            log_excerpt="starting",
+            metrics={"prometheus_available": True},
+            findings=[
+                Finding(
+                    severity="critical",
+                    source="events",
+                    title="Crash Loop Detected",
+                    evidence="Events indicate BackOff/CrashLoopBackOff behavior",
+                )
+            ],
+            limitations=["alertname: PodCrashLooping"],
+        )
+
+    monkeypatch.setattr("investigation_service.main.collect_alert_context", fake_collect)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/collect_alert_context",
+        json={
+            "alertname": "PodCrashLooping",
+            "labels": {
+                "namespace": "kagent-smoke",
+                "pod": "api-123",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"] == {
+        "namespace": "kagent-smoke",
+        "kind": "pod",
+        "name": "api-123",
+    }
+    assert "alertname: PodCrashLooping" in body["limitations"]

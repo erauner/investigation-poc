@@ -29,6 +29,7 @@ spec:
           kind: RemoteMCPServer
           toolNames:
             - collect_workload_context
+            - collect_alert_context
     a2aConfig:
       skills:
         - id: investigate-workload

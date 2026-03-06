@@ -20,3 +20,18 @@ def get_default_lookback_minutes() -> int:
     except ValueError:
         return 15
     return min(max(value, 1), 240)
+
+
+def get_allowed_namespaces() -> set[str] | None:
+    raw = os.getenv("ALLOWED_NAMESPACES", "").strip()
+    if not raw:
+        return None
+    values = {item.strip() for item in raw.split(",") if item.strip()}
+    return values or None
+
+
+def get_action_mode() -> str:
+    raw = os.getenv("ACTION_MODE", "disabled").strip().lower()
+    if raw in {"disabled", "proposal-only"}:
+        return raw
+    return "disabled"
