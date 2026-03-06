@@ -14,6 +14,31 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
             )
         )
 
+    if object_state.get("kind") == "node":
+        conditions = {
+            item.get("type"): item.get("status")
+            for item in object_state.get("conditions", [])
+            if item.get("type")
+        }
+        if conditions.get("Ready") == "False":
+            findings.append(
+                Finding(
+                    severity="critical",
+                    source="k8s",
+                    title="Node Not Ready",
+                    evidence="Node condition Ready=False",
+                )
+            )
+        if conditions.get("MemoryPressure") == "True":
+            findings.append(
+                Finding(
+                    severity="warning",
+                    source="k8s",
+                    title="Node Memory Pressure",
+                    evidence="Node condition MemoryPressure=True",
+                )
+            )
+
     event_blob = "\n".join(events).lower()
     if "crashloopbackoff" in event_blob or "backoff" in event_blob:
         findings.append(

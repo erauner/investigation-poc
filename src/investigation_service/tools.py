@@ -20,22 +20,59 @@ def _label_value(labels: dict[str, str], *keys: str) -> str | None:
     return None
 
 
+def _annotation_value(annotations: dict[str, str], *keys: str) -> str | None:
+    for key in keys:
+        value = annotations.get(key)
+        if value:
+            return value
+    return None
+
+
+def _infer_target_from_text(text: str | None) -> str | None:
+    if not text:
+        return None
+    lower = text.lower()
+    patterns = [
+        (r"\bpod\s+([a-z0-9][a-z0-9\-\.]*)\b", "pod"),
+        (r"\bdeployment\s+([a-z0-9][a-z0-9\-\.]*)\b", "deployment"),
+        (r"\bservice\s+([a-z0-9][a-z0-9\-\.]*)\b", "service"),
+        (r"\bnode\s+([a-z0-9][a-z0-9\-\.]*)\b", "node"),
+    ]
+    import re
+
+    for pattern, kind in patterns:
+        match = re.search(pattern, lower)
+        if match:
+            return f"{kind}/{match.group(1)}"
+    return None
+
+
 def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextRequest:
     labels = req.labels
+    annotations = req.annotations
+    target = req.target
+    if not target:
+        target = _infer_target_from_text(
+            _first_non_empty(
+                _annotation_value(annotations, "summary", "description", "message"),
+                labels.get("summary"),
+            )
+        )
+
     namespace = _first_non_empty(
         req.namespace,
         _label_value(labels, "namespace", "kubernetes_namespace", "exported_namespace"),
     )
-    if not namespace:
+    if not namespace and not (target and target.startswith("node/")):
         raise ValueError("namespace could not be inferred from alert input")
 
-    target = req.target
     if not target:
         pod_name = _label_value(labels, "pod", "pod_name", "kubernetes_pod_name")
         deployment_name = _label_value(labels, "deployment", "deployment_name", "kubernetes_deployment_name")
         statefulset_name = _label_value(labels, "statefulset", "statefulset_name", "kubernetes_statefulset_name")
         daemonset_name = _label_value(labels, "daemonset", "daemonset_name", "kubernetes_daemonset_name")
         service_name = _label_value(labels, "service", "service_name")
+        node_name = _label_value(labels, "node", "node_name", "kubernetes_node", "instance")
         app_name = _label_value(labels, "app", "app_kubernetes_io_name", "job")
         if pod_name:
             target = f"pod/{pod_name}"
@@ -47,6 +84,8 @@ def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextReques
             target = f"deployment/{daemonset_name}"
         elif service_name:
             target = f"service/{service_name}"
+        elif node_name:
+            target = f"node/{node_name}"
         elif app_name:
             target = app_name
     if not target:

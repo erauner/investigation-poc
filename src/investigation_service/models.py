@@ -6,13 +6,13 @@ ProfileType = Literal["workload", "service", "otel-pipeline"]
 
 
 class TargetRef(BaseModel):
-    namespace: str
-    kind: Literal["pod", "deployment", "service"]
+    namespace: str | None = None
+    kind: Literal["pod", "deployment", "service", "node"]
     name: str
 
 
 class CollectContextRequest(BaseModel):
-    namespace: str = Field(..., description="Kubernetes namespace")
+    namespace: str | None = Field(default=None, description="Kubernetes namespace when target is namespaced")
     target: str = Field(..., description="Target in form pod/name, deployment/name, service/name, or plain name")
     profile: ProfileType = Field(default="workload", description="Investigation profile")
     service_name: str | None = Field(default=None, description="Optional service name hint for service profile")

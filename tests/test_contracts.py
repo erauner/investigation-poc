@@ -109,6 +109,19 @@ def test_collect_alert_context_infers_service_profile() -> None:
     assert normalized.service_name == "kagent-controller"
 
 
+def test_collect_alert_context_infers_node_target_from_summary() -> None:
+    normalized = _infer_alert_inputs(
+        CollectAlertContextRequest(
+            alertname="NodeHighMemoryAllocation",
+            annotations={"summary": "Node worker3 memory allocation at 86.8%"},
+        )
+    )
+
+    assert normalized.namespace is None
+    assert normalized.target == "node/worker3"
+    assert normalized.profile == "workload"
+
+
 def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
     def fake_collect(_req):
         return CollectedContextResponse(

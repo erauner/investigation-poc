@@ -14,11 +14,13 @@ def resolve_target(namespace: str, target: str) -> TargetRef:
             kind = "deployment"
         elif normalized in ("svc", "service", "services"):
             kind = "service"
+        elif normalized in ("node", "nodes"):
+            kind = "node"
         else:
             kind = "pod"
-        return TargetRef(namespace=namespace, kind=kind, name=name)
+        return TargetRef(namespace=namespace or None, kind=kind, name=name)
 
-    return TargetRef(namespace=namespace, kind="pod", name=target)
+    return TargetRef(namespace=namespace or None, kind="pod", name=target)
 
 
 def _run_kubectl(args: list[str]) -> tuple[bool, str]:
@@ -34,6 +36,9 @@ def _run_kubectl(args: list[str]) -> tuple[bool, str]:
 
 
 def _resource_exists(namespace: str, kind: str, name: str) -> bool:
+    if kind == "node":
+        ok, _ = _run_kubectl(["get", kind, name, "-o", "name"])
+        return ok
     ok, _ = _run_kubectl(["-n", namespace, "get", kind, name, "-o", "name"])
     return ok
 
@@ -81,7 +86,10 @@ def resolve_runtime_target(target: TargetRef) -> TargetRef:
 
 
 def get_k8s_object(target: TargetRef) -> dict:
-    ok, output = _run_kubectl(["-n", target.namespace, "get", target.kind, target.name, "-o", "json"])
+    args = ["get", target.kind, target.name, "-o", "json"]
+    if target.namespace:
+        args = ["-n", target.namespace, *args]
+    ok, output = _run_kubectl(args)
     if not ok:
         return {"error": output, "namespace": target.namespace, "kind": target.kind, "name": target.name}
 
@@ -92,7 +100,7 @@ def get_k8s_object(target: TargetRef) -> dict:
 
     metadata = parsed.get("metadata", {})
     status = parsed.get("status", {})
-    return {
+    response = {
         "namespace": target.namespace,
         "kind": target.kind,
         "name": target.name,
@@ -102,6 +110,11 @@ def get_k8s_object(target: TargetRef) -> dict:
         "observedGeneration": status.get("observedGeneration"),
         "creationTimestamp": metadata.get("creationTimestamp"),
     }
+    if target.kind == "node":
+        response["conditions"] = status.get("conditions", [])
+        response["allocatable"] = status.get("allocatable", {})
+        response["capacity"] = status.get("capacity", {})
+    return response
 
 
 def get_related_events(target: TargetRef, limit: int = 20) -> list[str]:
@@ -113,20 +126,21 @@ def get_related_events(target: TargetRef, limit: int = 20) -> list[str]:
 
     lines: list[str] = []
     for name in names:
-        ok, output = _run_kubectl(
-            [
-                "-n",
-                target.namespace,
-                "get",
-                "events",
-                "--sort-by=.lastTimestamp",
-                "--field-selector",
-                f"involvedObject.name={name}",
-                "-o",
-                "custom-columns=TYPE:.type,REASON:.reason,MESSAGE:.message",
-                "--no-headers",
-            ]
-        )
+        args = [
+            "get",
+            "events",
+            "--sort-by=.lastTimestamp",
+            "--field-selector",
+            f"involvedObject.name={name}",
+            "-o",
+            "custom-columns=TYPE:.type,REASON:.reason,MESSAGE:.message",
+            "--no-headers",
+        ]
+        if target.namespace:
+            args = ["-n", target.namespace, *args]
+        else:
+            args = ["-A", *args]
+        ok, output = _run_kubectl(args)
         if not ok:
             continue
         lines.extend([line.strip() for line in output.splitlines() if line.strip()])
@@ -169,6 +183,8 @@ def _first_pod_for_deployment(namespace: str, deployment_name: str) -> str | Non
 
 
 def get_pod_logs(target: TargetRef, tail: int = 200) -> str:
+    if target.kind == "node":
+        return "logs unavailable for node targets"
     pod_name = target.name
     if target.kind == "deployment":
         resolved = _first_pod_for_deployment(target.namespace, target.name)
