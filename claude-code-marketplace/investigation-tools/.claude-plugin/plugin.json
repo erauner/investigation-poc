@@ -1,0 +1,8 @@
+{
+  "name": "investigation-tools",
+  "version": "0.1.0",
+  "description": "Claude Code plugin that adds a thin /investigate command backed by the kagent controller MCP endpoint.",
+  "author": {
+    "name": "Evan Rauner"
+  }
+}

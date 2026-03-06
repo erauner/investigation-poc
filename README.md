@@ -165,6 +165,61 @@ Optional HTTP debug API deployment:
 make kind-enable-http-debug
 ```
 
+## Claude Code plugin
+
+This repo also includes a repo-local Claude Code plugin marketplace for testing a slash-command entrypoint before any future fork:
+
+- [claude-code-marketplace/README.md](/Users/erauner/git/side/investigation-poc/claude-code-marketplace/README.md)
+
+The included plugin is intentionally thin:
+
+- shared plugin command: `/investigation-tools:investigate`
+- MCP path: `kagent-controller`
+- agent path: `kagent/homelab-k8s-custom-agent`
+
+Local test flow:
+
+1. Port-forward the controller MCP endpoint:
+
+```bash
+./scripts/port-forward-controller-mcp.sh
+```
+
+2. In Claude Code, add the repo-local marketplace and install the plugin:
+
+```text
+/plugin marketplace add ./claude-code-marketplace
+/plugin install investigation-tools@investigation-poc-marketplace
+```
+
+3. Restart Claude Code and run:
+
+```text
+/investigation-tools:investigate Investigate the unhealthy pod in namespace kagent-smoke.
+```
+
+For faster project-local iteration without plugin namespacing, this repo also includes a standalone command:
+
+```text
+/investigate Investigate the unhealthy pod in namespace kagent-smoke.
+```
+
+That local command lives at [.claude/commands/investigate.md](/Users/erauner/git/side/investigation-poc/.claude/commands/investigate.md). Per the current Claude Code behavior we just tested, `.claude/commands/` is the right path for user-invoked plain slash commands, while plugins are the right path once you want something shareable and versioned.
+
+This repo also includes an optional skill form at [.claude/skills/investigation-helper/SKILL.md](/Users/erauner/git/side/investigation-poc/.claude/skills/investigation-helper/SKILL.md) if you want Claude to auto-discover the capability from natural-language requests, but that is not the primary manual entrypoint.
+
+Once the standalone command UX is stable, the next local packaging test should use a plugin directory directly:
+
+```bash
+claude --plugin-dir ./claude-code-marketplace/investigation-tools
+```
+
+Then invoke the namespaced plugin command:
+
+```text
+/investigation-tools:investigate Investigate the unhealthy pod in namespace kagent-smoke.
+```
+
 ## Claude Desktop extension
 
 This repo now also includes a Desktop packaging path in [desktop-extension/README.md](/Users/erauner/git/side/investigation-poc/desktop-extension/README.md).
