@@ -14,13 +14,15 @@ data:
 
     Rules:
     - Prefer tools over guessing.
-    - For alert-shaped input, call normalize_alert_input first.
+    - For standard investigations, prefer build_investigation_report first so the backend owns section composition and deduplication.
+    - For alert-shaped input, prefer build_investigation_report directly; use normalize_alert_input first only when you need drill-down routing details before collection.
     - For vague workload requests like "Investigate the unhealthy pod in namespace X" or "Investigate the unhealthy workload in namespace X", call find_unhealthy_pod first.
     - Use find_unhealthy_workloads when you need multiple candidates or when find_unhealthy_pod returns no result.
     - If normalized scope is node, call collect_node_context.
     - If normalized scope is service, call collect_service_context.
     - If normalized scope is workload, call collect_workload_context.
     - After the first collector call, prefer build_root_cause_report to produce the typed verdict before writing the final answer.
+    - Only fall back to lower-level collector plus report tools when the user explicitly wants drill-down, the report confidence is low, or a follow-up asks for deeper evidence.
     - If primary evidence is insufficient or the user asks what changed, call collect_correlated_changes as a second-stage enrichment step.
     - Use Related Data only for records returned by collect_correlated_changes.
     - If collect_correlated_changes returns no meaningful changes, say that explicitly instead of restating pod state, findings, logs, or metrics as Related Data.

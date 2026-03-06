@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
+import re
 
 from .k8s_adapter import (
     get_events,
@@ -21,12 +22,17 @@ def _parse_timestamp(raw: str | None) -> datetime | None:
         return None
 
 
-def _within_window(raw: str | None, lookback_minutes: int) -> bool:
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def _within_window(raw: str | None, lookback_minutes: int, anchor_timestamp: str | None = None) -> bool:
     parsed = _parse_timestamp(raw)
     if parsed is None:
         return False
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=max(lookback_minutes, 1))
-    return parsed >= cutoff
+    anchor = _parse_timestamp(anchor_timestamp) or datetime.now(timezone.utc)
+    cutoff = anchor - timedelta(minutes=max(lookback_minutes, 1))
+    return cutoff <= parsed <= anchor
 
 
 def _event_timestamp(event: dict) -> str:
@@ -70,7 +76,20 @@ def _is_meaningful_event(reason: str, message: str, scope: str) -> bool:
         keywords = ("rollout", "image", "restart", "restarted", "pulled", "created", "killing", "back-off", "failed")
         return any(keyword in normalized_message for keyword in keywords)
     if scope == "service":
-        return True
+        allowed = {
+            "ScalingReplicaSet",
+            "SuccessfulCreate",
+            "SuccessfulDelete",
+            "Created",
+            "Updated",
+            "Sync",
+            "Reloaded",
+            "ConfigReload",
+        }
+        if normalized_reason in allowed:
+            return True
+        keywords = ("rollout", "scaled", "applied", "updated", "configured", "reloaded", "deployment", "replicaset")
+        return any(keyword in normalized_message for keyword in keywords)
     if scope == "node":
         return True
     return False
@@ -81,6 +100,11 @@ def _change_from_event(event: dict, relation: str) -> CorrelatedChange:
     reason = event.get("reason") or "Event"
     message = event.get("message") or reason
     return CorrelatedChange(
+        fingerprint=(
+            f"event|{(involved.get('kind') or 'event').lower()}|"
+            f"{involved.get('namespace') or event.get('metadata', {}).get('namespace') or 'cluster'}|"
+            f"{involved.get('name') or 'unknown'}|{_normalize_text(reason)}|{_normalize_text(message)}"
+        ),
         timestamp=_event_timestamp(event),
         source="k8s_event",
         resource_kind=(involved.get("kind") or "Event").lower(),
@@ -95,27 +119,34 @@ def _change_from_event(event: dict, relation: str) -> CorrelatedChange:
 def _change_from_rollout(item: dict, relation: str) -> CorrelatedChange:
     images = item.get("images", [])
     image_text = f" images={','.join(images)}" if images else ""
+    summary = f"Recent rollout candidate for {item.get('kind', 'deployment')}/{item.get('name', 'unknown')}.{image_text}".strip()
     return CorrelatedChange(
+        fingerprint=(
+            f"rollout|{item.get('kind', 'deployment')}|{item.get('namespace') or 'cluster'}|"
+            f"{item.get('name', 'unknown')}|{_normalize_text(','.join(images))}"
+        ),
         timestamp=item.get("timestamp", ""),
         source="rollout",
         resource_kind=item.get("kind", "deployment"),
         namespace=item.get("namespace"),
         name=item.get("name", "unknown"),
         relation=relation,
-        summary=f"Recent rollout candidate for {item.get('kind', 'deployment')}/{item.get('name', 'unknown')}.{image_text}".strip(),
+        summary=summary,
         confidence="medium",
     )
 
 
 def _change_from_scheduled_pod(item: dict) -> CorrelatedChange:
+    summary = f"Pod scheduled onto node recently: {item.get('namespace')}/{item.get('name')}"
     return CorrelatedChange(
+        fingerprint=f"scheduled_pod|{item.get('namespace') or 'default'}|{item.get('name', 'unknown')}",
         timestamp=item.get("creationTimestamp", ""),
         source="rollout",
         resource_kind="pod",
         namespace=item.get("namespace"),
         name=item.get("name", "unknown"),
         relation="same_node",
-        summary=f"Pod scheduled onto node recently: {item.get('namespace')}/{item.get('name')}",
+        summary=summary,
         confidence="low",
     )
 
@@ -141,23 +172,25 @@ def _score(change: CorrelatedChange) -> int:
     return relation_weight + source_weight + confidence_weight + timestamp_weight
 
 
-def _workload_changes(target, lookback_minutes: int) -> list[CorrelatedChange]:
+def _workload_changes(target, lookback_minutes: int, anchor_timestamp: str | None) -> list[CorrelatedChange]:
     changes: list[CorrelatedChange] = []
     for event in get_events(namespace=target.namespace, involved_kind=target.kind, involved_name=target.name, limit=20):
         reason = event.get("reason") or ""
         message = event.get("message") or ""
-        if _within_window(_event_timestamp(event), lookback_minutes) and _is_meaningful_event(
+        if _within_window(_event_timestamp(event), lookback_minutes, anchor_timestamp) and _is_meaningful_event(
             reason, message, "workload"
         ):
             changes.append(_change_from_event(event, "direct"))
     return changes
 
 
-def _service_changes(target, service_name: str, lookback_minutes: int) -> tuple[list[CorrelatedChange], list[str]]:
+def _service_changes(
+    target, service_name: str, lookback_minutes: int, anchor_timestamp: str | None
+) -> tuple[list[CorrelatedChange], list[str]]:
     changes: list[CorrelatedChange] = []
     limitations: list[str] = []
     for event in get_events(namespace=target.namespace, involved_kind="Service", involved_name=target.name, limit=20):
-        if _within_window(_event_timestamp(event), lookback_minutes) and _is_meaningful_event(
+        if _within_window(_event_timestamp(event), lookback_minutes, anchor_timestamp) and _is_meaningful_event(
             event.get("reason") or "", event.get("message") or "", "service"
         ):
             changes.append(_change_from_event(event, "direct"))
@@ -166,20 +199,20 @@ def _service_changes(target, service_name: str, lookback_minutes: int) -> tuple[
     if not deployments:
         limitations.append("no related deployments inferred from service selector")
     for item in deployments:
-        if _within_window(item.get("timestamp"), lookback_minutes):
+        if _within_window(item.get("timestamp"), lookback_minutes, anchor_timestamp):
             changes.append(_change_from_rollout(item, "same_service"))
     return changes, limitations
 
 
-def _node_changes(target, lookback_minutes: int) -> list[CorrelatedChange]:
+def _node_changes(target, lookback_minutes: int, anchor_timestamp: str | None) -> list[CorrelatedChange]:
     changes: list[CorrelatedChange] = []
     for event in get_events(namespace=None, involved_kind="Node", involved_name=target.name, limit=20):
-        if _within_window(_event_timestamp(event), lookback_minutes) and _is_meaningful_event(
+        if _within_window(_event_timestamp(event), lookback_minutes, anchor_timestamp) and _is_meaningful_event(
             event.get("reason") or "", event.get("message") or "", "node"
         ):
             changes.append(_change_from_event(event, "direct"))
     for item in get_pods_for_node(target.name, limit=10):
-        if _within_window(item.get("creationTimestamp"), lookback_minutes):
+        if _within_window(item.get("creationTimestamp"), lookback_minutes, anchor_timestamp):
             changes.append(_change_from_scheduled_pod(item))
     return changes
 
@@ -193,12 +226,12 @@ def collect_correlated_changes(req: CollectCorrelatedChangesRequest) -> Correlat
 
     if scope == "service":
         service_name = req.service_name or resolved.name
-        changes, service_limitations = _service_changes(resolved, service_name, req.lookback_minutes)
+        changes, service_limitations = _service_changes(resolved, service_name, req.lookback_minutes, req.anchor_timestamp)
         limitations.extend(service_limitations)
     elif scope == "node":
-        changes = _node_changes(resolved, req.lookback_minutes)
+        changes = _node_changes(resolved, req.lookback_minutes, req.anchor_timestamp)
     else:
-        changes = _workload_changes(resolved, req.lookback_minutes)
+        changes = _workload_changes(resolved, req.lookback_minutes, req.anchor_timestamp)
 
     if not changes:
         limitations.append("no correlated changes found in the requested time window")

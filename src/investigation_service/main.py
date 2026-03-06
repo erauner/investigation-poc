@@ -11,6 +11,8 @@ from .models import (
     CorrelatedChangesResponse,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
+    InvestigationReport,
+    InvestigationReportRequest,
     InvestigateRequest,
     InvestigationResponse,
     RootCauseReport,
@@ -18,8 +20,7 @@ from .models import (
     UnhealthyWorkloadsResponse,
 )
 from .correlation import collect_correlated_changes
-from .reporting import build_root_cause_report as build_root_cause_report_from_request
-from .synthesis import build_root_cause_report
+from .reporting import build_investigation_report, build_root_cause_report as build_root_cause_report_from_request
 from .tools import collect_alert_context, collect_node_context, collect_service_context, collect_workload_context, find_unhealthy_pod, find_unhealthy_workloads, normalize_alert_input
 
 app = FastAPI(title="Investigation Service", version="0.2.0")
@@ -70,6 +71,11 @@ def build_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
     return build_root_cause_report_from_request(req)
 
 
+@app.post("/tools/build_investigation_report", response_model=InvestigationReport)
+def build_investigation(req: InvestigationReportRequest) -> InvestigationReport:
+    return build_investigation_report(req)
+
+
 @app.post("/tools/collect_correlated_changes", response_model=CorrelatedChangesResponse)
 def collect_related(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
     return collect_correlated_changes(req)
@@ -77,8 +83,8 @@ def collect_related(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesRe
 
 @app.post("/investigate", response_model=InvestigationResponse)
 def investigate(req: InvestigateRequest) -> InvestigationResponse:
-    context = collect_workload_context(
-        CollectContextRequest(
+    report = build_investigation_report(
+        InvestigationReportRequest(
             namespace=req.namespace,
             target=req.target,
             profile=req.profile,
@@ -86,22 +92,11 @@ def investigate(req: InvestigateRequest) -> InvestigationResponse:
             lookback_minutes=req.lookback_minutes,
         )
     )
-    report = build_root_cause_report(
-        context,
-        CollectContextRequest(
-            namespace=req.namespace,
-            target=req.target,
-            profile=req.profile,
-            service_name=req.service_name,
-            lookback_minutes=req.lookback_minutes,
-        ),
-    )
     evidence = [
-        f"Target: {context.target.kind}/{context.target.name} in namespace {context.target.namespace}",
+        f"Target: {report.target}",
         f"Profile: {req.profile}",
         *report.evidence,
-        f"Prometheus metrics: {context.metrics}",
-        f"Limitations: {context.limitations}",
+        f"Limitations: {report.limitations}",
     ]
     return InvestigationResponse(
         diagnosis=report.diagnosis,

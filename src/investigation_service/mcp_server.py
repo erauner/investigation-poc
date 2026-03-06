@@ -11,8 +11,10 @@ from .models import (
     BuildRootCauseReportRequest,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
+    InvestigationReportRequest,
 )
 from .correlation import collect_correlated_changes as collect_correlated_changes_impl
+from .reporting import build_investigation_report as build_investigation_report_impl
 from .reporting import build_root_cause_report as build_root_cause_report_impl
 from .tools import collect_alert_context as collect_alert_context_impl
 from .tools import collect_node_context as collect_node_context_impl
@@ -175,12 +177,50 @@ def build_root_cause_report(
 
 
 @mcp.tool()
+def build_investigation_report(
+    target: str | None = None,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+    include_related_data: bool = True,
+    correlation_window_minutes: int = 60,
+    correlation_limit: int = 10,
+    anchor_timestamp: str | None = None,
+    alertname: str | None = None,
+    labels: dict[str, str] | None = None,
+    annotations: dict[str, str] | None = None,
+    node_name: str | None = None,
+) -> dict:
+    """Build the final typed investigation report with backend-owned section composition and dedupe."""
+    response = build_investigation_report_impl(
+        InvestigationReportRequest(
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+            include_related_data=include_related_data,
+            correlation_window_minutes=correlation_window_minutes,
+            correlation_limit=correlation_limit,
+            anchor_timestamp=anchor_timestamp,
+            alertname=alertname,
+            labels=labels or {},
+            annotations=annotations or {},
+            node_name=node_name,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
 def collect_correlated_changes(
     target: str,
     namespace: str | None = None,
     profile: str = "workload",
     service_name: str | None = None,
     lookback_minutes: int = 60,
+    anchor_timestamp: str | None = None,
     limit: int = 10,
 ) -> dict:
     """Collect bounded, ranked correlated changes for a normalized target."""
@@ -191,6 +231,7 @@ def collect_correlated_changes(
             profile=profile,
             service_name=service_name,
             lookback_minutes=lookback_minutes,
+            anchor_timestamp=anchor_timestamp,
             limit=limit,
         )
     )

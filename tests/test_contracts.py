@@ -15,13 +15,16 @@ from investigation_service.models import (
     CollectServiceContextRequest,
     CollectedContextResponse,
     CorrelatedChangesResponse,
+    EvidenceItem,
     Finding,
+    InvestigationReport,
+    InvestigationReportRequest,
     RootCauseReport,
     TargetRef,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
-from investigation_service.reporting import build_root_cause_report as build_root_cause_report_from_request
+from investigation_service.reporting import build_investigation_report, build_root_cause_report as build_root_cause_report_from_request
 from investigation_service.synthesis import build_root_cause_report
 from investigation_service.tools import collect_service_context, normalize_alert_input
 
@@ -77,23 +80,21 @@ def test_collect_context_accepts_profile_fields(monkeypatch) -> None:
 
 def test_investigate_includes_limitations(monkeypatch) -> None:
     monkeypatch.setattr(
-        "investigation_service.main.collect_workload_context",
-        lambda _req: CollectedContextResponse(
-            target=TargetRef(namespace="default", kind="deployment", name="api"),
-            object_state={"namespace": "default", "kind": "deployment", "name": "api"},
-            events=["Normal Created"],
-            log_excerpt="ok",
-            metrics={"prometheus_available": False},
-            findings=[
-                Finding(
-                    severity="warning",
-                    source="prometheus",
-                    title="High Service Latency",
-                    evidence="p95 latency is 1.234s",
-                )
-            ],
+        "investigation_service.main.build_investigation_report",
+        lambda _req: InvestigationReport(
+            scope="service",
+            target="deployment/api",
+            diagnosis="High Service Latency",
+            likely_cause="The service is responding slowly, which suggests downstream dependency latency or overloaded request handling.",
+            confidence="medium",
+            evidence=["prometheus: High Service Latency - p95 latency is 1.234s"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="no meaningful correlated changes found in the requested time window",
             limitations=["prometheus unavailable or returned no usable results"],
-            enrichment_hints=["service metrics unavailable; use observability MCP for logs, traces, or dashboards"],
+            recommended_next_step="Inspect service dashboards, recent deploys, and upstream or downstream dependencies before changing traffic handling.",
+            suggested_follow_ups=[],
+            normalization_notes=[],
         ),
     )
     client = TestClient(app)
@@ -463,6 +464,7 @@ def test_collect_correlated_changes_route_returns_ranked_changes(monkeypatch) ->
             target="pod/crashy-abc123",
             changes=[
                 {
+                    "fingerprint": "event|pod|kagent-smoke|crashy-abc123|backoff|back-off restarting failed container",
                     "timestamp": _now_iso(),
                     "source": "k8s_event",
                     "resource_kind": "pod",
@@ -487,6 +489,47 @@ def test_collect_correlated_changes_route_returns_ranked_changes(monkeypatch) ->
     body = response.json()
     assert body["scope"] == "workload"
     assert body["changes"][0]["relation"] == "direct"
+
+
+def test_build_investigation_report_route_returns_typed_report(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.build_investigation_report",
+        lambda _req: InvestigationReport(
+            scope="workload",
+            target="pod/crashy-abc123",
+            diagnosis="Container Restart Failure Details",
+            likely_cause="Container is exiting with code 1, which is causing repeated CrashLoopBackOff restarts.",
+            confidence="high",
+            evidence=["k8s: Container Restart Failure Details - exit code=1"],
+            evidence_items=[
+                EvidenceItem(
+                    fingerprint="finding|workload|container restart failure details|exit code=1",
+                    source="k8s",
+                    kind="finding",
+                    severity="critical",
+                    summary="k8s: Container Restart Failure Details",
+                    detail="exit code=1",
+                )
+            ],
+            related_data=[],
+            related_data_note="no meaningful correlated changes found in the requested time window",
+            limitations=[],
+            recommended_next_step="Confirm the failure with describe output, recent logs, and rollout history before taking write actions.",
+            suggested_follow_ups=[],
+            normalization_notes=["target normalized from manual request"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/build_investigation_report",
+        json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"] == "pod/crashy-abc123"
+    assert body["evidence_items"][0]["fingerprint"].startswith("finding|workload|")
 
 
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:
@@ -575,6 +618,7 @@ def test_build_root_cause_report_prefers_direct_restart_evidence() -> None:
     assert report.confidence == "high"
     assert report.likely_cause is not None
     assert "exiting with code 1" in report.likely_cause
+    assert report.evidence_items
 
 
 def test_build_root_cause_report_from_request_collects_node_context(monkeypatch) -> None:
@@ -671,6 +715,7 @@ def test_collect_correlated_changes_ranks_direct_workload_events(monkeypatch) ->
     assert response.target == "pod/crashy-abc123"
     assert response.changes[0].relation == "direct"
     assert response.changes[0].confidence == "high"
+    assert response.changes[0].fingerprint.startswith("event|pod|")
 
 
 def test_collect_correlated_changes_infers_service_rollouts(monkeypatch) -> None:
@@ -700,6 +745,57 @@ def test_collect_correlated_changes_infers_service_rollouts(monkeypatch) -> None
     assert response.scope == "service"
     assert response.changes[0].source == "rollout"
     assert response.changes[0].relation == "same_service"
+
+
+def test_build_investigation_report_dedupes_related_changes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.reporting.collect_workload_context",
+        lambda _req: CollectedContextResponse(
+            target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-abc123"),
+            object_state={"kind": "pod", "name": "crashy-abc123"},
+            events=["BackOff restarting failed container"],
+            log_excerpt="starting",
+            metrics={"prometheus_available": True},
+            findings=[
+                Finding(
+                    severity="critical",
+                    source="events",
+                    title="Crash Loop Detected",
+                    evidence="Events indicate BackOff/CrashLoopBackOff behavior",
+                )
+            ],
+            limitations=[],
+            enrichment_hints=[],
+        ),
+    )
+    monkeypatch.setattr(
+        "investigation_service.reporting.collect_correlated_changes",
+        lambda _req: CorrelatedChangesResponse(
+            scope="workload",
+            target="pod/crashy-abc123",
+            changes=[
+                {
+                    "fingerprint": "event|pod/crashy-abc123|backoff|restarting failed container",
+                    "timestamp": _now_iso(),
+                    "source": "k8s_event",
+                    "resource_kind": "pod",
+                    "namespace": "kagent-smoke",
+                    "name": "crashy-abc123",
+                    "relation": "direct",
+                    "summary": "BackOff: restarting failed container",
+                    "confidence": "high",
+                }
+            ],
+            limitations=[],
+        ),
+    )
+
+    report = build_investigation_report(
+        InvestigationReportRequest(namespace="kagent-smoke", target="pod/crashy-abc123")
+    )
+
+    assert report.related_data == []
+    assert report.related_data_note == "all correlated changes duplicated primary evidence"
 
 
 def test_collect_correlated_changes_for_node_includes_recent_scheduling(monkeypatch) -> None:

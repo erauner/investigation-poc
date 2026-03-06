@@ -88,7 +88,24 @@ class CollectCorrelatedChangesRequest(BaseModel):
     profile: ProfileType = Field(default="workload", description="Investigation profile")
     service_name: str | None = Field(default=None, description="Optional service name hint for service profile")
     lookback_minutes: int = Field(default=60, ge=1, le=1440, description="Correlation window in minutes")
+    anchor_timestamp: str | None = Field(default=None, description="Optional timestamp to anchor the correlation window")
     limit: int = Field(default=10, ge=1, le=25, description="Maximum correlated changes to return")
+
+
+class InvestigationReportRequest(BaseModel):
+    namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
+    target: str | None = Field(default=None, description="Target in form pod/name, deployment/name, service/name, or node/name")
+    profile: ProfileType = Field(default="workload", description="Investigation profile")
+    service_name: str | None = Field(default=None, description="Optional service name hint for service profile")
+    lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
+    include_related_data: bool = Field(default=True, description="Whether to collect correlated changes")
+    correlation_window_minutes: int = Field(default=60, ge=1, le=1440, description="Correlation window in minutes")
+    correlation_limit: int = Field(default=10, ge=1, le=25, description="Maximum correlated changes to return")
+    anchor_timestamp: str | None = Field(default=None, description="Optional timestamp to anchor the correlation window")
+    alertname: str | None = Field(default=None, description="Optional alert name for alert-shaped investigation input")
+    labels: dict[str, str] = Field(default_factory=dict, description="Optional alert labels")
+    annotations: dict[str, str] = Field(default_factory=dict, description="Optional alert annotations")
+    node_name: str | None = Field(default=None, description="Optional node override for alert-shaped node investigations")
 
 
 class Finding(BaseModel):
@@ -96,6 +113,15 @@ class Finding(BaseModel):
     source: Literal["k8s", "events", "logs", "prometheus", "heuristic"]
     title: str
     evidence: str
+
+
+class EvidenceItem(BaseModel):
+    fingerprint: str
+    source: Literal["k8s", "events", "logs", "prometheus", "heuristic"]
+    kind: Literal["finding", "event", "metric", "object_state"]
+    severity: Literal["info", "warning", "critical"]
+    summary: str
+    detail: str | None = None
 
 
 class CollectedContextResponse(BaseModel):
@@ -140,12 +166,14 @@ class RootCauseReport(BaseModel):
     likely_cause: str | None = None
     confidence: ConfidenceType
     evidence: list[str]
+    evidence_items: list[EvidenceItem] = Field(default_factory=list)
     limitations: list[str]
     recommended_next_step: str
     suggested_follow_ups: list[str] = Field(default_factory=list)
 
 
 class CorrelatedChange(BaseModel):
+    fingerprint: str
     timestamp: str
     source: Literal["k8s_event", "rollout", "config_change", "argocd", "prometheus_rule"]
     resource_kind: str
@@ -161,6 +189,22 @@ class CorrelatedChangesResponse(BaseModel):
     target: str
     changes: list[CorrelatedChange]
     limitations: list[str] = Field(default_factory=list)
+
+
+class InvestigationReport(BaseModel):
+    scope: ScopeType
+    target: str
+    diagnosis: str
+    likely_cause: str | None = None
+    confidence: ConfidenceType
+    evidence: list[str]
+    evidence_items: list[EvidenceItem] = Field(default_factory=list)
+    related_data: list[CorrelatedChange] = Field(default_factory=list)
+    related_data_note: str | None = None
+    limitations: list[str] = Field(default_factory=list)
+    recommended_next_step: str
+    suggested_follow_ups: list[str] = Field(default_factory=list)
+    normalization_notes: list[str] = Field(default_factory=list)
 
 
 class InvestigationResponse(BaseModel):

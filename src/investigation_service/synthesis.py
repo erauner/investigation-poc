@@ -1,6 +1,13 @@
 import re
 
-from .models import CollectContextRequest, CollectedContextResponse, ConfidenceType, NormalizedInvestigationRequest, RootCauseReport
+from .models import (
+    CollectContextRequest,
+    CollectedContextResponse,
+    ConfidenceType,
+    EvidenceItem,
+    NormalizedInvestigationRequest,
+    RootCauseReport,
+)
 from .tools import _scope_from_target
 
 _SOURCE_PRIORITY = {
@@ -103,6 +110,16 @@ def _extract_field(pattern: str, evidence: str) -> str | None:
     return None
 
 
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def _event_fingerprint(target: str, event_text: str) -> str:
+    reason, _, message = event_text.partition(" ")
+    detail = message or reason
+    return f"event|{target}|{_normalize_text(reason.rstrip(':'))}|{_normalize_text(detail)}"
+
+
 def _derive_likely_cause(scope: str, lead) -> str | None:
     if lead.source == "heuristic" and lead.title == "No Critical Signals Found":
         return None
@@ -152,17 +169,37 @@ def _recommended_next_step(scope: str, profile: str) -> str:
     return "Confirm the failure with describe output, recent logs, and rollout history before taking write actions."
 
 
-def _selected_evidence(context: CollectedContextResponse, scope: str) -> list[str]:
-    evidence = [
-        f"{item.source}: {item.title} - {item.evidence}"
+def build_primary_evidence(context: CollectedContextResponse, scope: str) -> list[EvidenceItem]:
+    target = f"{context.target.kind}/{context.target.name}"
+    evidence_items = [
+        EvidenceItem(
+            fingerprint=f"finding|{scope}|{_normalize_text(item.title)}|{_normalize_text(item.evidence)}",
+            source=item.source,
+            kind="finding",
+            severity=item.severity,
+            summary=f"{item.source}: {item.title}",
+            detail=item.evidence,
+        )
         for item in _ranked_findings(context, scope)[:5]
     ]
     if context.events and context.events != ["no related events"]:
         first_event = context.events[0]
-        rendered = f"recent events: {first_event}"
-        if rendered not in evidence:
-            evidence.append(rendered)
-    return evidence
+        event_item = EvidenceItem(
+            fingerprint=_event_fingerprint(target, first_event),
+            source="events",
+            kind="event",
+            severity="warning",
+            summary="recent events",
+            detail=first_event,
+        )
+        if event_item.fingerprint not in {item.fingerprint for item in evidence_items}:
+            evidence_items.append(event_item)
+    return evidence_items
+
+
+def _selected_evidence(evidence_items: list[EvidenceItem]) -> list[str]:
+    rendered = [item.summary if not item.detail else f"{item.summary} - {item.detail}" for item in evidence_items]
+    return rendered
 
 
 def _follow_ups(context: CollectedContextResponse, scope: str) -> list[str]:
@@ -184,6 +221,7 @@ def build_root_cause_report(
     scope, profile = _request_scope(request)
     ranked_findings = _ranked_findings(context, scope)
     lead = ranked_findings[0]
+    evidence_items = build_primary_evidence(context, scope)
 
     return RootCauseReport(
         scope=scope,
@@ -191,7 +229,8 @@ def build_root_cause_report(
         diagnosis=lead.title,
         likely_cause=_derive_likely_cause(scope, lead),
         confidence=_select_confidence(scope, lead, context.limitations),
-        evidence=_selected_evidence(context, scope),
+        evidence=_selected_evidence(evidence_items),
+        evidence_items=evidence_items,
         limitations=context.limitations,
         recommended_next_step=_recommended_next_step(scope, profile),
         suggested_follow_ups=_follow_ups(context, scope),
