@@ -5,24 +5,19 @@ from .models import (
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
+    BuildRootCauseReportRequest,
     CollectedContextResponse,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     InvestigateRequest,
     InvestigationResponse,
+    RootCauseReport,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
-from .tools import (
-    build_root_cause_report,
-    collect_alert_context,
-    collect_node_context,
-    collect_service_context,
-    collect_workload_context,
-    find_unhealthy_pod,
-    find_unhealthy_workloads,
-    normalize_alert_input,
-)
+from .reporting import build_root_cause_report as build_root_cause_report_from_request
+from .synthesis import build_root_cause_report
+from .tools import collect_alert_context, collect_node_context, collect_service_context, collect_workload_context, find_unhealthy_pod, find_unhealthy_workloads, normalize_alert_input
 
 app = FastAPI(title="Investigation Service", version="0.2.0")
 
@@ -65,6 +60,11 @@ def find_unhealthy(req: FindUnhealthyWorkloadsRequest) -> UnhealthyWorkloadsResp
 @app.post("/tools/find_unhealthy_pod", response_model=UnhealthyPodResponse)
 def find_unhealthy_single(req: FindUnhealthyPodRequest) -> UnhealthyPodResponse:
     return find_unhealthy_pod(req)
+
+
+@app.post("/tools/build_root_cause_report", response_model=RootCauseReport)
+def build_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
+    return build_root_cause_report_from_request(req)
 
 
 @app.post("/investigate", response_model=InvestigationResponse)

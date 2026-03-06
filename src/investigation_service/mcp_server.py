@@ -7,9 +7,11 @@ from .models import (
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
+    BuildRootCauseReportRequest,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
 )
+from .reporting import build_root_cause_report as build_root_cause_report_impl
 from .tools import collect_alert_context as collect_alert_context_impl
 from .tools import collect_node_context as collect_node_context_impl
 from .tools import collect_service_context as collect_service_context_impl
@@ -146,6 +148,27 @@ def find_unhealthy_workloads(namespace: str, limit: int = 5) -> dict:
 def find_unhealthy_pod(namespace: str) -> dict:
     """Find the single best unhealthy pod candidate in a namespace."""
     response = find_unhealthy_pod_impl(FindUnhealthyPodRequest(namespace=namespace))
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def build_root_cause_report(
+    target: str,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+) -> dict:
+    """Collect context for a normalized target and return a typed root-cause report."""
+    response = build_root_cause_report_impl(
+        BuildRootCauseReportRequest(
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+        )
+    )
     return response.model_dump(mode="json")
 
 

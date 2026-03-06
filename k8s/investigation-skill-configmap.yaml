@@ -20,6 +20,7 @@ data:
     - If normalized scope is node, call collect_node_context.
     - If normalized scope is service, call collect_service_context.
     - If normalized scope is workload, call collect_workload_context.
+    - After the first collector call, prefer build_root_cause_report to produce the typed verdict before writing the final answer.
     - After find_unhealthy_pod or find_unhealthy_workloads returns a candidate, call collect_workload_context with that exact concrete target.
     - Do not pass placeholder targets like `pod`, `workload`, or `unhealthy` into collect_workload_context.
     - Keep collect_alert_context only as a compatibility fallback when normalization cannot be separated.

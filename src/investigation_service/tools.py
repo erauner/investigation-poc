@@ -18,7 +18,6 @@ from .models import (
     FindUnhealthyWorkloadsRequest,
     CollectedContextResponse,
     NormalizedInvestigationRequest,
-    RootCauseReport,
     ScopeType,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
@@ -312,46 +311,4 @@ def collect_alert_context(req: CollectAlertContextRequest) -> CollectedContextRe
             "limitations": sorted(set(limitations)),
             "enrichment_hints": enrichment_hints,
         }
-    )
-
-
-def build_root_cause_report(
-    context: CollectedContextResponse, request: NormalizedInvestigationRequest | CollectContextRequest
-) -> RootCauseReport:
-    if isinstance(request, NormalizedInvestigationRequest):
-        scope = request.scope
-        profile = request.profile
-    else:
-        scope = _scope_from_target(request.target, request.profile)
-        profile = request.profile
-
-    critical = [item for item in context.findings if item.severity == "critical"]
-    warnings = [item for item in context.findings if item.severity == "warning"]
-    lead = critical[0] if critical else warnings[0] if warnings else context.findings[0]
-    confidence = "high" if critical else "medium" if warnings else "low"
-
-    evidence = [f"{item.source}: {item.title} - {item.evidence}" for item in context.findings[:5]]
-    if context.events and context.events != ["no related events"]:
-        evidence.append(f"recent events: {context.events[0]}")
-
-    recommended_next_step = "Use Kubernetes describe/logs to confirm the failure before taking write actions."
-    if scope == "service":
-        recommended_next_step = "Check service dashboards, recent deploys, and upstream/downstream dependencies."
-    elif scope == "node":
-        recommended_next_step = "Inspect allocatable vs requests, top consumers, and recent node pressure events."
-    elif profile == "otel-pipeline":
-        recommended_next_step = "Verify collector ingestion, exporter health, and recent telemetry pipeline changes."
-
-    likely_cause = None if lead.source == "heuristic" else lead.title
-    suggested_follow_ups = list(context.enrichment_hints)
-    return RootCauseReport(
-        scope=scope,
-        target=f"{context.target.kind}/{context.target.name}",
-        diagnosis=lead.title,
-        likely_cause=likely_cause,
-        confidence=confidence,
-        evidence=evidence,
-        limitations=context.limitations,
-        recommended_next_step=recommended_next_step,
-        suggested_follow_ups=suggested_follow_ups,
     )

@@ -74,6 +74,14 @@ class InvestigateRequest(BaseModel):
     lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
 
 
+class BuildRootCauseReportRequest(BaseModel):
+    namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
+    target: str = Field(..., description="Target in form pod/name, deployment/name, service/name, or node/name")
+    profile: ProfileType = Field(default="workload", description="Investigation profile")
+    service_name: str | None = Field(default=None, description="Optional service name hint for service profile")
+    lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
+
+
 class Finding(BaseModel):
     severity: Literal["info", "warning", "critical"]
     source: Literal["k8s", "events", "logs", "prometheus", "heuristic"]

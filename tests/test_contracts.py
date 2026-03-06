@@ -7,13 +7,17 @@ from investigation_service.k8s_adapter import find_unhealthy_workloads as find_u
 from investigation_service.k8s_adapter import get_k8s_object
 from investigation_service.main import app
 from investigation_service.models import (
+    BuildRootCauseReportRequest,
     CollectAlertContextRequest,
     CollectedContextResponse,
     Finding,
+    RootCauseReport,
     TargetRef,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
+from investigation_service.reporting import build_root_cause_report as build_root_cause_report_from_request
+from investigation_service.synthesis import build_root_cause_report
 from investigation_service.tools import normalize_alert_input
 
 
@@ -393,6 +397,34 @@ def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
     assert "alertname: PodCrashLooping" in body["limitations"]
 
 
+def test_build_root_cause_report_route_returns_typed_report(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.build_root_cause_report_from_request",
+        lambda _req: RootCauseReport(
+            scope="workload",
+            target="pod/crashy-abc123",
+            diagnosis="Container Restart Failure Details",
+            likely_cause="Container command 'sh -c echo starting && sleep 2 && exit 1' is exiting with code 1, driving repeated CrashLoopBackOff restarts.",
+            confidence="high",
+            evidence=["k8s: Container Restart Failure Details - exit code=1"],
+            limitations=[],
+            recommended_next_step="Confirm the failure with describe output, recent logs, and rollout history before taking write actions.",
+            suggested_follow_ups=[],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/build_root_cause_report",
+        json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"] == "pod/crashy-abc123"
+    assert body["confidence"] == "high"
+
+
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:
     findings = derive_findings(
         "workload",
@@ -439,6 +471,77 @@ def test_workload_findings_include_container_restart_details() -> None:
     detail_finding = next(item for item in findings if item.title == "Container Restart Failure Details")
     assert "exit code=1" in detail_finding.evidence
     assert "command='sh -c echo starting && sleep 2 && exit 1'" in detail_finding.evidence
+
+
+def test_build_root_cause_report_prefers_direct_restart_evidence() -> None:
+    report = build_root_cause_report(
+        CollectedContextResponse(
+            target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-abc123"),
+            object_state={"kind": "pod", "name": "crashy-abc123"},
+            events=["BackOff restarting failed container crashy in pod crashy-abc123"],
+            log_excerpt="starting",
+            metrics={"pod_restart_rate": 0.2, "prometheus_available": True},
+            findings=[
+                Finding(
+                    severity="warning",
+                    source="prometheus",
+                    title="Pod Restarts Increasing",
+                    evidence="Restart rate over lookback window: 0.2000/s",
+                ),
+                Finding(
+                    severity="critical",
+                    source="k8s",
+                    title="Container Restart Failure Details",
+                    evidence="waiting reason=CrashLoopBackOff, last termination reason=Error, exit code=1, command='sh -c echo starting && sleep 2 && exit 1'",
+                ),
+                Finding(
+                    severity="critical",
+                    source="events",
+                    title="Crash Loop Detected",
+                    evidence="Events indicate BackOff/CrashLoopBackOff behavior",
+                ),
+            ],
+            limitations=[],
+            enrichment_hints=[],
+        ),
+        BuildRootCauseReportRequest(namespace="kagent-smoke", target="pod/crashy-abc123"),
+    )
+
+    assert report.diagnosis == "Container Restart Failure Details"
+    assert report.confidence == "high"
+    assert report.likely_cause is not None
+    assert "exiting with code 1" in report.likely_cause
+
+
+def test_build_root_cause_report_from_request_collects_node_context(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.reporting.collect_node_context",
+        lambda _req: CollectedContextResponse(
+            target=TargetRef(namespace=None, kind="node", name="worker3"),
+            object_state={"kind": "node", "conditions": [{"type": "Ready", "status": "False"}]},
+            events=["NodeNotReady"],
+            log_excerpt="",
+            metrics={"prometheus_available": True},
+            findings=[
+                Finding(
+                    severity="critical",
+                    source="k8s",
+                    title="Node Not Ready",
+                    evidence="Node condition Ready=False",
+                )
+            ],
+            limitations=[],
+            enrichment_hints=[],
+        ),
+    )
+
+    report = build_root_cause_report_from_request(
+        BuildRootCauseReportRequest(target="node/worker3", lookback_minutes=20)
+    )
+
+    assert report.scope == "node"
+    assert report.target == "node/worker3"
+    assert report.diagnosis == "Node Not Ready"
 
 
 def test_get_k8s_object_includes_pod_container_details(monkeypatch) -> None:
