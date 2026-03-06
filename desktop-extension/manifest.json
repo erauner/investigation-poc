@@ -1,0 +1,93 @@
+{
+  "manifest_version": "0.3",
+  "name": "homelab-investigation-remote",
+  "display_name": "Homelab Investigation Remote",
+  "version": "0.1.4",
+  "description": "Thin Claude Desktop extension that proxies investigation tools to a remote streamable HTTP MCP server.",
+  "long_description": "Claude Desktop extension for the homelab investigation stack. This bundle runs a local Node MCP server over stdio and forwards high-level investigation requests to the kagent controller MCP endpoint. The controller invokes the investigation agent behind the scenes, which keeps the user-facing path aligned with the intended product architecture.",
+  "author": {
+    "name": "Evan Rauner",
+    "email": "raunerevan@gmail.com",
+    "url": "https://github.com/erauner/investigation-poc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/erauner/investigation-poc.git"
+  },
+  "homepage": "https://github.com/erauner/investigation-poc",
+  "documentation": "https://github.com/erauner/investigation-poc/blob/main/desktop-extension/README.md",
+  "support": "https://github.com/erauner/investigation-poc/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js"
+      ],
+      "env": {
+        "REMOTE_MCP_URL": "${user_config.remote_mcp_url}",
+        "REMOTE_MCP_BEARER_TOKEN": "${user_config.remote_mcp_bearer_token}",
+        "ALLOW_INSECURE_TLS": "${user_config.allow_insecure_tls}",
+        "DEFAULT_AGENT_REF": "${user_config.default_agent_ref}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "list_investigation_agents",
+      "description": "List invokable investigation agents exposed by the controller."
+    },
+    {
+      "name": "investigate_with_agent",
+      "description": "Invoke the investigation agent through the controller."
+    }
+  ],
+  "keywords": [
+    "mcp",
+    "kubernetes",
+    "incident-response",
+    "observability",
+    "homelab"
+  ],
+  "user_config": {
+    "remote_mcp_url": {
+      "type": "string",
+      "title": "Remote MCP URL",
+      "description": "Reachable controller MCP endpoint, for example https://kagent-mcp.erauner.dev/mcp.",
+      "required": true,
+      "default": "https://kagent-mcp.erauner.dev/mcp"
+    },
+    "remote_mcp_bearer_token": {
+      "type": "string",
+      "title": "Bearer token",
+      "description": "Optional bearer token sent to the remote MCP server.",
+      "sensitive": true,
+      "default": ""
+    },
+    "allow_insecure_tls": {
+      "type": "boolean",
+      "title": "Allow insecure TLS",
+      "description": "Disable TLS verification for lab-only endpoints with self-signed certificates.",
+      "default": false
+    },
+    "default_agent_ref": {
+      "type": "string",
+      "title": "Default agent ref",
+      "description": "Default kagent agent reference in namespace/name format.",
+      "default": "kagent/homelab-k8s-custom-agent"
+    }
+  },
+  "license": "MIT",
+  "compatibility": {
+    "claude_desktop": ">=0.13.91",
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=18"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "homelab-investigation-remote-extension",
+  "version": "0.1.4",
+  "private": true,
+  "type": "module",
+  "description": "Claude Desktop MCP bundle that proxies investigation tools to a remote streamable HTTP MCP server.",
+  "scripts": {
+    "check": "node --check server/index.js",
+    "validate:manifest": "npx @anthropic-ai/mcpb validate manifest.json"
+  }
+}

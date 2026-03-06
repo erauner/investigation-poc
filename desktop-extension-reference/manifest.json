@@ -1,0 +1,37 @@
+{
+  "manifest_version": "0.3",
+  "name": "homelab-investigation-reference",
+  "display_name": "Homelab Investigation Reference",
+  "version": "0.1.0",
+  "description": "Minimal reference Desktop extension used to validate Claude Desktop MCPB runtime behavior.",
+  "author": {
+    "name": "Evan Rauner",
+    "url": "https://github.com/erauner/investigation-poc"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js"
+      ]
+    }
+  },
+  "tools": [
+    {
+      "name": "get_current_time",
+      "description": "Get the current time from the local machine."
+    }
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.13.91",
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=18"
+    }
+  }
+}

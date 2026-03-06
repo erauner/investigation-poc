@@ -149,3 +149,32 @@ Optional HTTP debug API deployment:
 ```bash
 make kind-enable-http-debug
 ```
+
+## Claude Desktop extension
+
+This repo now also includes a Desktop packaging path in [desktop-extension/README.md](/Users/erauner/git/side/investigation-poc/desktop-extension/README.md).
+
+Use that path when you want Claude Desktop to reach a remote MCP server through an installable `.mcpb` bundle. The extension is intentionally thin: it proxies a narrow investigation tool surface to a remote streamable HTTP MCP endpoint and leaves all diagnosis logic in the existing Python backend.
+
+Build it with:
+
+```bash
+./scripts/build-desktop-extension.sh
+```
+
+For a versioned release artifact plus SHA256 output:
+
+```bash
+./scripts/release-desktop-extension.sh
+```
+
+For this repo, the two client paths are:
+
+- `Claude Code`: keep using [.mcp.json](/Users/erauner/git/side/investigation-poc/.mcp.json) or a managed remote MCP configuration.
+- `Claude Desktop`: install the generated `.mcpb` and point it at the remote MCP URL you want Desktop users to reach.
+
+You can also test the Desktop extension locally without Claude Desktop:
+
+```bash
+./scripts/test-desktop-extension.sh
+```
