@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: investigation-cluster-registry
+  namespace: kagent
+data:
+  clusters.yaml: |-
+    default_cluster: local-kind
+    clusters:
+      local-kind:
+        kube_context: kind-investigation
+        prometheus_url: http://prometheus-gateway.kagent.svc.cluster.local:9090
+        default: true

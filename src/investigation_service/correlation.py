@@ -1,6 +1,6 @@
-import json
 from datetime import datetime, timedelta, timezone
 
+from .cluster_registry import resolve_cluster
 from .event_fingerprints import fingerprint_event, normalize_event_text
 from .k8s_adapter import (
     get_events,
@@ -11,6 +11,15 @@ from .k8s_adapter import (
 )
 from .models import CollectCorrelatedChangesRequest, CorrelatedChange, CorrelatedChangesResponse
 from .routing import canonical_target, scope_from_target
+
+
+def _call_with_optional_cluster(func, *args, cluster=None, **kwargs):
+    if cluster is None:
+        return func(*args, **kwargs)
+    try:
+        return func(*args, cluster=cluster, **kwargs)
+    except TypeError:
+        return func(*args, **kwargs)
 
 
 def _parse_timestamp(raw: str | None) -> datetime | None:
@@ -170,9 +179,15 @@ def _score(change: CorrelatedChange) -> int:
     return relation_weight + source_weight + confidence_weight + timestamp_weight
 
 
-def _workload_changes(target, lookback_minutes: int, anchor_timestamp: str | None) -> list[CorrelatedChange]:
+def _workload_changes(target, lookback_minutes: int, anchor_timestamp: str | None, *, cluster) -> list[CorrelatedChange]:
     changes: list[CorrelatedChange] = []
-    for event in get_events(namespace=target.namespace, involved_kind=target.kind, involved_name=target.name, limit=20):
+    for event in get_events(
+        namespace=target.namespace,
+        involved_kind=target.kind,
+        involved_name=target.name,
+        limit=20,
+        cluster=cluster,
+    ):
         reason = event.get("reason") or ""
         message = event.get("message") or ""
         if _within_window(_event_timestamp(event), lookback_minutes, anchor_timestamp) and _is_meaningful_event(
@@ -183,17 +198,33 @@ def _workload_changes(target, lookback_minutes: int, anchor_timestamp: str | Non
 
 
 def _service_changes(
-    target, service_name: str, lookback_minutes: int, anchor_timestamp: str | None
+    target,
+    service_name: str,
+    lookback_minutes: int,
+    anchor_timestamp: str | None,
+    *,
+    cluster,
 ) -> tuple[list[CorrelatedChange], list[str]]:
     changes: list[CorrelatedChange] = []
     limitations: list[str] = []
-    for event in get_events(namespace=target.namespace, involved_kind="Service", involved_name=target.name, limit=20):
+    for event in get_events(
+        namespace=target.namespace,
+        involved_kind="Service",
+        involved_name=target.name,
+        limit=20,
+        cluster=cluster,
+    ):
         if _within_window(_event_timestamp(event), lookback_minutes, anchor_timestamp) and _is_meaningful_event(
             event.get("reason") or "", event.get("message") or "", "service"
         ):
             changes.append(_change_from_event(event, "direct"))
 
-    deployments = get_service_related_deployments(target.namespace or "", service_name)
+    deployments = _call_with_optional_cluster(
+        get_service_related_deployments,
+        target.namespace or "",
+        service_name,
+        cluster=cluster,
+    )
     if not deployments:
         limitations.append("no related deployments inferred from service selector")
     for item in deployments:
@@ -202,40 +233,48 @@ def _service_changes(
     return changes, limitations
 
 
-def _node_changes(target, lookback_minutes: int, anchor_timestamp: str | None) -> list[CorrelatedChange]:
+def _node_changes(target, lookback_minutes: int, anchor_timestamp: str | None, *, cluster) -> list[CorrelatedChange]:
     changes: list[CorrelatedChange] = []
-    for event in get_events(namespace=None, involved_kind="Node", involved_name=target.name, limit=20):
+    for event in get_events(namespace=None, involved_kind="Node", involved_name=target.name, limit=20, cluster=cluster):
         if _within_window(_event_timestamp(event), lookback_minutes, anchor_timestamp) and _is_meaningful_event(
             event.get("reason") or "", event.get("message") or "", "node"
         ):
             changes.append(_change_from_event(event, "direct"))
-    for item in get_pods_for_node(target.name, limit=10):
+    for item in _call_with_optional_cluster(get_pods_for_node, target.name, limit=10, cluster=cluster):
         if _within_window(item.get("creationTimestamp"), lookback_minutes, anchor_timestamp):
             changes.append(_change_from_scheduled_pod(item))
     return changes
 
 
 def collect_correlated_changes(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
+    cluster = resolve_cluster(req.cluster)
     target_text = canonical_target(req.target, req.profile, req.service_name)
     scope = scope_from_target(target_text, req.profile)
-    resolved = resolve_runtime_target(resolve_target(req.namespace, target_text))
+    resolved = resolve_runtime_target(resolve_target(req.namespace, target_text, cluster=cluster), cluster=cluster)
     changes: list[CorrelatedChange] = []
     limitations: list[str] = []
 
     if scope == "service":
         service_name = req.service_name or resolved.name
-        changes, service_limitations = _service_changes(resolved, service_name, req.lookback_minutes, req.anchor_timestamp)
+        changes, service_limitations = _service_changes(
+            resolved,
+            service_name,
+            req.lookback_minutes,
+            req.anchor_timestamp,
+            cluster=cluster,
+        )
         limitations.extend(service_limitations)
     elif scope == "node":
-        changes = _node_changes(resolved, req.lookback_minutes, req.anchor_timestamp)
+        changes = _node_changes(resolved, req.lookback_minutes, req.anchor_timestamp, cluster=cluster)
     else:
-        changes = _workload_changes(resolved, req.lookback_minutes, req.anchor_timestamp)
+        changes = _workload_changes(resolved, req.lookback_minutes, req.anchor_timestamp, cluster=cluster)
 
     if not changes:
         limitations.append("no correlated changes found in the requested time window")
 
     ranked = sorted(changes, key=_score, reverse=True)[: req.limit]
     return CorrelatedChangesResponse(
+        cluster=cluster.alias,
         scope=scope,
         target=f"{resolved.kind}/{resolved.name}",
         changes=ranked,

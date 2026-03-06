@@ -36,6 +36,7 @@ mcp = FastMCP(
 def collect_workload_context(
     namespace: str,
     target: str,
+    cluster: str | None = None,
     profile: str = "workload",
     service_name: str | None = None,
     lookback_minutes: int = 15,
@@ -43,6 +44,7 @@ def collect_workload_context(
     """Collect structured workload context (state, events, logs, metrics, findings)."""
     response = collect_workload_context_impl(
         CollectContextRequest(
+            cluster=cluster,
             namespace=namespace,
             target=target,
             profile=profile,
@@ -58,6 +60,7 @@ def collect_alert_context(
     alertname: str,
     labels: dict[str, str] | None = None,
     annotations: dict[str, str] | None = None,
+    cluster: str | None = None,
     namespace: str | None = None,
     node_name: str | None = None,
     target: str | None = None,
@@ -71,6 +74,7 @@ def collect_alert_context(
             alertname=alertname,
             labels=labels or {},
             annotations=annotations or {},
+            cluster=cluster,
             namespace=namespace,
             node_name=node_name,
             target=target,
@@ -87,6 +91,7 @@ def normalize_alert_input(
     alertname: str,
     labels: dict[str, str] | None = None,
     annotations: dict[str, str] | None = None,
+    cluster: str | None = None,
     namespace: str | None = None,
     node_name: str | None = None,
     target: str | None = None,
@@ -100,6 +105,7 @@ def normalize_alert_input(
             alertname=alertname,
             labels=labels or {},
             annotations=annotations or {},
+            cluster=cluster,
             namespace=namespace,
             node_name=node_name,
             target=target,
@@ -112,10 +118,10 @@ def normalize_alert_input(
 
 
 @mcp.tool()
-def collect_node_context(node_name: str, lookback_minutes: int = 15) -> dict:
+def collect_node_context(node_name: str, lookback_minutes: int = 15, cluster: str | None = None) -> dict:
     """Collect structured context for a cluster node target."""
     response = collect_node_context_impl(
-        CollectNodeContextRequest(node_name=node_name, lookback_minutes=lookback_minutes)
+        CollectNodeContextRequest(cluster=cluster, node_name=node_name, lookback_minutes=lookback_minutes)
     )
     return response.model_dump(mode="json")
 
@@ -124,12 +130,14 @@ def collect_node_context(node_name: str, lookback_minutes: int = 15) -> dict:
 def collect_service_context(
     namespace: str,
     service_name: str,
+    cluster: str | None = None,
     target: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
     """Collect structured context for a namespaced service target."""
     response = collect_service_context_impl(
         CollectServiceContextRequest(
+            cluster=cluster,
             namespace=namespace,
             service_name=service_name,
             target=target,
@@ -140,24 +148,25 @@ def collect_service_context(
 
 
 @mcp.tool()
-def find_unhealthy_workloads(namespace: str, limit: int = 5) -> dict:
+def find_unhealthy_workloads(namespace: str, limit: int = 5, cluster: str | None = None) -> dict:
     """List concrete unhealthy pod targets in a namespace for vague workload requests."""
     response = find_unhealthy_workloads_impl(
-        FindUnhealthyWorkloadsRequest(namespace=namespace, limit=limit)
+        FindUnhealthyWorkloadsRequest(cluster=cluster, namespace=namespace, limit=limit)
     )
     return response.model_dump(mode="json")
 
 
 @mcp.tool()
-def find_unhealthy_pod(namespace: str) -> dict:
+def find_unhealthy_pod(namespace: str, cluster: str | None = None) -> dict:
     """Find the single best unhealthy pod candidate in a namespace."""
-    response = find_unhealthy_pod_impl(FindUnhealthyPodRequest(namespace=namespace))
+    response = find_unhealthy_pod_impl(FindUnhealthyPodRequest(cluster=cluster, namespace=namespace))
     return response.model_dump(mode="json")
 
 
 @mcp.tool()
 def build_root_cause_report(
     target: str,
+    cluster: str | None = None,
     namespace: str | None = None,
     profile: str = "workload",
     service_name: str | None = None,
@@ -166,6 +175,7 @@ def build_root_cause_report(
     """Collect context for a normalized target and return a typed root-cause report."""
     response = build_root_cause_report_impl(
         BuildRootCauseReportRequest(
+            cluster=cluster,
             namespace=namespace,
             target=target,
             profile=profile,
@@ -179,6 +189,7 @@ def build_root_cause_report(
 @mcp.tool()
 def build_investigation_report(
     target: str | None = None,
+    cluster: str | None = None,
     namespace: str | None = None,
     profile: str = "workload",
     service_name: str | None = None,
@@ -195,6 +206,7 @@ def build_investigation_report(
     """Build the final typed investigation report with backend-owned section composition and dedupe."""
     response = build_investigation_report_impl(
         InvestigationReportRequest(
+            cluster=cluster,
             namespace=namespace,
             target=target,
             profile=profile,
@@ -216,6 +228,7 @@ def build_investigation_report(
 @mcp.tool()
 def collect_correlated_changes(
     target: str,
+    cluster: str | None = None,
     namespace: str | None = None,
     profile: str = "workload",
     service_name: str | None = None,
@@ -226,6 +239,7 @@ def collect_correlated_changes(
     """Collect bounded, ranked correlated changes for a normalized target."""
     response = collect_correlated_changes_impl(
         CollectCorrelatedChangesRequest(
+            cluster=cluster,
             namespace=namespace,
             target=target,
             profile=profile,

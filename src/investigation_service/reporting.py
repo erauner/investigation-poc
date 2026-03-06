@@ -52,6 +52,7 @@ def _normalized_request(req: InvestigationReportRequest) -> NormalizedInvestigat
                 alertname=req.alertname,
                 labels=req.labels,
                 annotations=req.annotations,
+                cluster=req.cluster,
                 namespace=req.namespace,
                 node_name=req.node_name,
                 target=req.target,
@@ -71,10 +72,13 @@ def _normalized_request(req: InvestigationReportRequest) -> NormalizedInvestigat
     if scope == "service" and profile == "workload":
         profile = "service"
         notes.append("profile promoted to service based on target")
+    if req.cluster:
+        notes.append(f"cluster resolved from explicit: {req.cluster}")
 
     return NormalizedInvestigationRequest(
         source="manual",
         scope=scope,
+        cluster=req.cluster,
         namespace=req.namespace,
         target=target,
         node_name=target.split("/", 1)[1] if scope == "node" and "/" in target else None,
@@ -95,7 +99,7 @@ def _resolve_vague_workload_target(normalized: NormalizedInvestigationRequest) -
     if not normalized.namespace:
         raise ValueError("namespace is required when resolving a vague workload target")
 
-    unhealthy = find_unhealthy_pod(FindUnhealthyPodRequest(namespace=normalized.namespace))
+    unhealthy = find_unhealthy_pod(FindUnhealthyPodRequest(cluster=normalized.cluster, namespace=normalized.namespace))
     candidate = unhealthy.candidate
     if candidate is None:
         raise ValueError("no unhealthy pod found in namespace")
@@ -109,6 +113,7 @@ def _collect_context_for_normalized_request(normalized: NormalizedInvestigationR
     if normalized.scope == "node":
         return collect_node_context(
             CollectNodeContextRequest(
+                cluster=normalized.cluster,
                 node_name=normalized.node_name or normalized.target.split("/", 1)[1],
                 lookback_minutes=normalized.lookback_minutes,
             )
@@ -119,6 +124,7 @@ def _collect_context_for_normalized_request(normalized: NormalizedInvestigationR
         service_name = normalized.service_name or normalized.target.split("/", 1)[1]
         return collect_service_context(
             CollectServiceContextRequest(
+                cluster=normalized.cluster,
                 namespace=normalized.namespace,
                 service_name=service_name,
                 target=normalized.target,
@@ -127,6 +133,7 @@ def _collect_context_for_normalized_request(normalized: NormalizedInvestigationR
         )
     return collect_workload_context(
         CollectContextRequest(
+            cluster=normalized.cluster,
             namespace=normalized.namespace,
             target=normalized.target,
             profile=normalized.profile,
@@ -190,6 +197,7 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
 
 def _base_investigation_report(root_cause: RootCauseReport) -> InvestigationReport:
     return InvestigationReport(
+        cluster=root_cause.cluster,
         scope=root_cause.scope,
         target=root_cause.target,
         diagnosis=root_cause.diagnosis,
@@ -242,6 +250,7 @@ def _apply_guidelines(
 def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
     report = build_investigation_report(
         InvestigationReportRequest(
+            cluster=req.cluster,
             namespace=req.namespace,
             target=req.target,
             profile=req.profile,
@@ -251,6 +260,7 @@ def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport
         )
     )
     return RootCauseReport(
+        cluster=report.cluster,
         scope=report.scope,
         target=report.target,
         diagnosis=report.diagnosis,
@@ -268,6 +278,11 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
     normalized = _resolve_vague_workload_target(_normalized_request(req))
     context = _collect_context_for_normalized_request(normalized)
     normalized = _align_normalized_request_with_context(normalized, context)
+    context_cluster = getattr(context, "cluster", None)
+    if context_cluster and not any(note.startswith("cluster resolved") for note in normalized.normalization_notes):
+        notes = list(normalized.normalization_notes)
+        notes.append(f"cluster resolved from collected context: {context_cluster}")
+        normalized = normalized.model_copy(update={"cluster": context_cluster, "normalization_notes": notes})
     root_cause = build_root_cause_report_impl(context, normalized)
 
     related_data: list[CorrelatedChange] = []
@@ -284,6 +299,7 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
     if req.include_related_data:
         correlated = collect_correlated_changes(
             CollectCorrelatedChangesRequest(
+                cluster=normalized.cluster,
                 namespace=normalized.namespace,
                 target=normalized.target,
                 profile=normalized.profile,
@@ -304,6 +320,7 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
             suggested_follow_ups.append("Inspect the related changes timeline before taking write actions.")
 
     return InvestigationReport(
+        cluster=root_cause.cluster,
         scope=root_cause.scope,
         target=root_cause.target,
         diagnosis=root_cause.diagnosis,

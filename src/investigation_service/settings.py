@@ -5,6 +5,21 @@ def get_prometheus_url() -> str:
     return os.getenv("PROMETHEUS_URL", "http://localhost:9090")
 
 
+def get_cluster_registry_path() -> str | None:
+    value = os.getenv("CLUSTER_REGISTRY_PATH", "").strip()
+    return value or None
+
+
+def get_kubeconfig_path() -> str | None:
+    value = os.getenv("KUBECONFIG_PATH", os.getenv("KUBECONFIG", "")).strip()
+    return value or None
+
+
+def get_default_cluster_alias() -> str | None:
+    value = os.getenv("DEFAULT_CLUSTER_ALIAS", "").strip()
+    return value or None
+
+
 def get_log_tail_lines() -> int:
     raw = os.getenv("LOG_TAIL_LINES", "200")
     try:

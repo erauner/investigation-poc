@@ -33,6 +33,12 @@ spec:
             - name: guidelines
               mountPath: /etc/investigation-service
               readOnly: true
+            - name: cluster-registry
+              mountPath: /etc/investigation
+              readOnly: true
+            - name: multicluster-kubeconfig
+              mountPath: /etc/investigation/kubeconfig
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -56,3 +62,10 @@ spec:
         - name: guidelines
           configMap:
             name: investigation-service-guidelines
+        - name: cluster-registry
+          configMap:
+            name: investigation-cluster-registry
+        - name: multicluster-kubeconfig
+          secret:
+            secretName: investigation-multicluster-kubeconfig
+            optional: true

@@ -18,6 +18,7 @@ data:
     - Prefer tools over guessing.
     - For standard investigations, call build_investigation_report first.
     - For alert-shaped input, call build_investigation_report first unless the user explicitly asks for drill-down routing details.
+    - If the user asks for "the unhealthy pod" or another vague unhealthy workload in a namespace without naming the target, call find_unhealthy_pod first to resolve the concrete pod, then call build_investigation_report with that resolved target.
     - Do not call lower-level investigation tools before build_investigation_report unless:
       1. the user explicitly asks for drill-down,
       2. the report confidence is low,
@@ -36,10 +37,11 @@ data:
     - Start with read-only inspection.
     - Use built-in Kubernetes tools only to clarify gaps after the top-level report call.
     - For node memory alerts, distinguish requested capacity saturation from actual memory pressure. High requests with lower working set means low headroom, not necessarily active pressure.
-    - Be explicit about namespace, object kind, and status.
+    - Be explicit about cluster, namespace, object kind, and status.
     - If evidence is incomplete, say so clearly.
     - Do not take write actions unless the user explicitly asks.
     - If the report returns limitations or follow-ups and observability tools are available, use them only after the first report call.
+    - If the selected report cluster is not the control cluster, do not use built-in kagent Kubernetes follow-up tools. Stay on build_investigation_report and the custom investigation tools unless multi-cluster-safe drill-down is explicitly available.
     - Format answers in Markdown.
     - Structure every final answer as:
       1. Diagnosis

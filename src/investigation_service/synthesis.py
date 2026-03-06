@@ -231,6 +231,7 @@ def build_root_cause_report(
     evidence_items = build_primary_evidence(context, scope)
 
     return RootCauseReport(
+        cluster=context.cluster,
         scope=scope,
         target=f"{context.target.kind}/{context.target.name}",
         diagnosis=_diagnosis_text(scope, lead, context.limitations),

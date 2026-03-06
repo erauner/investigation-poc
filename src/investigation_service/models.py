@@ -15,6 +15,7 @@ class TargetRef(BaseModel):
 
 
 class CollectContextRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str | None = Field(default=None, description="Kubernetes namespace when target is namespaced")
     target: str = Field(..., description="Target in form pod/name, deployment/name, service/name, or plain name")
     profile: ProfileType = Field(default="workload", description="Investigation profile")
@@ -26,6 +27,7 @@ class CollectAlertContextRequest(BaseModel):
     alertname: str = Field(..., description="Alert name")
     labels: dict[str, str] = Field(default_factory=dict, description="Alert labels")
     annotations: dict[str, str] = Field(default_factory=dict, description="Alert annotations")
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str | None = Field(default=None, description="Optional namespace override")
     node_name: str | None = Field(default=None, description="Optional node override for cluster-scoped node alerts")
     target: str | None = Field(default=None, description="Optional target override")
@@ -37,6 +39,7 @@ class CollectAlertContextRequest(BaseModel):
 class NormalizedInvestigationRequest(BaseModel):
     source: Literal["manual", "alert"]
     scope: ScopeType
+    cluster: str | None = Field(default=None, description="Resolved logical cluster alias")
     namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
     target: str = Field(..., description="Normalized target in kind/name form")
     node_name: str | None = Field(default=None, description="Explicit node target when scope=node")
@@ -47,11 +50,13 @@ class NormalizedInvestigationRequest(BaseModel):
 
 
 class CollectNodeContextRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     node_name: str = Field(..., description="Cluster node name")
     lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
 
 
 class CollectServiceContextRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str = Field(..., description="Kubernetes namespace")
     service_name: str = Field(..., description="Kubernetes service name")
     target: str | None = Field(default=None, description="Optional explicit target override")
@@ -59,15 +64,18 @@ class CollectServiceContextRequest(BaseModel):
 
 
 class FindUnhealthyWorkloadsRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str = Field(..., description="Kubernetes namespace")
     limit: int = Field(default=5, ge=1, le=20, description="Maximum number of unhealthy workloads to return")
 
 
 class FindUnhealthyPodRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str = Field(..., description="Kubernetes namespace")
 
 
 class InvestigateRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str = Field(..., description="Kubernetes namespace")
     target: str = Field(..., description="Target in form pod/name, deployment/name, service/name, or plain name")
     profile: ProfileType = Field(default="workload", description="Investigation profile")
@@ -76,6 +84,7 @@ class InvestigateRequest(BaseModel):
 
 
 class BuildRootCauseReportRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
     target: str = Field(..., description="Target in form pod/name, deployment/name, service/name, or node/name")
     profile: ProfileType = Field(default="workload", description="Investigation profile")
@@ -84,6 +93,7 @@ class BuildRootCauseReportRequest(BaseModel):
 
 
 class CollectCorrelatedChangesRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
     target: str = Field(..., description="Target in form pod/name, deployment/name, service/name, or node/name")
     profile: ProfileType = Field(default="workload", description="Investigation profile")
@@ -94,6 +104,7 @@ class CollectCorrelatedChangesRequest(BaseModel):
 
 
 class InvestigationReportRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
     target: str | None = Field(default=None, description="Target in form pod/name, deployment/name, service/name, or node/name")
     profile: ProfileType = Field(default="workload", description="Investigation profile")
@@ -162,6 +173,7 @@ class EvidenceItem(BaseModel):
 
 
 class CollectedContextResponse(BaseModel):
+    cluster: str = "current-context"
     target: TargetRef
     object_state: dict
     events: list[str]
@@ -185,18 +197,21 @@ class UnhealthyWorkloadCandidate(BaseModel):
 
 
 class UnhealthyWorkloadsResponse(BaseModel):
+    cluster: str = "current-context"
     namespace: str
     candidates: list[UnhealthyWorkloadCandidate]
     limitations: list[str] = Field(default_factory=list)
 
 
 class UnhealthyPodResponse(BaseModel):
+    cluster: str = "current-context"
     namespace: str
     candidate: UnhealthyWorkloadCandidate | None = None
     limitations: list[str] = Field(default_factory=list)
 
 
 class RootCauseReport(BaseModel):
+    cluster: str = "current-context"
     scope: ScopeType
     target: str
     diagnosis: str
@@ -222,6 +237,7 @@ class CorrelatedChange(BaseModel):
 
 
 class CorrelatedChangesResponse(BaseModel):
+    cluster: str = "current-context"
     scope: ScopeType
     target: str
     changes: list[CorrelatedChange]
@@ -229,6 +245,7 @@ class CorrelatedChangesResponse(BaseModel):
 
 
 class InvestigationReport(BaseModel):
+    cluster: str = "current-context"
     scope: ScopeType
     target: str
     diagnosis: str

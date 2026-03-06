@@ -1,10 +1,20 @@
 import json
 import subprocess
 
+from .cluster_registry import ResolvedCluster
 from .models import TargetRef, UnhealthyWorkloadCandidate, UnhealthyWorkloadsResponse
 
 
-def resolve_target(namespace: str, target: str) -> TargetRef:
+def _call_with_optional_cluster(func, *args, cluster: ResolvedCluster | None = None):
+    if cluster is None:
+        return func(*args)
+    try:
+        return func(*args, cluster=cluster)
+    except TypeError:
+        return func(*args)
+
+
+def resolve_target(namespace: str, target: str, cluster: ResolvedCluster | None = None) -> TargetRef:
     if "/" in target:
         kind, name = target.split("/", 1)
         normalized = kind.strip().lower()
@@ -22,18 +32,29 @@ def resolve_target(namespace: str, target: str) -> TargetRef:
 
     normalized_namespace = namespace or None
     if normalized_namespace:
-        if _resource_exists(normalized_namespace, "pod", target):
+        if _call_with_optional_cluster(_resource_exists, normalized_namespace, "pod", target, cluster=cluster):
             return TargetRef(namespace=normalized_namespace, kind="pod", name=target)
-        if _resource_exists(normalized_namespace, "deployment", target):
+        if _call_with_optional_cluster(_resource_exists, normalized_namespace, "deployment", target, cluster=cluster):
             return TargetRef(namespace=normalized_namespace, kind="deployment", name=target)
-        if _resource_exists(normalized_namespace, "service", target):
+        if _call_with_optional_cluster(_resource_exists, normalized_namespace, "service", target, cluster=cluster):
             return TargetRef(namespace=normalized_namespace, kind="service", name=target)
 
     return TargetRef(namespace=normalized_namespace, kind="pod", name=target)
 
 
-def _run_kubectl(args: list[str]) -> tuple[bool, str]:
-    cmd = ["kubectl", *args]
+def _cluster_args(cluster: ResolvedCluster | None) -> list[str]:
+    args: list[str] = []
+    if not cluster:
+        return args
+    if cluster.kubeconfig_path:
+        args.extend(["--kubeconfig", cluster.kubeconfig_path])
+    if cluster.kube_context:
+        args.extend(["--context", cluster.kube_context])
+    return args
+
+
+def _run_kubectl(args: list[str], cluster: ResolvedCluster | None = None) -> tuple[bool, str]:
+    cmd = ["kubectl", *_cluster_args(cluster), *args]
     try:
         completed = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=10)
     except Exception as exc:
@@ -44,16 +65,16 @@ def _run_kubectl(args: list[str]) -> tuple[bool, str]:
     return True, completed.stdout
 
 
-def _resource_exists(namespace: str, kind: str, name: str) -> bool:
+def _resource_exists(namespace: str, kind: str, name: str, cluster: ResolvedCluster | None = None) -> bool:
     if kind == "node":
-        ok, _ = _run_kubectl(["get", kind, name, "-o", "name"])
+        ok, _ = _call_with_optional_cluster(_run_kubectl, ["get", kind, name, "-o", "name"], cluster=cluster)
         return ok
-    ok, _ = _run_kubectl(["-n", namespace, "get", kind, name, "-o", "name"])
+    ok, _ = _call_with_optional_cluster(_run_kubectl, ["-n", namespace, "get", kind, name, "-o", "name"], cluster=cluster)
     return ok
 
 
-def _first_pod_with_prefix(namespace: str, prefix: str) -> str | None:
-    ok, pods_json = _run_kubectl(["-n", namespace, "get", "pods", "-o", "json"])
+def _first_pod_with_prefix(namespace: str, prefix: str, cluster: ResolvedCluster | None = None) -> str | None:
+    ok, pods_json = _call_with_optional_cluster(_run_kubectl, ["-n", namespace, "get", "pods", "-o", "json"], cluster=cluster)
     if not ok:
         return None
     try:
@@ -70,35 +91,31 @@ def _first_pod_with_prefix(namespace: str, prefix: str) -> str | None:
     if not candidates:
         return None
 
-    # Pick most recent pod to match current workload instance.
     candidates.sort(key=lambda i: i.get("metadata", {}).get("creationTimestamp", ""), reverse=True)
     return candidates[0].get("metadata", {}).get("name")
 
 
-def resolve_runtime_target(target: TargetRef) -> TargetRef:
+def resolve_runtime_target(target: TargetRef, cluster: ResolvedCluster | None = None) -> TargetRef:
     if target.kind != "pod":
         return target
 
-    if _resource_exists(target.namespace, "pod", target.name):
+    if _call_with_optional_cluster(_resource_exists, target.namespace, "pod", target.name, cluster=cluster):
         return target
-
-    # Common user intent: pod/<workload-name>. Prefer deployment when it exists.
-    if _resource_exists(target.namespace, "deployment", target.name):
+    if _call_with_optional_cluster(_resource_exists, target.namespace, "deployment", target.name, cluster=cluster):
         return TargetRef(namespace=target.namespace, kind="deployment", name=target.name)
 
-    # Fallback to best-effort pod prefix match.
-    matched_pod = _first_pod_with_prefix(target.namespace, target.name)
+    matched_pod = _call_with_optional_cluster(_first_pod_with_prefix, target.namespace, target.name, cluster=cluster)
     if matched_pod:
         return TargetRef(namespace=target.namespace, kind="pod", name=matched_pod)
 
     return target
 
 
-def get_k8s_object(target: TargetRef) -> dict:
+def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) -> dict:
     args = ["get", target.kind, target.name, "-o", "json"]
     if target.namespace:
         args = ["-n", target.namespace, *args]
-    ok, output = _run_kubectl(args)
+    ok, output = _call_with_optional_cluster(_run_kubectl, args, cluster=cluster)
     if not ok:
         return {"error": output, "namespace": target.namespace, "kind": target.kind, "name": target.name}
 
@@ -151,7 +168,7 @@ def get_k8s_object(target: TargetRef) -> dict:
         response["conditions"] = status.get("conditions", [])
         response["allocatable"] = status.get("allocatable", {})
         response["capacity"] = status.get("capacity", {})
-        response["top_pods_by_memory_request"] = _top_pods_for_node(target.name)
+        response["top_pods_by_memory_request"] = _top_pods_for_node(target.name, cluster=cluster)
     return response
 
 
@@ -183,8 +200,12 @@ def _parse_memory_to_bytes(raw: str | None) -> int:
         return 0
 
 
-def _top_pods_for_node(node_name: str, limit: int = 5) -> list[dict]:
-    ok, pods_json = _run_kubectl(["get", "pods", "-A", "--field-selector", f"spec.nodeName={node_name}", "-o", "json"])
+def _top_pods_for_node(node_name: str, limit: int = 5, cluster: ResolvedCluster | None = None) -> list[dict]:
+    ok, pods_json = _call_with_optional_cluster(
+        _run_kubectl,
+        ["get", "pods", "-A", "--field-selector", f"spec.nodeName={node_name}", "-o", "json"],
+        cluster=cluster,
+    )
     if not ok:
         return []
     try:
@@ -215,12 +236,16 @@ def _top_pods_for_node(node_name: str, limit: int = 5) -> list[dict]:
     return pods[:limit]
 
 
-def get_top_pods_for_node(node_name: str, limit: int = 5) -> list[dict]:
-    return _top_pods_for_node(node_name=node_name, limit=limit)
+def get_top_pods_for_node(node_name: str, limit: int = 5, cluster: ResolvedCluster | None = None) -> list[dict]:
+    return _top_pods_for_node(node_name=node_name, limit=limit, cluster=cluster)
 
 
-def get_pods_for_node(node_name: str, limit: int = 10) -> list[dict]:
-    ok, pods_json = _run_kubectl(["get", "pods", "-A", "--field-selector", f"spec.nodeName={node_name}", "-o", "json"])
+def get_pods_for_node(node_name: str, limit: int = 10, cluster: ResolvedCluster | None = None) -> list[dict]:
+    ok, pods_json = _call_with_optional_cluster(
+        _run_kubectl,
+        ["get", "pods", "-A", "--field-selector", f"spec.nodeName={node_name}", "-o", "json"],
+        cluster=cluster,
+    )
     if not ok:
         return []
     try:
@@ -245,6 +270,7 @@ def get_events(
     involved_kind: str | None = None,
     involved_name: str | None = None,
     limit: int = 20,
+    cluster: ResolvedCluster | None = None,
 ) -> list[dict]:
     args = ["get", "events", "-o", "json"]
     if namespace:
@@ -258,7 +284,7 @@ def get_events(
         if involved_name:
             selectors.append(f"involvedObject.name={involved_name}")
         args.extend(["--field-selector", ",".join(selectors)])
-    ok, output = _run_kubectl(args)
+    ok, output = _call_with_optional_cluster(_run_kubectl, args, cluster=cluster)
     if not ok:
         return []
     try:
@@ -279,8 +305,17 @@ def get_events(
     return items[:limit]
 
 
-def get_service_related_deployments(namespace: str, service_name: str, limit: int = 5) -> list[dict]:
-    ok, service_json = _run_kubectl(["-n", namespace, "get", "service", service_name, "-o", "json"])
+def get_service_related_deployments(
+    namespace: str,
+    service_name: str,
+    limit: int = 5,
+    cluster: ResolvedCluster | None = None,
+) -> list[dict]:
+    ok, service_json = _call_with_optional_cluster(
+        _run_kubectl,
+        ["-n", namespace, "get", "service", service_name, "-o", "json"],
+        cluster=cluster,
+    )
     if not ok:
         return []
     try:
@@ -293,7 +328,11 @@ def get_service_related_deployments(namespace: str, service_name: str, limit: in
         return []
 
     selector_items = set(selector.items())
-    ok, deployments_json = _run_kubectl(["-n", namespace, "get", "deployments", "-o", "json"])
+    ok, deployments_json = _call_with_optional_cluster(
+        _run_kubectl,
+        ["-n", namespace, "get", "deployments", "-o", "json"],
+        cluster=cluster,
+    )
     if not ok:
         return []
     try:
@@ -329,10 +368,20 @@ def get_service_related_deployments(namespace: str, service_name: str, limit: in
     return related[:limit]
 
 
-def find_unhealthy_workloads(namespace: str, limit: int = 5) -> UnhealthyWorkloadsResponse:
-    ok, pods_json = _run_kubectl(["-n", namespace, "get", "pods", "-o", "json"])
+def find_unhealthy_workloads(
+    namespace: str,
+    limit: int = 5,
+    cluster: ResolvedCluster | None = None,
+) -> UnhealthyWorkloadsResponse:
+    ok, pods_json = _call_with_optional_cluster(
+        _run_kubectl,
+        ["-n", namespace, "get", "pods", "-o", "json"],
+        cluster=cluster,
+    )
+    cluster_alias = cluster.alias if cluster else "current-context"
     if not ok:
         return UnhealthyWorkloadsResponse(
+            cluster=cluster_alias,
             namespace=namespace,
             candidates=[],
             limitations=[f"pod query failed: {pods_json}"],
@@ -342,6 +391,7 @@ def find_unhealthy_workloads(namespace: str, limit: int = 5) -> UnhealthyWorkloa
         items = json.loads(pods_json).get("items", [])
     except json.JSONDecodeError:
         return UnhealthyWorkloadsResponse(
+            cluster=cluster_alias,
             namespace=namespace,
             candidates=[],
             limitations=["pod query returned invalid json"],
@@ -403,15 +453,21 @@ def find_unhealthy_workloads(namespace: str, limit: int = 5) -> UnhealthyWorkloa
 
     candidates.sort(key=lambda item: (item[0], item[1].restart_count), reverse=True)
     return UnhealthyWorkloadsResponse(
+        cluster=cluster_alias,
         namespace=namespace,
         candidates=[candidate for _, candidate in candidates[:limit]],
     )
 
 
-def get_related_events(target: TargetRef, limit: int = 20) -> list[str]:
+def get_related_events(target: TargetRef, limit: int = 20, cluster: ResolvedCluster | None = None) -> list[str]:
     event_targets: list[tuple[str | None, str]] = [(target.kind.capitalize(), target.name)]
     if target.kind == "deployment":
-        pod_name = _first_pod_for_deployment(target.namespace, target.name)
+        pod_name = _call_with_optional_cluster(
+            _first_pod_for_deployment,
+            target.namespace,
+            target.name,
+            cluster=cluster,
+        )
         if pod_name:
             event_targets.append(("Pod", pod_name))
 
@@ -433,21 +489,28 @@ def get_related_events(target: TargetRef, limit: int = 20) -> list[str]:
             args = ["-n", target.namespace, *args]
         else:
             args = ["-A", *args]
-        ok, output = _run_kubectl(args)
+        ok, output = _call_with_optional_cluster(_run_kubectl, args, cluster=cluster)
         if not ok:
             continue
         lines.extend([line.strip() for line in output.splitlines() if line.strip()])
 
-    # Preserve order but remove duplicate lines.
-    deduped = list(dict.fromkeys(lines))
-    lines = deduped[-limit:]
+    lines = list(dict.fromkeys(lines))
+    lines = lines[-limit:]
     if not lines:
         return ["no related events"]
     return lines
 
 
-def _first_pod_for_deployment(namespace: str, deployment_name: str) -> str | None:
-    ok, deploy_json = _run_kubectl(["-n", namespace, "get", "deployment", deployment_name, "-o", "json"])
+def _first_pod_for_deployment(
+    namespace: str,
+    deployment_name: str,
+    cluster: ResolvedCluster | None = None,
+) -> str | None:
+    ok, deploy_json = _call_with_optional_cluster(
+        _run_kubectl,
+        ["-n", namespace, "get", "deployment", deployment_name, "-o", "json"],
+        cluster=cluster,
+    )
     if not ok:
         return None
 
@@ -461,7 +524,11 @@ def _first_pod_for_deployment(namespace: str, deployment_name: str) -> str | Non
         return None
 
     selector = ",".join([f"{k}={v}" for k, v in labels.items()])
-    ok, pods_json = _run_kubectl(["-n", namespace, "get", "pods", "-l", selector, "-o", "json"])
+    ok, pods_json = _call_with_optional_cluster(
+        _run_kubectl,
+        ["-n", namespace, "get", "pods", "-l", selector, "-o", "json"],
+        cluster=cluster,
+    )
     if not ok:
         return None
 
@@ -475,12 +542,17 @@ def _first_pod_for_deployment(namespace: str, deployment_name: str) -> str | Non
     return pod_list[0].get("metadata", {}).get("name")
 
 
-def get_pod_logs(target: TargetRef, tail: int = 200) -> str:
+def get_pod_logs(target: TargetRef, tail: int = 200, cluster: ResolvedCluster | None = None) -> str:
     if target.kind == "node":
         return "logs unavailable for node targets"
     pod_name = target.name
     if target.kind == "deployment":
-        resolved = _first_pod_for_deployment(target.namespace, target.name)
+        resolved = _call_with_optional_cluster(
+            _first_pod_for_deployment,
+            target.namespace,
+            target.name,
+            cluster=cluster,
+        )
         if not resolved:
             return "no pod found for deployment"
         pod_name = resolved
@@ -488,13 +560,17 @@ def get_pod_logs(target: TargetRef, tail: int = 200) -> str:
     if target.kind not in ("pod", "deployment"):
         return "logs only supported for pod or deployment targets"
 
-    ok, output = _run_kubectl(
-        ["-n", target.namespace, "logs", pod_name, "--tail", str(tail), "--timestamps=true"]
+    ok, output = _call_with_optional_cluster(
+        _run_kubectl,
+        ["-n", target.namespace, "logs", pod_name, "--tail", str(tail), "--timestamps=true"],
+        cluster=cluster,
     )
     current_logs = output.strip() if ok else ""
 
-    previous_ok, previous_output = _run_kubectl(
-        ["-n", target.namespace, "logs", pod_name, "--previous", "--tail", str(tail), "--timestamps=true"]
+    previous_ok, previous_output = _call_with_optional_cluster(
+        _run_kubectl,
+        ["-n", target.namespace, "logs", pod_name, "--previous", "--tail", str(tail), "--timestamps=true"],
+        cluster=cluster,
     )
     previous_logs = previous_output.strip() if previous_ok else ""
 

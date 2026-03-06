@@ -85,6 +85,7 @@ def collect_related(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesRe
 def investigate(req: InvestigateRequest) -> InvestigationResponse:
     report = build_investigation_report(
         InvestigationReportRequest(
+            cluster=req.cluster,
             namespace=req.namespace,
             target=req.target,
             profile=req.profile,
@@ -93,6 +94,7 @@ def investigate(req: InvestigateRequest) -> InvestigationResponse:
         )
     )
     evidence = [
+        f"Cluster: {report.cluster}",
         f"Target: {report.target}",
         f"Profile: {req.profile}",
         *report.evidence,

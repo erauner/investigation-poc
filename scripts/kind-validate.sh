@@ -16,15 +16,70 @@ run_make() {
   make -C "${ROOT_DIR}" "$@"
 }
 
+normalize_agent_output() {
+  local src="$1"
+  local dst="$2"
+  python3 - "$src" "$dst" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+raw = src.read_text()
+text = raw.strip()
+if not text.startswith("{"):
+    dst.write_text(raw)
+    raise SystemExit(0)
+
+payload = json.loads(raw)
+for artifact in payload.get("artifacts", []):
+    for part in artifact.get("parts", []):
+        if part.get("kind") == "text" and part.get("text"):
+            dst.write_text(part["text"])
+            raise SystemExit(0)
+
+dst.write_text(raw)
+PY
+}
+
+wait_for_unhealthy_pod() {
+  local namespace="$1"
+  local attempts="${2:-36}"
+  local sleep_seconds="${3:-5}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    if kubectl -n "${namespace}" get pods 2>/dev/null | grep -Eq 'CrashLoopBackOff|Error|Failed'; then
+      return 0
+    fi
+    sleep "${sleep_seconds}"
+  done
+
+  echo "Timed out waiting for an unhealthy pod in namespace ${namespace}" >&2
+  kubectl -n "${namespace}" get pods >&2 || true
+  exit 1
+}
+
 extract_section() {
   local heading="$1"
   local file="$2"
-  awk -v heading="### ${heading}" '
-    $0 ~ /^### / {
+  awk -v heading="${heading}" '
+    function lower_trim(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      return tolower(value)
+    }
+    $0 ~ /^###+ / || $0 ~ /^## / || $0 ~ /^[1-5]\. \*\*.*\*\*/ {
       if (in_section) {
         exit
       }
-      in_section = ($0 == heading)
+      line=$0
+      sub(/^###+ /, "", line)
+      sub(/^## /, "", line)
+      sub(/^[0-9]+\. /, "", line)
+      sub(/^\*\*/, "", line)
+      sub(/\*\*[[:space:]]*$/, "", line)
+      sub(/[[:space:]]*$/, "", line)
+      in_section = (lower_trim(line) == lower_trim(heading))
       next
     }
     in_section {
@@ -36,7 +91,25 @@ extract_section() {
 require_heading() {
   local heading="$1"
   local file="$2"
-  if ! grep -q "^### ${heading}$" "${file}"; then
+  if ! awk -v heading="${heading}" '
+    function lower_trim(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      return tolower(value)
+    }
+    $0 ~ /^###+ / || $0 ~ /^## / || $0 ~ /^[1-5]\. \*\*.*\*\*/ {
+      line=$0
+      sub(/^###+ /, "", line)
+      sub(/^## /, "", line)
+      sub(/^[0-9]+\. /, "", line)
+      sub(/^\*\*/, "", line)
+      sub(/\*\*[[:space:]]*$/, "", line)
+      sub(/[[:space:]]*$/, "", line)
+      if (lower_trim(line) == lower_trim(heading)) {
+        found=1
+      }
+    }
+    END { exit found ? 0 : 1 }
+  ' "${file}"; then
     echo "Missing required heading: ${heading}" >&2
     exit 1
   fi
@@ -65,6 +138,8 @@ fi
 tmp_dir="$(mktemp -d)"
 standard_output="${tmp_dir}/standard.md"
 top_level_output="${tmp_dir}/top-level.md"
+standard_raw="${tmp_dir}/standard.raw"
+top_level_raw="${tmp_dir}/top-level.raw"
 
 echo "==> Setting up local kind stack"
 run_make kind-setup
@@ -72,9 +147,12 @@ run_make kind-setup
 echo "==> Applying smoke workload"
 run_make kagent-smoke-apply
 kubectl -n "${SMOKE_NAMESPACE}" get pods
+wait_for_unhealthy_pod "${SMOKE_NAMESPACE}"
+kubectl -n "${SMOKE_NAMESPACE}" get pods
 
 echo "==> Running standard workload validation prompt"
-run_make kagent-smoke-test TASK="${WORKLOAD_PROMPT}" >"${standard_output}"
+run_make kagent-smoke-test TASK="${WORKLOAD_PROMPT}" >"${standard_raw}"
+normalize_agent_output "${standard_raw}" "${standard_output}"
 cat "${standard_output}"
 
 for heading in "Diagnosis" "Evidence" "Related Data" "Limitations" "Recommended next step"; do
@@ -97,7 +175,8 @@ if grep -Eiq "correlated changes|related data available" <<<"${limitations_secti
 fi
 
 echo "==> Running explicit top-level report prompt"
-run_make kagent-smoke-test TASK="${TOP_LEVEL_PROMPT}" >"${top_level_output}"
+run_make kagent-smoke-test TASK="${TOP_LEVEL_PROMPT}" >"${top_level_raw}"
+normalize_agent_output "${top_level_raw}" "${top_level_output}"
 cat "${top_level_output}"
 
 for heading in "Diagnosis" "Evidence" "Related Data" "Limitations" "Recommended next step"; do

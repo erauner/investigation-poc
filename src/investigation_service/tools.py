@@ -1,6 +1,7 @@
 import re
 
 from .analysis import derive_findings
+from .cluster_registry import resolve_cluster
 from .k8s_adapter import (
     find_unhealthy_workloads as find_unhealthy_workloads_impl,
     get_k8s_object,
@@ -26,6 +27,15 @@ from .prom_adapter import collect_metrics_for_scope
 from .routing import canonical_target as _canonical_target
 from .routing import scope_from_target as _scope_from_target
 from .settings import get_default_lookback_minutes, get_log_tail_lines
+
+
+def _call_with_optional_cluster(func, *args, cluster=None, **kwargs):
+    if cluster is None:
+        return func(*args, **kwargs)
+    try:
+        return func(*args, cluster=cluster, **kwargs)
+    except TypeError:
+        return func(*args, **kwargs)
 
 
 def _first_non_empty(*values: str | None) -> str | None:
@@ -85,24 +95,27 @@ def _build_enrichment_hints(
 
 
 def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
-    requested_target = resolve_target(req.namespace, req.target)
-    target = resolve_runtime_target(requested_target)
+    cluster = resolve_cluster(req.cluster)
+    requested_target = _call_with_optional_cluster(resolve_target, req.namespace, req.target, cluster=cluster)
+    target = _call_with_optional_cluster(resolve_runtime_target, requested_target, cluster=cluster)
     effective_profile = req.profile
     effective_service_name = req.service_name
     if target.kind == "service":
         effective_profile = "service"
         effective_service_name = req.service_name or target.name
-    object_state = get_k8s_object(target)
-    events = get_related_events(target)
+    object_state = _call_with_optional_cluster(get_k8s_object, target, cluster=cluster)
+    events = _call_with_optional_cluster(get_related_events, target, cluster=cluster)
     logs = ""
     if target.kind in {"pod", "deployment"}:
-        logs = get_pod_logs(target, tail=get_log_tail_lines())
+        logs = _call_with_optional_cluster(get_pod_logs, target, tail=get_log_tail_lines(), cluster=cluster)
     lookback_minutes = req.lookback_minutes or get_default_lookback_minutes()
-    metrics, metric_limitations = collect_metrics_for_scope(
+    metrics, metric_limitations = _call_with_optional_cluster(
+        collect_metrics_for_scope,
         target=target,
         profile=effective_profile,
         service_name=effective_service_name,
         lookback_minutes=lookback_minutes,
+        cluster=cluster,
     )
     findings = derive_findings(effective_profile, object_state, events, logs, metrics)
     limitations = list(metric_limitations)
@@ -115,6 +128,7 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
     enrichment_hints = _build_enrichment_hints(target.kind, effective_profile, metrics, limitations, findings)
 
     return CollectedContextResponse(
+        cluster=cluster.alias,
         target=target,
         object_state=object_state,
         events=events,
@@ -129,6 +143,7 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
 def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextRequest:
     normalized = normalize_alert_input(req)
     return CollectContextRequest(
+        cluster=normalized.cluster,
         namespace=normalized.namespace,
         target=normalized.target,
         profile=normalized.profile,
@@ -140,7 +155,8 @@ def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextReques
 def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestigationRequest:
     labels = req.labels
     annotations = req.annotations
-    notes: list[str] = [f"alertname={req.alertname}"]
+    cluster = resolve_cluster(req.cluster, labels)
+    notes: list[str] = [f"alertname={req.alertname}", f"cluster resolved from {cluster.source}: {cluster.alias}"]
 
     target = req.target or (f"node/{req.node_name}" if req.node_name else None)
     if target:
@@ -217,6 +233,7 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
     return NormalizedInvestigationRequest(
         source="alert",
         scope=scope,
+        cluster=cluster.alias,
         namespace=namespace,
         target=target,
         node_name=node_name if scope == "node" else None,
@@ -232,16 +249,19 @@ def collect_workload_context(req: CollectContextRequest) -> CollectedContextResp
 
 
 def find_unhealthy_workloads(req: FindUnhealthyWorkloadsRequest) -> UnhealthyWorkloadsResponse:
-    return find_unhealthy_workloads_impl(namespace=req.namespace, limit=req.limit)
+    cluster = resolve_cluster(req.cluster)
+    return find_unhealthy_workloads_impl(namespace=req.namespace, limit=req.limit, cluster=cluster)
 
 
 def find_unhealthy_pod(req: FindUnhealthyPodRequest) -> UnhealthyPodResponse:
-    workloads = find_unhealthy_workloads_impl(namespace=req.namespace, limit=1)
+    cluster = resolve_cluster(req.cluster)
+    workloads = find_unhealthy_workloads_impl(namespace=req.namespace, limit=1, cluster=cluster)
     candidate = workloads.candidates[0] if workloads.candidates else None
     limitations = list(workloads.limitations)
     if candidate is None:
         limitations.append("no unhealthy pod found in namespace")
     return UnhealthyPodResponse(
+        cluster=cluster.alias,
         namespace=req.namespace,
         candidate=candidate,
         limitations=sorted(set(limitations)),
@@ -251,6 +271,7 @@ def find_unhealthy_pod(req: FindUnhealthyPodRequest) -> UnhealthyPodResponse:
 def collect_node_context(req: CollectNodeContextRequest) -> CollectedContextResponse:
     return _collect_context(
         CollectContextRequest(
+            cluster=req.cluster,
             namespace=None,
             target=f"node/{req.node_name}",
             profile="workload",
@@ -263,6 +284,7 @@ def collect_service_context(req: CollectServiceContextRequest) -> CollectedConte
     target = _canonical_target(req.target or req.service_name, profile="service", service_name=req.service_name)
     return _collect_context(
         CollectContextRequest(
+            cluster=req.cluster,
             namespace=req.namespace,
             target=target,
             profile="service",
@@ -277,6 +299,7 @@ def collect_alert_context(req: CollectAlertContextRequest) -> CollectedContextRe
     if normalized.scope == "node" and normalized.node_name:
         context = collect_node_context(
             CollectNodeContextRequest(
+                cluster=normalized.cluster,
                 node_name=normalized.node_name,
                 lookback_minutes=normalized.lookback_minutes,
             )
@@ -284,6 +307,7 @@ def collect_alert_context(req: CollectAlertContextRequest) -> CollectedContextRe
     elif normalized.scope == "service" and normalized.service_name and normalized.namespace:
         context = collect_service_context(
             CollectServiceContextRequest(
+                cluster=normalized.cluster,
                 namespace=normalized.namespace,
                 service_name=normalized.service_name,
                 target=normalized.target,
@@ -293,6 +317,7 @@ def collect_alert_context(req: CollectAlertContextRequest) -> CollectedContextRe
     else:
         context = collect_workload_context(
             CollectContextRequest(
+                cluster=normalized.cluster,
                 namespace=normalized.namespace,
                 target=normalized.target,
                 profile=normalized.profile,

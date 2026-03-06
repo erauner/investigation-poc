@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-setup kind-smoke-loop kind-validate kind-down
+.PHONY: install test run run-mcp kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-setup kind-smoke-loop kind-validate kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -107,6 +107,9 @@ kind-smoke-loop:
 
 kind-validate:
 	@./scripts/kind-validate.sh
+
+kind-validate-multi:
+	@./scripts/kind-validate-multi.sh
 
 kind-down:
 	@if ! command -v kind >/dev/null 2>&1; then \

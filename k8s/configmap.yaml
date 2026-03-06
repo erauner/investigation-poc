@@ -7,3 +7,5 @@ data:
   CLUSTER_NAME: local-kind
   PROMETHEUS_URL: http://prometheus:9090
   LOG_TAIL_LINES: "200"
+  CLUSTER_REGISTRY_PATH: /etc/investigation/clusters.yaml
+  KUBECONFIG_PATH: /etc/investigation/kubeconfig/config

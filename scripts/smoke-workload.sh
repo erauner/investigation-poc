@@ -3,6 +3,17 @@ set -euo pipefail
 
 NS="${NS:-kagent-smoke}"
 ACTION="${1:-}"
+KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-}"
+FAILURE_EXIT_CODE="${FAILURE_EXIT_CODE:-1}"
+FAILURE_MESSAGE="${FAILURE_MESSAGE:-starting}"
+
+kubectl_cmd() {
+  if [[ -n "${KUBECTL_CONTEXT}" ]]; then
+    kubectl --context "${KUBECTL_CONTEXT}" "$@"
+  else
+    kubectl "$@"
+  fi
+}
 
 usage() {
   cat <<USAGE
@@ -14,7 +25,7 @@ USAGE
 }
 
 apply_smoke() {
-  cat <<YAML | kubectl apply -f -
+  cat <<YAML | kubectl_cmd apply -f -
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -40,7 +51,7 @@ spec:
       containers:
         - name: crashy
           image: busybox:1.36
-          command: ["sh", "-c", "echo starting && sleep 2 && exit 1"]
+          command: ["sh", "-c", "echo ${FAILURE_MESSAGE} && sleep 2 && exit ${FAILURE_EXIT_CODE}"]
 ---
 apiVersion: v1
 kind: Service
@@ -85,7 +96,7 @@ case "${ACTION}" in
     apply_smoke
     ;;
   delete)
-    kubectl delete namespace "${NS}" --ignore-not-found
+    kubectl_cmd delete namespace "${NS}" --ignore-not-found
     ;;
   *)
     usage

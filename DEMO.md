@@ -57,6 +57,12 @@ This target:
 - verifies the five required sections are present
 - fails if `Limitations` leaks correlated-change notes
 
+For multi-cluster routing validation without changing the single-cluster contract lane, run:
+
+```bash
+make kind-validate-multi
+```
+
 ### 1. Create or reuse the local cluster
 
 ```bash

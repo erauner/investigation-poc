@@ -30,6 +30,12 @@ For the most important end-to-end local validation path, use:
 OPENAI_API_KEY=sk-... make kind-validate
 ```
 
+For the first multi-cluster routing validation path, use:
+
+```bash
+make kind-validate-multi
+```
+
 This exercises the local kind stack, deploys the smoke workload, runs the standard investigation prompt, runs the explicit `build_investigation_report` prompt, and fails if the five-section report contract regresses.
 
 ## Example investigate request
@@ -83,6 +89,12 @@ Full local contract validation:
 
 ```bash
 OPENAI_API_KEY=sk-... make kind-validate
+```
+
+Host-routed multi-cluster validation:
+
+```bash
+make kind-validate-multi
 ```
 
 Use [DEMO.md](/Users/erauner/git/side/investigation-poc/DEMO.md) as the repo-local source of truth for:
