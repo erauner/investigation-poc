@@ -87,6 +87,11 @@ def _build_enrichment_hints(
 def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
     requested_target = resolve_target(req.namespace, req.target)
     target = resolve_runtime_target(requested_target)
+    effective_profile = req.profile
+    effective_service_name = req.service_name
+    if target.kind == "service":
+        effective_profile = "service"
+        effective_service_name = req.service_name or target.name
     object_state = get_k8s_object(target)
     events = get_related_events(target)
     logs = ""
@@ -95,11 +100,11 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
     lookback_minutes = req.lookback_minutes or get_default_lookback_minutes()
     metrics, metric_limitations = collect_metrics_for_scope(
         target=target,
-        profile=req.profile,
-        service_name=req.service_name,
+        profile=effective_profile,
+        service_name=effective_service_name,
         lookback_minutes=lookback_minutes,
     )
-    findings = derive_findings(req.profile, object_state, events, logs, metrics)
+    findings = derive_findings(effective_profile, object_state, events, logs, metrics)
     limitations = list(metric_limitations)
     if object_state.get("error"):
         limitations.append("kubernetes object query failed")
@@ -107,7 +112,7 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
         limitations.append("no related Kubernetes events found")
     if target.kind in {"pod", "deployment"} and (logs.startswith("log query failed:") or logs.startswith("no pod found")):
         limitations.append("pod logs unavailable for target")
-    enrichment_hints = _build_enrichment_hints(target.kind, req.profile, metrics, limitations, findings)
+    enrichment_hints = _build_enrichment_hints(target.kind, effective_profile, metrics, limitations, findings)
 
     return CollectedContextResponse(
         target=target,

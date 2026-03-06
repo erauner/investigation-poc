@@ -135,6 +135,27 @@ def _collect_context_for_normalized_request(normalized: NormalizedInvestigationR
     )
 
 
+def _align_normalized_request_with_context(
+    normalized: NormalizedInvestigationRequest, context
+) -> NormalizedInvestigationRequest:
+    target_ref = getattr(context, "target", None)
+    target_kind = getattr(target_ref, "kind", None)
+    if target_kind != "service" or normalized.scope == "service":
+        return normalized
+
+    notes = list(normalized.normalization_notes)
+    notes.append(f"profile promoted to service after resolving target kind={target_kind}")
+    return normalized.model_copy(
+        update={
+            "scope": "service",
+            "profile": "service",
+            "target": f"service/{target_ref.name}",
+            "service_name": normalized.service_name or target_ref.name,
+            "normalization_notes": notes,
+        }
+    )
+
+
 def _filter_related_data(report: RootCauseReport, changes: list[CorrelatedChange]) -> tuple[list[CorrelatedChange], str | None]:
     def dedupe_key(value: str) -> str:
         canonical = canonicalize_event_fingerprint(value)
@@ -245,6 +266,7 @@ def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport
 def build_investigation_report(req: InvestigationReportRequest) -> InvestigationReport:
     normalized = _resolve_vague_workload_target(_normalized_request(req))
     context = _collect_context_for_normalized_request(normalized)
+    normalized = _align_normalized_request_with_context(normalized, context)
     root_cause = build_root_cause_report_impl(context, normalized)
 
     related_data: list[CorrelatedChange] = []

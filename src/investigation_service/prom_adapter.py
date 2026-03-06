@@ -176,7 +176,7 @@ def collect_metrics_for_scope(
     scoped_limitations: list[str] = []
     if target.kind == "node":
         scoped_metrics, scoped_limitations = collect_node_metrics(target.name, lookback_minutes)
-    elif profile == "service":
+    elif target.kind == "service" or profile == "service":
         scoped_metrics, scoped_limitations = collect_service_metrics(
             namespace=target.namespace or "",
             service_name=service_name or target.name,
