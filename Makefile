@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-setup kind-smoke-loop kind-down
+.PHONY: install test run run-mcp kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-setup kind-smoke-loop kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -89,9 +89,12 @@ kind-install-kagent:
 	@kubectl apply -f k8s/agent.yaml
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-controller --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-ui --timeout=180s
-	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-service --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-mcp-server --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/investigation-agent --timeout=180s
+
+kind-enable-http-debug:
+	@kubectl apply -k k8s/optional-http
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-service --timeout=180s
 
 kind-setup:
 	@$(MAKE) kind-up

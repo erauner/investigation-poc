@@ -3,12 +3,10 @@ kind: Kustomization
 
 resources:
   - serviceaccount.yaml
-  - role.yaml
-  - rolebinding.yaml
+  - clusterrole.yaml
+  - clusterrolebinding.yaml
   - configmap.yaml
   - investigation-skill-configmap.yaml
   - investigation-remotemcpserver.yaml
-  - deployment.yaml
-  - service.yaml
   - mcp-deployment.yaml
   - mcp-service.yaml

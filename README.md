@@ -1,6 +1,6 @@
-# Investigation Service
+# Investigation MCP
 
-Minimal v1 scaffold for pod/workload investigation.
+Minimal v1 scaffold for pod/workload investigation with an MCP-first cluster path.
 
 ## Local run
 
@@ -32,7 +32,7 @@ curl -s localhost:8080/investigate \
   -d '{"namespace":"default","target":"pod/api-7d4c"}' | jq
 ```
 
-## Kubernetes deployment
+## Kubernetes deployment (MCP default)
 
 Manifests are in `k8s/`:
 
@@ -40,13 +40,16 @@ Manifests are in `k8s/`:
 kubectl apply -k k8s/
 ```
 
+This applies the MCP server path used by the agent (`RemoteMCPServer -> investigation-mcp-server`).
+The legacy HTTP debug API manifests are isolated in `k8s/optional-http/`.
+
 ## Repeatable local kind flow
 
 ```bash
 # 1) Create/use kind cluster
 make kind-up
 
-# 2) Install kagent + service + agent
+# 2) Install kagent + MCP server + agent
 OPENAI_API_KEY=sk-... make kind-install-kagent
 
 # 3) Run smoke test loop (apply workload, invoke agent, cleanup)
@@ -72,3 +75,9 @@ make kagent-smoke-clean
 
 Optional fast-loop mode: run `make run-mcp` and patch `k8s/investigation-remotemcpserver.yaml`
 to `host.docker.internal:8001` if you want host-run MCP iteration.
+
+Optional HTTP debug API deployment:
+
+```bash
+make kind-enable-http-debug
+```
