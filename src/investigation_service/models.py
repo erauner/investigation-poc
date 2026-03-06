@@ -24,6 +24,7 @@ class CollectAlertContextRequest(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict, description="Alert labels")
     annotations: dict[str, str] = Field(default_factory=dict, description="Alert annotations")
     namespace: str | None = Field(default=None, description="Optional namespace override")
+    node_name: str | None = Field(default=None, description="Optional node override for cluster-scoped node alerts")
     target: str | None = Field(default=None, description="Optional target override")
     profile: ProfileType = Field(default="workload", description="Investigation profile")
     service_name: str | None = Field(default=None, description="Optional service name hint for service profile")

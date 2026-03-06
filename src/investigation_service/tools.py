@@ -50,7 +50,7 @@ def _infer_target_from_text(text: str | None) -> str | None:
 def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextRequest:
     labels = req.labels
     annotations = req.annotations
-    target = req.target
+    target = req.target or (f"node/{req.node_name}" if req.node_name else None)
     if not target:
         target = _infer_target_from_text(
             _first_non_empty(
@@ -72,7 +72,7 @@ def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextReques
         statefulset_name = _label_value(labels, "statefulset", "statefulset_name", "kubernetes_statefulset_name")
         daemonset_name = _label_value(labels, "daemonset", "daemonset_name", "kubernetes_daemonset_name")
         service_name = _label_value(labels, "service", "service_name")
-        node_name = _label_value(labels, "node", "node_name", "kubernetes_node", "instance")
+        node_name = req.node_name or _label_value(labels, "node", "node_name", "kubernetes_node", "instance")
         app_name = _label_value(labels, "app", "app_kubernetes_io_name", "job")
         if pod_name:
             target = f"pod/{pod_name}"

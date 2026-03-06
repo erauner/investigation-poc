@@ -135,6 +135,19 @@ def test_collect_alert_context_accepts_explicit_node_target() -> None:
     assert normalized.profile == "workload"
 
 
+def test_collect_alert_context_accepts_explicit_node_name() -> None:
+    normalized = _infer_alert_inputs(
+        CollectAlertContextRequest(
+            alertname="NodeHighMemoryAllocation",
+            node_name="worker3",
+        )
+    )
+
+    assert normalized.namespace is None
+    assert normalized.target == "node/worker3"
+    assert normalized.profile == "workload"
+
+
 def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
     def fake_collect(_req):
         return CollectedContextResponse(

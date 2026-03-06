@@ -16,6 +16,7 @@ data:
     - Prefer tools over guessing.
     - For workload questions, call collect_workload_context first.
     - For alert-shaped questions, call collect_alert_context first.
+    - For cluster-scoped node alerts, call collect_alert_context with node_name and do not require a namespace.
     - Start with read-only inspection.
     - Use built-in Kubernetes tools only to clarify gaps after the first context call.
     - For workload health, follow this order:
