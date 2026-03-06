@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
-import re
 
+from .event_fingerprints import fingerprint_event, normalize_event_text
 from .k8s_adapter import (
     get_events,
     get_pods_for_node,
@@ -20,10 +20,6 @@ def _parse_timestamp(raw: str | None) -> datetime | None:
         return datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         return None
-
-
-def _normalize_text(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip().lower())
 
 
 def _within_window(raw: str | None, lookback_minutes: int, anchor_timestamp: str | None = None) -> bool:
@@ -100,10 +96,12 @@ def _change_from_event(event: dict, relation: str) -> CorrelatedChange:
     reason = event.get("reason") or "Event"
     message = event.get("message") or reason
     return CorrelatedChange(
-        fingerprint=(
-            f"event|{(involved.get('kind') or 'event').lower()}|"
-            f"{involved.get('namespace') or event.get('metadata', {}).get('namespace') or 'cluster'}|"
-            f"{involved.get('name') or 'unknown'}|{_normalize_text(reason)}|{_normalize_text(message)}"
+        fingerprint=fingerprint_event(
+            resource_kind=involved.get("kind"),
+            namespace=involved.get("namespace") or event.get("metadata", {}).get("namespace"),
+            name=involved.get("name"),
+            reason=reason,
+            message=message,
         ),
         timestamp=_event_timestamp(event),
         source="k8s_event",
@@ -123,7 +121,7 @@ def _change_from_rollout(item: dict, relation: str) -> CorrelatedChange:
     return CorrelatedChange(
         fingerprint=(
             f"rollout|{item.get('kind', 'deployment')}|{item.get('namespace') or 'cluster'}|"
-            f"{item.get('name', 'unknown')}|{_normalize_text(','.join(images))}"
+            f"{item.get('name', 'unknown')}|{normalize_event_text(','.join(images))}"
         ),
         timestamp=item.get("timestamp", ""),
         source="rollout",

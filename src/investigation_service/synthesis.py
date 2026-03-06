@@ -1,5 +1,6 @@
 import re
 
+from .event_fingerprints import fingerprint_event, parse_compact_event_text
 from .models import (
     CollectContextRequest,
     CollectedContextResponse,
@@ -110,16 +111,6 @@ def _extract_field(pattern: str, evidence: str) -> str | None:
     return None
 
 
-def _normalize_text(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip().lower())
-
-
-def _event_fingerprint(target: str, event_text: str) -> str:
-    reason, _, message = event_text.partition(" ")
-    detail = message or reason
-    return f"event|{target}|{_normalize_text(reason.rstrip(':'))}|{_normalize_text(detail)}"
-
-
 def _derive_likely_cause(scope: str, lead) -> str | None:
     if lead.source == "heuristic" and lead.title == "No Critical Signals Found":
         return None
@@ -170,10 +161,9 @@ def _recommended_next_step(scope: str, profile: str) -> str:
 
 
 def build_primary_evidence(context: CollectedContextResponse, scope: str) -> list[EvidenceItem]:
-    target = f"{context.target.kind}/{context.target.name}"
     evidence_items = [
         EvidenceItem(
-            fingerprint=f"finding|{scope}|{_normalize_text(item.title)}|{_normalize_text(item.evidence)}",
+            fingerprint=f"finding|{scope}|{re.sub(r'\\s+', ' ', item.title.strip().lower())}|{re.sub(r'\\s+', ' ', item.evidence.strip().lower())}",
             source=item.source,
             kind="finding",
             severity=item.severity,
@@ -184,8 +174,15 @@ def build_primary_evidence(context: CollectedContextResponse, scope: str) -> lis
     ]
     if context.events and context.events != ["no related events"]:
         first_event = context.events[0]
+        reason, message = parse_compact_event_text(first_event)
         event_item = EvidenceItem(
-            fingerprint=_event_fingerprint(target, first_event),
+            fingerprint=fingerprint_event(
+                resource_kind=context.target.kind,
+                namespace=context.target.namespace,
+                name=context.target.name,
+                reason=reason,
+                message=message,
+            ),
             source="events",
             kind="event",
             severity="warning",
