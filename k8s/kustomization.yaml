@@ -7,5 +7,6 @@ resources:
   - rolebinding.yaml
   - configmap.yaml
   - investigation-skill-configmap.yaml
+  - investigation-remotemcpserver.yaml
   - deployment.yaml
   - service.yaml

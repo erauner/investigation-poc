@@ -49,6 +49,9 @@ make kind-up
 # 2) Install kagent + service + agent
 OPENAI_API_KEY=sk-... make kind-install-kagent
 
+# 3) Start local MCP wrapper (separate terminal)
+make run-mcp
+
 # 3) Run smoke test loop (apply workload, invoke agent, cleanup)
 make kagent-smoke-loop
 
@@ -60,4 +63,12 @@ Or one-shot:
 
 ```bash
 OPENAI_API_KEY=sk-... make kind-smoke-loop
+```
+
+To prove the custom MCP tool is in the loop, run:
+
+```bash
+make kagent-smoke-apply
+make kagent-smoke-test TASK="Before answering, call functions.collect_workload_context exactly once with namespace kagent-smoke and target pod/crashy. Then return Diagnosis, Evidence, Recommendation."
+make kagent-smoke-clean
 ```

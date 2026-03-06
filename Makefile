@@ -1,10 +1,10 @@
-.PHONY: install test run kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-setup kind-smoke-loop kind-down
+.PHONY: install test run run-mcp kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-setup kind-smoke-loop kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
 KIND_CONTEXT ?= kind-$(KIND_CLUSTER_NAME)
 KAGENT_NAMESPACE ?= kagent
-KAGENT_VERSION ?= 0.7.5
+KAGENT_VERSION ?= 0.7.22
 
 install:
 	@if command -v uv >/dev/null 2>&1; then \
@@ -26,6 +26,13 @@ run:
 		uv run uvicorn investigation_service.main:app --host 0.0.0.0 --port 8080 --reload; \
 	else \
 		$(PYTHON) -m uvicorn investigation_service.main:app --host 0.0.0.0 --port 8080 --reload; \
+	fi
+
+run-mcp:
+	@if command -v uv >/dev/null 2>&1; then \
+		MCP_HOST=0.0.0.0 MCP_PORT=8001 MCP_PATH=/mcp uv run python -m investigation_service.mcp_server; \
+	else \
+		MCP_HOST=0.0.0.0 MCP_PORT=8001 MCP_PATH=/mcp $(PYTHON) -m investigation_service.mcp_server; \
 	fi
 
 kagent-smoke-apply:
