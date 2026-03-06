@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: investigation-service-config
+  namespace: kagent
+data:
+  PROMETHEUS_URL: http://prometheus:9090
+  LOG_TAIL_LINES: "200"

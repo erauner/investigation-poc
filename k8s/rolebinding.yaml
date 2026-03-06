@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: investigation-service-readonly
+  namespace: kagent
+subjects:
+  - kind: ServiceAccount
+    name: investigation-service
+    namespace: kagent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: investigation-service-readonly

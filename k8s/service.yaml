@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: investigation-service
+  namespace: kagent
+  labels:
+    app.kubernetes.io/name: investigation-service
+  annotations:
+    kagent.dev/tool.type: "openapi"
+    kagent.dev/openapi.path: "/openapi.json"
+    kagent.dev/tool.description: "Collect read-only Kubernetes and Prometheus investigation context"
+spec:
+  selector:
+    app.kubernetes.io/name: investigation-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

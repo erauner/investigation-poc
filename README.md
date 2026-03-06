@@ -29,3 +29,11 @@ curl -s localhost:8080/investigate \
   -H 'content-type: application/json' \
   -d '{"namespace":"default","target":"pod/api-7d4c"}' | jq
 ```
+
+## Kubernetes deployment
+
+Manifests are in `k8s/`:
+
+```bash
+kubectl apply -k k8s/
+```
