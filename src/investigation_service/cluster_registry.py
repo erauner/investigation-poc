@@ -92,10 +92,11 @@ def list_clusters() -> list[str]:
 
 
 def _resolve_registered_cluster(config: ClusterConfig, source: str) -> ResolvedCluster:
+    kubeconfig_path = _resolved_kubeconfig_path()
     return ResolvedCluster(
         alias=config.alias,
-        kube_context=config.kube_context,
-        kubeconfig_path=_resolved_kubeconfig_path(),
+        kube_context=config.kube_context if kubeconfig_path else None,
+        kubeconfig_path=kubeconfig_path,
         prometheus_url=config.prometheus_url or get_prometheus_url(),
         source=source,
         allowed_namespaces=config.allowed_namespaces,

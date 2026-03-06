@@ -109,3 +109,4 @@ clusters:
 
     assert resolved.alias == "erauner-home"
     assert resolved.kubeconfig_path is None
+    assert resolved.kube_context is None
