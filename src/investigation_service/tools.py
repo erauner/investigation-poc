@@ -77,6 +77,20 @@ def _scope_from_target(target: str, profile: str) -> ScopeType:
     return "workload"
 
 
+def _canonical_target(target: str, profile: str, service_name: str | None = None) -> str:
+    normalized_target = target.strip()
+    if not normalized_target:
+        return normalized_target
+    if normalized_target.startswith(("pod/", "deployment/", "service/", "node/")):
+        return normalized_target
+    scope = _scope_from_target(normalized_target, profile)
+    if scope == "service":
+        return f"service/{service_name or normalized_target}"
+    if scope == "node":
+        return f"node/{normalized_target}"
+    return normalized_target
+
+
 def _build_enrichment_hints(
     target_kind: str, profile: str, metrics: dict, limitations: list[str], findings: list
 ) -> list[str]:
@@ -261,10 +275,11 @@ def collect_node_context(req: CollectNodeContextRequest) -> CollectedContextResp
 
 
 def collect_service_context(req: CollectServiceContextRequest) -> CollectedContextResponse:
+    target = _canonical_target(req.target or req.service_name, profile="service", service_name=req.service_name)
     return _collect_context(
         CollectContextRequest(
             namespace=req.namespace,
-            target=req.target or f"service/{req.service_name}",
+            target=target,
             profile="service",
             service_name=req.service_name,
             lookback_minutes=req.lookback_minutes,

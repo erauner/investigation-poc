@@ -9,6 +9,7 @@ from investigation_service.main import app
 from investigation_service.models import (
     BuildRootCauseReportRequest,
     CollectAlertContextRequest,
+    CollectServiceContextRequest,
     CollectedContextResponse,
     Finding,
     RootCauseReport,
@@ -18,7 +19,7 @@ from investigation_service.models import (
 )
 from investigation_service.reporting import build_root_cause_report as build_root_cause_report_from_request
 from investigation_service.synthesis import build_root_cause_report
-from investigation_service.tools import normalize_alert_input
+from investigation_service.tools import collect_service_context, normalize_alert_input
 
 
 def _sample_response(target: TargetRef) -> CollectedContextResponse:
@@ -248,6 +249,27 @@ def test_collect_service_context_route_returns_context(monkeypatch) -> None:
         "kind": "service",
         "name": "kagent-controller",
     }
+
+
+def test_collect_service_context_canonicalizes_bare_service_target(monkeypatch) -> None:
+    captured = {}
+
+    def fake_collect(_req):
+        captured["target"] = _req.target
+        return _sample_response(TargetRef(namespace="kagent", kind="service", name="kagent-controller"))
+
+    monkeypatch.setattr("investigation_service.tools._collect_context", fake_collect)
+
+    response = collect_service_context(
+        CollectServiceContextRequest(
+            namespace="kagent",
+            service_name="kagent-controller",
+            target="kagent-controller",
+        )
+    )
+
+    assert captured["target"] == "service/kagent-controller"
+    assert response.target.kind == "service"
 
 
 def test_find_unhealthy_workloads_route_returns_candidates(monkeypatch) -> None:
@@ -542,6 +564,47 @@ def test_build_root_cause_report_from_request_collects_node_context(monkeypatch)
     assert report.scope == "node"
     assert report.target == "node/worker3"
     assert report.diagnosis == "Node Not Ready"
+
+
+def test_build_root_cause_report_from_request_canonicalizes_service_target(monkeypatch) -> None:
+    captured = {}
+
+    def fake_collect_service(req):
+        captured["target"] = req.target
+        captured["service_name"] = req.service_name
+        return CollectedContextResponse(
+            target=TargetRef(namespace="observability", kind="service", name="giraffe-kube-prometheus-st-prometheus"),
+            object_state={"kind": "service", "name": "giraffe-kube-prometheus-st-prometheus"},
+            events=["no related events"],
+            log_excerpt="logs only supported for pod or deployment targets",
+            metrics={"service_latency_p95_seconds": 1.5, "prometheus_available": True},
+            findings=[
+                Finding(
+                    severity="warning",
+                    source="prometheus",
+                    title="High Service Latency",
+                    evidence="p95 latency is 1.500s",
+                )
+            ],
+            limitations=[],
+            enrichment_hints=[],
+        )
+
+    monkeypatch.setattr("investigation_service.reporting.collect_service_context", fake_collect_service)
+
+    report = build_root_cause_report_from_request(
+        BuildRootCauseReportRequest(
+            namespace="observability",
+            target="giraffe-kube-prometheus-st-prometheus",
+            profile="service",
+            service_name="giraffe-kube-prometheus-st-prometheus",
+        )
+    )
+
+    assert captured["target"] == "service/giraffe-kube-prometheus-st-prometheus"
+    assert captured["service_name"] == "giraffe-kube-prometheus-st-prometheus"
+    assert report.scope == "service"
+    assert report.diagnosis == "High Service Latency"
 
 
 def test_get_k8s_object_includes_pod_container_details(monkeypatch) -> None:
