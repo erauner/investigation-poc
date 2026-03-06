@@ -45,13 +45,15 @@ spec:
     - name: nexus-creds
       secret:
         secretName: nexus-registry-credentials
+        items:
+          - key: config.json
+            path: config.json
 '''
         }
     }
 
     environment {
-        REGISTRY = 'docker.nexus.erauner.dev/homelab'
-        IMAGE_NAME = 'investigation-poc'
+        IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/investigation-poc'
         DOCKER_CONFIG = '/kaniko/.docker'
     }
 
@@ -88,13 +90,16 @@ spec:
                     script {
                         def shortCommit = sh(script: 'echo $GIT_COMMIT | cut -c1-7', returnStdout: true).trim()
                         sh """
+                            test -f /kaniko/.docker/config.json
                             /kaniko/executor \
-                                --context=dir://${WORKSPACE} \
-                                --dockerfile=${WORKSPACE}/Dockerfile \
-                                --destination=${REGISTRY}/${IMAGE_NAME}:${shortCommit} \
-                                --destination=${REGISTRY}/${IMAGE_NAME}:latest \
+                                --dockerfile=Dockerfile \
+                                --context=dir://. \
+                                --destination=${IMAGE_NAME}:${shortCommit} \
+                                --destination=${IMAGE_NAME}:latest \
                                 --cache=true \
-                                --cache-repo=${REGISTRY}/${IMAGE_NAME}-cache
+                                --cache-repo=${IMAGE_NAME}-cache \
+                                --skip-tls-verify-registry=docker.nexus.erauner.dev \
+                                --custom-platform=linux/amd64
                         """
                     }
                 }
