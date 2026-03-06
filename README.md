@@ -119,6 +119,8 @@ Use [DEMO.md](/Users/erauner/git/side/investigation-poc/DEMO.md) as the repo-loc
 
 This repo should be sufficient for local validation. The production GitOps rollout still happens from `homelab-k8s`, but the fast feedback loop should stay here.
 
+If you are preparing to fork this into a non-homelab environment, use [PRE_FORK_PLAN.md](/Users/erauner/git/side/investigation-poc/PRE_FORK_PLAN.md) as the repo-local checklist for separating platform code, runtime overlays, and domain-specific behavior.
+
 ## Use from Claude Code
 
 After `make kind-install-kagent`, port-forward the controller MCP endpoint:
