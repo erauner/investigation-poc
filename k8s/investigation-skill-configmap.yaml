@@ -30,6 +30,7 @@ data:
     - If related_data is empty, print the report's related_data_note exactly in the Related Data section.
     - Never populate Related Data from limitations, findings, metrics, logs, events, or enrichment hints unless they are explicitly present in related_data.
     - Do not omit the Related Data section, even when it is empty.
+    - Limitations must come only from the report's limitations field and must not restate the Related Data note.
     - Start with read-only inspection.
     - Use built-in Kubernetes tools only to clarify gaps after the top-level report call.
     - For node memory alerts, distinguish requested capacity saturation from actual memory pressure. High requests with lower working set means low headroom, not necessarily active pressure.

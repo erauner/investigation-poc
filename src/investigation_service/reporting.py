@@ -34,6 +34,8 @@ _VAGUE_WORKLOAD_TARGETS = {
     "unhealthy-workload",
 }
 
+_EMPTY_CORRELATION_LIMITATION = "no correlated changes found in the requested time window"
+
 
 def _normalized_request(req: InvestigationReportRequest) -> NormalizedInvestigationRequest:
     if req.alertname:
@@ -181,7 +183,12 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
             )
         )
         related_data, related_data_note = _filter_related_data(root_cause, correlated.changes)
-        limitations.extend(correlated.limitations)
+        correlation_limitations = list(correlated.limitations)
+        if not related_data and related_data_note:
+            correlation_limitations = [
+                item for item in correlation_limitations if item != _EMPTY_CORRELATION_LIMITATION
+            ]
+        limitations.extend(correlation_limitations)
         if related_data:
             suggested_follow_ups.append("Inspect the related changes timeline before taking write actions.")
 

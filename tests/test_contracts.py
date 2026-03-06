@@ -836,7 +836,7 @@ def test_build_investigation_report_keeps_empty_related_note_out_of_limitations(
     assert report.related_data == []
     assert report.related_data_note == "no meaningful correlated changes found in the requested time window"
     assert "metric unavailable: accepted_spans_per_second" in report.limitations
-    assert report.limitations.count("no correlated changes found in the requested time window") == 1
+    assert "no correlated changes found in the requested time window" not in report.limitations
     assert "no meaningful correlated changes found in the requested time window" not in report.limitations
 
 
