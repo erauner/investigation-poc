@@ -38,7 +38,7 @@ def test_empty_related_data_note_uses_canonical_wording() -> None:
     related_data, note = _filter_related_data(report, [])
 
     assert related_data == []
-    assert note == "No meaningful related data found in the requested time window."
+    assert note == "no meaningful correlated changes found in the requested time window"
 
 
 def test_low_signal_service_diagnosis_is_inconclusive() -> None:

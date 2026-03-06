@@ -37,7 +37,7 @@ _VAGUE_WORKLOAD_TARGETS = {
 }
 
 _EMPTY_CORRELATION_LIMITATION = "no correlated changes found in the requested time window"
-_EMPTY_RELATED_DATA_NOTE = "No meaningful related data found in the requested time window."
+_EMPTY_RELATED_DATA_NOTE = "no meaningful correlated changes found in the requested time window"
 
 
 def _is_empty_correlation_limitation(value: str) -> bool:
