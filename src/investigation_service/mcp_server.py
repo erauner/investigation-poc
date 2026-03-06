@@ -4,6 +4,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .models import (
     CollectAlertContextRequest,
+    CollectCorrelatedChangesRequest,
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
@@ -11,6 +12,7 @@ from .models import (
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
 )
+from .correlation import collect_correlated_changes as collect_correlated_changes_impl
 from .reporting import build_root_cause_report as build_root_cause_report_impl
 from .tools import collect_alert_context as collect_alert_context_impl
 from .tools import collect_node_context as collect_node_context_impl
@@ -167,6 +169,29 @@ def build_root_cause_report(
             profile=profile,
             service_name=service_name,
             lookback_minutes=lookback_minutes,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def collect_correlated_changes(
+    target: str,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 60,
+    limit: int = 10,
+) -> dict:
+    """Collect bounded, ranked correlated changes for a normalized target."""
+    response = collect_correlated_changes_impl(
+        CollectCorrelatedChangesRequest(
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+            limit=limit,
         )
     )
     return response.model_dump(mode="json")

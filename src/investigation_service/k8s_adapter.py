@@ -210,6 +210,116 @@ def get_top_pods_for_node(node_name: str, limit: int = 5) -> list[dict]:
     return _top_pods_for_node(node_name=node_name, limit=limit)
 
 
+def get_pods_for_node(node_name: str, limit: int = 10) -> list[dict]:
+    ok, pods_json = _run_kubectl(["get", "pods", "-A", "--field-selector", f"spec.nodeName={node_name}", "-o", "json"])
+    if not ok:
+        return []
+    try:
+        items = json.loads(pods_json).get("items", [])
+    except json.JSONDecodeError:
+        return []
+
+    pods = [
+        {
+            "namespace": item.get("metadata", {}).get("namespace"),
+            "name": item.get("metadata", {}).get("name"),
+            "creationTimestamp": item.get("metadata", {}).get("creationTimestamp"),
+        }
+        for item in items
+    ]
+    pods.sort(key=lambda item: item.get("creationTimestamp") or "", reverse=True)
+    return pods[:limit]
+
+
+def get_events(
+    namespace: str | None,
+    involved_kind: str | None = None,
+    involved_name: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    args = ["get", "events", "-o", "json"]
+    if namespace:
+        args = ["-n", namespace, *args]
+    else:
+        args = ["-A", *args]
+    if involved_kind or involved_name:
+        selectors: list[str] = []
+        if involved_kind:
+            selectors.append(f"involvedObject.kind={involved_kind}")
+        if involved_name:
+            selectors.append(f"involvedObject.name={involved_name}")
+        args.extend(["--field-selector", ",".join(selectors)])
+    ok, output = _run_kubectl(args)
+    if not ok:
+        return []
+    try:
+        items = json.loads(output).get("items", [])
+    except json.JSONDecodeError:
+        return []
+
+    def timestamp(item: dict) -> str:
+        return (
+            item.get("eventTime")
+            or item.get("lastTimestamp")
+            or item.get("firstTimestamp")
+            or item.get("metadata", {}).get("creationTimestamp")
+            or ""
+        )
+
+    items.sort(key=timestamp, reverse=True)
+    return items[:limit]
+
+
+def get_service_related_deployments(namespace: str, service_name: str, limit: int = 5) -> list[dict]:
+    ok, service_json = _run_kubectl(["-n", namespace, "get", "service", service_name, "-o", "json"])
+    if not ok:
+        return []
+    try:
+        service = json.loads(service_json)
+    except json.JSONDecodeError:
+        return []
+
+    selector = service.get("spec", {}).get("selector", {}) or {}
+    if not selector:
+        return []
+
+    selector_items = set(selector.items())
+    ok, deployments_json = _run_kubectl(["-n", namespace, "get", "deployments", "-o", "json"])
+    if not ok:
+        return []
+    try:
+        deployments = json.loads(deployments_json).get("items", [])
+    except json.JSONDecodeError:
+        return []
+
+    related: list[dict] = []
+    for item in deployments:
+        template_labels = item.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {}) or {}
+        match_labels = item.get("spec", {}).get("selector", {}).get("matchLabels", {}) or {}
+        label_pool = dict(template_labels)
+        label_pool.update(match_labels)
+        if not selector_items.issubset(set(label_pool.items())):
+            continue
+        images = [
+            container.get("image")
+            for container in item.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+            if container.get("image")
+        ]
+        related.append(
+            {
+                "kind": "deployment",
+                "namespace": namespace,
+                "name": item.get("metadata", {}).get("name"),
+                "timestamp": item.get("metadata", {}).get("creationTimestamp")
+                or item.get("status", {}).get("conditions", [{}])[-1].get("lastUpdateTime"),
+                "images": images,
+            }
+        )
+
+    related.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
+    return related[:limit]
+
+
 def find_unhealthy_workloads(namespace: str, limit: int = 5) -> UnhealthyWorkloadsResponse:
     ok, pods_json = _run_kubectl(["-n", namespace, "get", "pods", "-o", "json"])
     if not ok:

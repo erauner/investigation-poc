@@ -82,6 +82,15 @@ class BuildRootCauseReportRequest(BaseModel):
     lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
 
 
+class CollectCorrelatedChangesRequest(BaseModel):
+    namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
+    target: str = Field(..., description="Target in form pod/name, deployment/name, service/name, or node/name")
+    profile: ProfileType = Field(default="workload", description="Investigation profile")
+    service_name: str | None = Field(default=None, description="Optional service name hint for service profile")
+    lookback_minutes: int = Field(default=60, ge=1, le=1440, description="Correlation window in minutes")
+    limit: int = Field(default=10, ge=1, le=25, description="Maximum correlated changes to return")
+
+
 class Finding(BaseModel):
     severity: Literal["info", "warning", "critical"]
     source: Literal["k8s", "events", "logs", "prometheus", "heuristic"]
@@ -134,6 +143,24 @@ class RootCauseReport(BaseModel):
     limitations: list[str]
     recommended_next_step: str
     suggested_follow_ups: list[str] = Field(default_factory=list)
+
+
+class CorrelatedChange(BaseModel):
+    timestamp: str
+    source: Literal["k8s_event", "rollout", "config_change", "argocd", "prometheus_rule"]
+    resource_kind: str
+    namespace: str | None = None
+    name: str
+    relation: Literal["direct", "same_workload", "same_service", "same_node", "namespace", "cluster"]
+    summary: str
+    confidence: ConfidenceType
+
+
+class CorrelatedChangesResponse(BaseModel):
+    scope: ScopeType
+    target: str
+    changes: list[CorrelatedChange]
+    limitations: list[str] = Field(default_factory=list)
 
 
 class InvestigationResponse(BaseModel):

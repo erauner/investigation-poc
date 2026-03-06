@@ -1,16 +1,20 @@
 import json
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
 from investigation_service.analysis import derive_findings
+from investigation_service.correlation import collect_correlated_changes
 from investigation_service.k8s_adapter import find_unhealthy_workloads as find_unhealthy_workloads_impl
 from investigation_service.k8s_adapter import get_k8s_object
 from investigation_service.main import app
 from investigation_service.models import (
     BuildRootCauseReportRequest,
     CollectAlertContextRequest,
+    CollectCorrelatedChangesRequest,
     CollectServiceContextRequest,
     CollectedContextResponse,
+    CorrelatedChangesResponse,
     Finding,
     RootCauseReport,
     TargetRef,
@@ -40,6 +44,10 @@ def _sample_response(target: TargetRef) -> CollectedContextResponse:
         limitations=["metric unavailable: service_latency_p95_seconds"],
         enrichment_hints=["service metrics unavailable; use observability MCP for logs, traces, or dashboards"],
     )
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def test_collect_context_accepts_profile_fields(monkeypatch) -> None:
@@ -447,6 +455,40 @@ def test_build_root_cause_report_route_returns_typed_report(monkeypatch) -> None
     assert body["confidence"] == "high"
 
 
+def test_collect_correlated_changes_route_returns_ranked_changes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.collect_correlated_changes",
+        lambda _req: CorrelatedChangesResponse(
+            scope="workload",
+            target="pod/crashy-abc123",
+            changes=[
+                {
+                    "timestamp": _now_iso(),
+                    "source": "k8s_event",
+                    "resource_kind": "pod",
+                    "namespace": "kagent-smoke",
+                    "name": "crashy-abc123",
+                    "relation": "direct",
+                    "summary": "BackOff: restarting failed container",
+                    "confidence": "high",
+                }
+            ],
+            limitations=[],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/collect_correlated_changes",
+        json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scope"] == "workload"
+    assert body["changes"][0]["relation"] == "direct"
+
+
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:
     findings = derive_findings(
         "workload",
@@ -605,6 +647,80 @@ def test_build_root_cause_report_from_request_canonicalizes_service_target(monke
     assert captured["service_name"] == "giraffe-kube-prometheus-st-prometheus"
     assert report.scope == "service"
     assert report.diagnosis == "High Service Latency"
+
+
+def test_collect_correlated_changes_ranks_direct_workload_events(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.correlation.get_events",
+        lambda **_kwargs: [
+                {
+                    "reason": "BackOff",
+                    "message": "Back-off restarting failed container",
+                    "lastTimestamp": _now_iso(),
+                "involvedObject": {"kind": "Pod", "name": "crashy-abc123", "namespace": "kagent-smoke"},
+                "metadata": {"namespace": "kagent-smoke"},
+            }
+        ],
+    )
+
+    response = collect_correlated_changes(
+        CollectCorrelatedChangesRequest(namespace="kagent-smoke", target="pod/crashy-abc123")
+    )
+
+    assert response.scope == "workload"
+    assert response.target == "pod/crashy-abc123"
+    assert response.changes[0].relation == "direct"
+    assert response.changes[0].confidence == "high"
+
+
+def test_collect_correlated_changes_infers_service_rollouts(monkeypatch) -> None:
+    monkeypatch.setattr("investigation_service.correlation.get_events", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "investigation_service.correlation.get_service_related_deployments",
+        lambda _namespace, _service_name: [
+            {
+                "kind": "deployment",
+                "namespace": "observability",
+                "name": "prometheus",
+                "timestamp": _now_iso(),
+                "images": ["prometheus:v1"],
+            }
+        ],
+    )
+
+    response = collect_correlated_changes(
+        CollectCorrelatedChangesRequest(
+            namespace="observability",
+            target="service/giraffe-kube-prometheus-st-prometheus",
+            profile="service",
+            service_name="giraffe-kube-prometheus-st-prometheus",
+        )
+    )
+
+    assert response.scope == "service"
+    assert response.changes[0].source == "rollout"
+    assert response.changes[0].relation == "same_service"
+
+
+def test_collect_correlated_changes_for_node_includes_recent_scheduling(monkeypatch) -> None:
+    monkeypatch.setattr("investigation_service.correlation.get_events", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "investigation_service.correlation.get_pods_for_node",
+        lambda _node_name, limit=10: [
+            {
+                "namespace": "default",
+                "name": "api-123",
+                "creationTimestamp": _now_iso(),
+            }
+        ],
+    )
+
+    response = collect_correlated_changes(
+        CollectCorrelatedChangesRequest(target="node/worker3", lookback_minutes=120)
+    )
+
+    assert response.scope == "node"
+    assert response.changes[0].relation == "same_node"
 
 
 def test_get_k8s_object_includes_pod_container_details(monkeypatch) -> None:

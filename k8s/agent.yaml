@@ -36,6 +36,7 @@ spec:
             - collect_workload_context
             - collect_alert_context
             - build_root_cause_report
+            - collect_correlated_changes
     a2aConfig:
       skills:
         - id: investigate-workload

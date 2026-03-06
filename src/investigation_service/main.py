@@ -2,11 +2,13 @@ from fastapi import FastAPI
 
 from .models import (
     CollectAlertContextRequest,
+    CollectCorrelatedChangesRequest,
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
     BuildRootCauseReportRequest,
     CollectedContextResponse,
+    CorrelatedChangesResponse,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     InvestigateRequest,
@@ -15,6 +17,7 @@ from .models import (
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
+from .correlation import collect_correlated_changes
 from .reporting import build_root_cause_report as build_root_cause_report_from_request
 from .synthesis import build_root_cause_report
 from .tools import collect_alert_context, collect_node_context, collect_service_context, collect_workload_context, find_unhealthy_pod, find_unhealthy_workloads, normalize_alert_input
@@ -65,6 +68,11 @@ def find_unhealthy_single(req: FindUnhealthyPodRequest) -> UnhealthyPodResponse:
 @app.post("/tools/build_root_cause_report", response_model=RootCauseReport)
 def build_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
     return build_root_cause_report_from_request(req)
+
+
+@app.post("/tools/collect_correlated_changes", response_model=CorrelatedChangesResponse)
+def collect_related(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
+    return collect_correlated_changes(req)
 
 
 @app.post("/investigate", response_model=InvestigationResponse)
