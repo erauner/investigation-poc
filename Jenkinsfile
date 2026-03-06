@@ -10,6 +10,21 @@ spec:
       image: python:3.12-alpine
       command: ["cat"]
       tty: true
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+    - name: jnlp
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
 '''
         }
     }
