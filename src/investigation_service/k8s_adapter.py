@@ -100,6 +100,7 @@ def get_k8s_object(target: TargetRef) -> dict:
 
     metadata = parsed.get("metadata", {})
     status = parsed.get("status", {})
+    spec = parsed.get("spec", {})
     response = {
         "namespace": target.namespace,
         "kind": target.kind,
@@ -110,6 +111,33 @@ def get_k8s_object(target: TargetRef) -> dict:
         "observedGeneration": status.get("observedGeneration"),
         "creationTimestamp": metadata.get("creationTimestamp"),
     }
+    if target.kind == "pod":
+        container_details: list[dict] = []
+        status_by_name = {
+            item.get("name"): item for item in status.get("containerStatuses", []) if item.get("name")
+        }
+        for container in spec.get("containers", []):
+            name = container.get("name")
+            container_status = status_by_name.get(name, {})
+            last_terminated = container_status.get("lastState", {}).get("terminated", {}) or {}
+            waiting_state = container_status.get("state", {}).get("waiting", {}) or {}
+            running_state = container_status.get("state", {}).get("running", {}) or {}
+            container_details.append(
+                {
+                    "name": name,
+                    "ready": container_status.get("ready"),
+                    "restartCount": container_status.get("restartCount", 0),
+                    "image": container.get("image"),
+                    "command": container.get("command", []),
+                    "args": container.get("args", []),
+                    "waitingReason": waiting_state.get("reason"),
+                    "lastTerminationReason": last_terminated.get("reason"),
+                    "lastTerminationExitCode": last_terminated.get("exitCode"),
+                    "lastTerminationMessage": last_terminated.get("message"),
+                    "startedAt": running_state.get("startedAt"),
+                }
+            )
+        response["containers"] = container_details
     if target.kind == "node":
         response["conditions"] = status.get("conditions", [])
         response["allocatable"] = status.get("allocatable", {})
@@ -342,7 +370,21 @@ def get_pod_logs(target: TargetRef, tail: int = 200) -> str:
     ok, output = _run_kubectl(
         ["-n", target.namespace, "logs", pod_name, "--tail", str(tail), "--timestamps=true"]
     )
-    if not ok:
+    current_logs = output.strip() if ok else ""
+
+    previous_ok, previous_output = _run_kubectl(
+        ["-n", target.namespace, "logs", pod_name, "--previous", "--tail", str(tail), "--timestamps=true"]
+    )
+    previous_logs = previous_output.strip() if previous_ok else ""
+
+    if not ok and not previous_ok:
         return f"log query failed: {output}"
 
-    return output.strip()
+    if current_logs and previous_logs:
+        return f"{current_logs}\n--- previous container logs ---\n{previous_logs}"
+    if previous_logs:
+        return previous_logs
+    if current_logs:
+        return current_logs
+
+    return ""

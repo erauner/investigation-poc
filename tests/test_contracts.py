@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from investigation_service.analysis import derive_findings
 from investigation_service.k8s_adapter import find_unhealthy_workloads as find_unhealthy_workloads_impl
+from investigation_service.k8s_adapter import get_k8s_object
 from investigation_service.main import app
 from investigation_service.models import (
     CollectAlertContextRequest,
@@ -410,3 +411,70 @@ def test_node_findings_distinguish_request_saturation_from_pressure() -> None:
 
     saturation_finding = next(item for item in findings if item.title == "High Node Memory Request Saturation")
     assert "request saturation more than active node memory pressure" in saturation_finding.evidence
+
+
+def test_workload_findings_include_container_restart_details() -> None:
+    findings = derive_findings(
+        "workload",
+        {
+            "kind": "pod",
+            "containers": [
+                {
+                    "name": "crashy",
+                    "waitingReason": "CrashLoopBackOff",
+                    "lastTerminationReason": "Error",
+                    "lastTerminationExitCode": 1,
+                    "command": ["sh", "-c"],
+                    "args": ["echo starting && sleep 2 && exit 1"],
+                }
+            ],
+        },
+        [],
+        "starting",
+        {
+            "pod_restart_rate": 0.1,
+        },
+    )
+
+    detail_finding = next(item for item in findings if item.title == "Container Restart Failure Details")
+    assert "exit code=1" in detail_finding.evidence
+    assert "command='sh -c echo starting && sleep 2 && exit 1'" in detail_finding.evidence
+
+
+def test_get_k8s_object_includes_pod_container_details(monkeypatch) -> None:
+    payload = {
+        "metadata": {"name": "crashy-abc123", "creationTimestamp": "2026-03-06T00:00:00Z"},
+        "spec": {
+            "containers": [
+                {
+                    "name": "crashy",
+                    "image": "busybox:1.36",
+                    "command": ["sh", "-c"],
+                    "args": ["echo starting && sleep 2 && exit 1"],
+                }
+            ]
+        },
+        "status": {
+            "phase": "Running",
+            "containerStatuses": [
+                {
+                    "name": "crashy",
+                    "ready": False,
+                    "restartCount": 12,
+                    "state": {"waiting": {"reason": "CrashLoopBackOff"}},
+                    "lastState": {"terminated": {"reason": "Error", "exitCode": 1}},
+                }
+            ]
+        },
+    }
+
+    monkeypatch.setattr(
+        "investigation_service.k8s_adapter._run_kubectl",
+        lambda _args: (True, json.dumps(payload)),
+    )
+
+    result = get_k8s_object(TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-abc123"))
+
+    assert result["containers"][0]["lastTerminationExitCode"] == 1
+    assert result["containers"][0]["waitingReason"] == "CrashLoopBackOff"
+    assert result["containers"][0]["command"] == ["sh", "-c"]

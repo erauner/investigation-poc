@@ -71,6 +71,33 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
     if object_state.get("kind") == "node":
         findings.extend(_derive_node_findings(object_state, metrics))
 
+    containers = object_state.get("containers", [])
+    for container in containers:
+        exit_code = container.get("lastTerminationExitCode")
+        termination_reason = container.get("lastTerminationReason")
+        waiting_reason = container.get("waitingReason")
+        command = container.get("command", [])
+        args = container.get("args", [])
+        if exit_code is not None or termination_reason or waiting_reason:
+            command_text = " ".join([*command, *args]).strip()
+            evidence_parts = []
+            if waiting_reason:
+                evidence_parts.append(f"waiting reason={waiting_reason}")
+            if termination_reason:
+                evidence_parts.append(f"last termination reason={termination_reason}")
+            if exit_code is not None:
+                evidence_parts.append(f"exit code={exit_code}")
+            if command_text:
+                evidence_parts.append(f"command='{command_text}'")
+            findings.append(
+                Finding(
+                    severity="critical" if waiting_reason == "CrashLoopBackOff" else "warning",
+                    source="k8s",
+                    title="Container Restart Failure Details",
+                    evidence=", ".join(evidence_parts),
+                )
+            )
+
     event_blob = "\n".join(events).lower()
     if "crashloopbackoff" in event_blob or "backoff" in event_blob:
         findings.append(
