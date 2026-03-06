@@ -150,6 +150,16 @@ def _derive_likely_cause(scope: str, lead) -> str | None:
     return lead.title
 
 
+def _diagnosis_text(scope: str, lead, limitations: list[str]) -> str:
+    if (
+        scope == "service"
+        and lead.title == "No Critical Signals Found"
+        and any("metric unavailable:" in item for item in limitations)
+    ):
+        return "Service Signals Inconclusive"
+    return lead.title
+
+
 def _recommended_next_step(scope: str, profile: str) -> str:
     if scope == "service":
         return "Inspect service dashboards, recent deploys, and upstream or downstream dependencies before changing traffic handling."
@@ -223,7 +233,7 @@ def build_root_cause_report(
     return RootCauseReport(
         scope=scope,
         target=f"{context.target.kind}/{context.target.name}",
-        diagnosis=lead.title,
+        diagnosis=_diagnosis_text(scope, lead, context.limitations),
         likely_cause=_derive_likely_cause(scope, lead),
         confidence=_select_confidence(scope, lead, context.limitations),
         evidence=_selected_evidence(evidence_items),
