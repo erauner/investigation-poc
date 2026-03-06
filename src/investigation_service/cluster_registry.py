@@ -55,6 +55,16 @@ def _registry_file() -> dict:
         return {}
 
 
+def _resolved_kubeconfig_path() -> str | None:
+    path = get_kubeconfig_path()
+    if not path:
+        return None
+    candidate = Path(path)
+    if not candidate.exists() or not candidate.is_file():
+        return None
+    return str(candidate)
+
+
 def load_cluster_registry() -> ClusterRegistry:
     raw = _registry_file()
     clusters: dict[str, ClusterConfig] = {}
@@ -85,7 +95,7 @@ def _resolve_registered_cluster(config: ClusterConfig, source: str) -> ResolvedC
     return ResolvedCluster(
         alias=config.alias,
         kube_context=config.kube_context,
-        kubeconfig_path=get_kubeconfig_path(),
+        kubeconfig_path=_resolved_kubeconfig_path(),
         prometheus_url=config.prometheus_url or get_prometheus_url(),
         source=source,
         allowed_namespaces=config.allowed_namespaces,
@@ -96,7 +106,7 @@ def _legacy_cluster() -> ResolvedCluster:
     return ResolvedCluster(
         alias=_normalize_alias(get_cluster_name()) or "current-context",
         kube_context=None,
-        kubeconfig_path=get_kubeconfig_path(),
+        kubeconfig_path=_resolved_kubeconfig_path(),
         prometheus_url=get_prometheus_url(),
         source="legacy_current_context",
         allowed_namespaces=None,
