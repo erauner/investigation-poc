@@ -71,6 +71,33 @@ Or one-shot:
 OPENAI_API_KEY=sk-... make kind-smoke-loop
 ```
 
+## Use from Claude Code
+
+After `make kind-install-kagent`, port-forward the controller MCP endpoint:
+
+```bash
+./scripts/port-forward-controller-mcp.sh
+```
+
+This repo includes a local Claude Code MCP config in [.mcp.json](/Users/erauner/git/side/investigation-poc/.mcp.json) that points at `http://127.0.0.1:8083/mcp`.
+
+From the repo root, launch Claude Code:
+
+```bash
+claude
+```
+
+Suggested smoke test prompts:
+
+```text
+Use the kagent MCP server to list available agents and show their names.
+```
+
+```text
+Use the kagent MCP server to invoke kagent/investigation-agent.
+Task: Investigate the unhealthy pod in namespace kagent-smoke and return Diagnosis, Evidence, Recommendation.
+```
+
 To prove the custom MCP tool is in the loop, run:
 
 ```bash
