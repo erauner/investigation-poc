@@ -148,6 +148,15 @@ def _align_normalized_request_with_context(
 ) -> NormalizedInvestigationRequest:
     target_ref = getattr(context, "target", None)
     target_kind = getattr(target_ref, "kind", None)
+    if target_kind == "pod" and normalized.target.startswith("pod/") and normalized.target != f"pod/{target_ref.name}":
+        notes = list(normalized.normalization_notes)
+        notes.append(f"resolved pod target to {target_ref.name}")
+        return normalized.model_copy(
+            update={
+                "target": f"pod/{target_ref.name}",
+                "normalization_notes": notes,
+            }
+        )
     if target_kind != "service" or normalized.scope == "service":
         return normalized
 
