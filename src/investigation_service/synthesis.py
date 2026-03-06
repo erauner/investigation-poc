@@ -62,6 +62,13 @@ def _request_scope(request: NormalizedInvestigationRequest | CollectContextReque
     return scope_from_target(request.target, request.profile), request.profile
 
 
+def _requested_target_kind(request: NormalizedInvestigationRequest | CollectContextRequest) -> str | None:
+    target = request.target
+    if "/" not in target:
+        return None
+    return target.split("/", 1)[0].strip().lower() or None
+
+
 def _finding_score(scope: str, finding) -> int:
     return (
         _SEVERITY_PRIORITY.get(finding.severity, 0)
@@ -226,16 +233,21 @@ def build_root_cause_report(
     context: CollectedContextResponse, request: NormalizedInvestigationRequest | CollectContextRequest
 ) -> RootCauseReport:
     scope, profile = _request_scope(request)
+    requested_target_kind = _requested_target_kind(request)
     ranked_findings = _ranked_findings(context, scope)
     lead = ranked_findings[0]
     evidence_items = build_primary_evidence(context, scope)
+    likely_cause = _derive_likely_cause(scope, lead)
+
+    if requested_target_kind == "pod" and lead.title == "Crash Loop Detected":
+        likely_cause = "The pod is repeatedly failing shortly after start, so Kubernetes is backing off restarts."
 
     return RootCauseReport(
         cluster=context.cluster,
         scope=scope,
         target=f"{context.target.kind}/{context.target.name}",
         diagnosis=_diagnosis_text(scope, lead, context.limitations),
-        likely_cause=_derive_likely_cause(scope, lead),
+        likely_cause=likely_cause,
         confidence=_select_confidence(scope, lead, context.limitations),
         evidence=_selected_evidence(evidence_items),
         evidence_items=evidence_items,

@@ -191,14 +191,12 @@ def derive_findings(profile: str, object_state: dict, events: list[str], logs: s
 
     if object_state.get("kind") == "node":
         findings.extend(_derive_node_findings(object_state, metrics))
-        findings.extend(_derive_pipeline_findings(metrics))
     elif profile == "service":
         findings.extend(_derive_service_findings(metrics))
     elif profile == "otel-pipeline":
         findings.extend(_derive_pipeline_findings(metrics))
     else:
         findings.extend(_derive_workload_findings(object_state, events, logs, metrics))
-        findings.extend(_derive_pipeline_findings(metrics))
 
     if not findings:
         findings.append(
