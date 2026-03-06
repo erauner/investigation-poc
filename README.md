@@ -49,9 +49,6 @@ make kind-up
 # 2) Install kagent + service + agent
 OPENAI_API_KEY=sk-... make kind-install-kagent
 
-# 3) Start local MCP wrapper (separate terminal)
-make run-mcp
-
 # 3) Run smoke test loop (apply workload, invoke agent, cleanup)
 make kagent-smoke-loop
 
@@ -72,3 +69,6 @@ make kagent-smoke-apply
 make kagent-smoke-test TASK="Before answering, call functions.collect_workload_context exactly once with namespace kagent-smoke and target pod/crashy. Then return Diagnosis, Evidence, Recommendation."
 make kagent-smoke-clean
 ```
+
+Optional fast-loop mode: run `make run-mcp` and patch `k8s/investigation-remotemcpserver.yaml`
+to `host.docker.internal:8001` if you want host-run MCP iteration.

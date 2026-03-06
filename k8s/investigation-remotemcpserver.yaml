@@ -4,9 +4,9 @@ metadata:
   name: investigation-mcp-server
   namespace: kagent
 spec:
-  description: Local MCP wrapper for investigation-service context collection
+  description: In-cluster MCP wrapper for investigation-service context collection
   protocol: STREAMABLE_HTTP
-  url: http://host.docker.internal:8001/mcp
+  url: http://investigation-mcp-server.kagent:8001/mcp
   timeout: 30s
   sseReadTimeout: 5m
   terminateOnClose: true

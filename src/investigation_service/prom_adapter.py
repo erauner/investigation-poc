@@ -1,6 +1,7 @@
 import json
 import urllib.parse
 import urllib.request
+from urllib.error import URLError
 
 from .settings import get_prometheus_url
 
@@ -10,8 +11,11 @@ def query_instant(query: str) -> float | None:
     params = urllib.parse.urlencode({"query": query})
     url = f"{base_url}/api/v1/query?{params}"
 
-    with urllib.request.urlopen(url, timeout=5) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(url, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError):
+        return None
 
     if payload.get("status") != "success":
         return None
@@ -28,7 +32,7 @@ def query_instant(query: str) -> float | None:
 
 
 def collect_core_service_metrics() -> dict:
-    return {
+    metrics = {
         "prometheus_url": get_prometheus_url(),
         "accepted_spans_per_sec": query_instant("sum(rate(otelcol_receiver_accepted_spans_total[1m]))"),
         "accepted_logs_per_sec": query_instant("sum(rate(otelcol_receiver_accepted_log_records_total[1m]))"),
@@ -37,3 +41,13 @@ def collect_core_service_metrics() -> dict:
         ),
         "up_targets": query_instant("sum(up)"),
     }
+    metrics["prometheus_available"] = any(
+        metrics[key] is not None
+        for key in (
+            "accepted_spans_per_sec",
+            "accepted_logs_per_sec",
+            "accepted_metric_points_per_sec",
+            "up_targets",
+        )
+    )
+    return metrics

@@ -90,6 +90,7 @@ kind-install-kagent:
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-controller --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-ui --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-service --timeout=180s
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-mcp-server --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/investigation-agent --timeout=180s
 
 kind-setup:
