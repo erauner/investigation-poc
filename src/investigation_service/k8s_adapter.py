@@ -20,7 +20,16 @@ def resolve_target(namespace: str, target: str) -> TargetRef:
             kind = "pod"
         return TargetRef(namespace=namespace or None, kind=kind, name=name)
 
-    return TargetRef(namespace=namespace or None, kind="pod", name=target)
+    normalized_namespace = namespace or None
+    if normalized_namespace:
+        if _resource_exists(normalized_namespace, "pod", target):
+            return TargetRef(namespace=normalized_namespace, kind="pod", name=target)
+        if _resource_exists(normalized_namespace, "deployment", target):
+            return TargetRef(namespace=normalized_namespace, kind="deployment", name=target)
+        if _resource_exists(normalized_namespace, "service", target):
+            return TargetRef(namespace=normalized_namespace, kind="service", name=target)
+
+    return TargetRef(namespace=normalized_namespace, kind="pod", name=target)
 
 
 def _run_kubectl(args: list[str]) -> tuple[bool, str]:
@@ -400,24 +409,26 @@ def find_unhealthy_workloads(namespace: str, limit: int = 5) -> UnhealthyWorkloa
 
 
 def get_related_events(target: TargetRef, limit: int = 20) -> list[str]:
-    names = [target.name]
+    event_targets: list[tuple[str | None, str]] = [(target.kind.capitalize(), target.name)]
     if target.kind == "deployment":
         pod_name = _first_pod_for_deployment(target.namespace, target.name)
         if pod_name:
-            names.append(pod_name)
+            event_targets.append(("Pod", pod_name))
 
     lines: list[str] = []
-    for name in names:
+    for kind, name in event_targets:
         args = [
             "get",
             "events",
             "--sort-by=.lastTimestamp",
-            "--field-selector",
-            f"involvedObject.name={name}",
             "-o",
             "custom-columns=TYPE:.type,REASON:.reason,MESSAGE:.message",
             "--no-headers",
         ]
+        selectors = [f"involvedObject.name={name}"]
+        if kind:
+            selectors.append(f"involvedObject.kind={kind}")
+        args.extend(["--field-selector", ",".join(selectors)])
         if target.namespace:
             args = ["-n", target.namespace, *args]
         else:
