@@ -1,4 +1,5 @@
 from .correlation import collect_correlated_changes
+from .guidelines import load_guideline_rules, resolve_guidelines
 from .models import (
     BuildRootCauseReportRequest,
     CollectAlertContextRequest,
@@ -11,12 +12,12 @@ from .models import (
     InvestigationReport,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
+    ResolvedGuideline,
     RootCauseReport,
 )
+from .routing import canonical_target, scope_from_target
 from .synthesis import build_root_cause_report as build_root_cause_report_impl
 from .tools import (
-    _canonical_target,
-    _scope_from_target,
     collect_node_context,
     collect_service_context,
     collect_workload_context,
@@ -61,8 +62,8 @@ def _normalized_request(req: InvestigationReportRequest) -> NormalizedInvestigat
     if not req.target:
         raise ValueError("target is required when alertname is not supplied")
 
-    target = _canonical_target(req.target, req.profile, req.service_name)
-    scope = _scope_from_target(target, req.profile)
+    target = canonical_target(req.target, req.profile, req.service_name)
+    scope = scope_from_target(target, req.profile)
     return NormalizedInvestigationRequest(
         source="manual",
         scope=scope,
@@ -140,6 +141,68 @@ def _filter_related_data(report: RootCauseReport, changes: list[CorrelatedChange
     return [], "no meaningful correlated changes found in the requested time window"
 
 
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _base_investigation_report(root_cause: RootCauseReport) -> InvestigationReport:
+    return InvestigationReport(
+        scope=root_cause.scope,
+        target=root_cause.target,
+        diagnosis=root_cause.diagnosis,
+        likely_cause=root_cause.likely_cause,
+        confidence=root_cause.confidence,
+        evidence=root_cause.evidence,
+        evidence_items=root_cause.evidence_items,
+        related_data=[],
+        related_data_note=None,
+        limitations=root_cause.limitations,
+        recommended_next_step=root_cause.recommended_next_step,
+        suggested_follow_ups=root_cause.suggested_follow_ups,
+        guidelines=[],
+        normalization_notes=[],
+    )
+
+
+def _apply_guidelines(
+    root_cause: RootCauseReport,
+    *,
+    alertname: str | None,
+    namespace: str | None,
+    service_name: str | None,
+) -> tuple[str, list[str], list[ResolvedGuideline], list[str]]:
+    base_report = _base_investigation_report(root_cause)
+    rules, load_limitations = load_guideline_rules()
+    resolved = resolve_guidelines(
+        rules,
+        base_report,
+        alertname=alertname,
+        namespace=namespace,
+        service_name=service_name,
+    )
+    if not resolved:
+        return root_cause.recommended_next_step, list(root_cause.suggested_follow_ups), [], load_limitations
+
+    recommended_next_step = next(
+        (item.text for item in resolved if item.category == "next_step"),
+        root_cause.recommended_next_step,
+    )
+    suggested_follow_ups = list(root_cause.suggested_follow_ups)
+    for item in resolved:
+        if item.category == "next_step" and item.text == recommended_next_step:
+            continue
+        suggested_follow_ups.append(item.text)
+
+    return recommended_next_step, _dedupe_preserving_order(suggested_follow_ups), resolved, load_limitations
+
+
 def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
     report = build_investigation_report(
         InvestigationReportRequest(
@@ -173,7 +236,13 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
     related_data: list[CorrelatedChange] = []
     related_data_note: str | None = None
     limitations = list(root_cause.limitations)
-    suggested_follow_ups = list(root_cause.suggested_follow_ups)
+    recommended_next_step, suggested_follow_ups, guidelines, guideline_limitations = _apply_guidelines(
+        root_cause,
+        alertname=req.alertname,
+        namespace=normalized.namespace,
+        service_name=normalized.service_name,
+    )
+    limitations.extend(guideline_limitations)
 
     if req.include_related_data:
         correlated = collect_correlated_changes(
@@ -208,7 +277,8 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
         related_data=related_data,
         related_data_note=related_data_note,
         limitations=sorted(set(limitations)),
-        recommended_next_step=root_cause.recommended_next_step,
-        suggested_follow_ups=sorted(set(suggested_follow_ups)),
+        recommended_next_step=recommended_next_step,
+        suggested_follow_ups=_dedupe_preserving_order(suggested_follow_ups),
+        guidelines=guidelines,
         normalization_notes=normalized.normalization_notes,
     )

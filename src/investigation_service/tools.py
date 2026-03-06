@@ -23,6 +23,8 @@ from .models import (
     UnhealthyWorkloadsResponse,
 )
 from .prom_adapter import collect_metrics_for_scope
+from .routing import canonical_target as _canonical_target
+from .routing import scope_from_target as _scope_from_target
 from .settings import get_default_lookback_minutes, get_log_tail_lines
 
 
@@ -65,30 +67,6 @@ def _infer_target_from_text(text: str | None) -> str | None:
         if match:
             return f"{kind}/{match.group(1)}"
     return None
-
-
-def _scope_from_target(target: str, profile: str) -> ScopeType:
-    if target.startswith("node/"):
-        return "node"
-    if target.startswith("service/") or profile == "service":
-        return "service"
-    if profile == "otel-pipeline":
-        return "otel-pipeline"
-    return "workload"
-
-
-def _canonical_target(target: str, profile: str, service_name: str | None = None) -> str:
-    normalized_target = target.strip()
-    if not normalized_target:
-        return normalized_target
-    if normalized_target.startswith(("pod/", "deployment/", "service/", "node/")):
-        return normalized_target
-    scope = _scope_from_target(normalized_target, profile)
-    if scope == "service":
-        return f"service/{service_name or normalized_target}"
-    if scope == "node":
-        return f"node/{normalized_target}"
-    return normalized_target
 
 
 def _build_enrichment_hints(

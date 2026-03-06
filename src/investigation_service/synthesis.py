@@ -8,7 +8,7 @@ from .models import (
     NormalizedInvestigationRequest,
     RootCauseReport,
 )
-from .tools import _scope_from_target
+from .routing import scope_from_target
 
 _SOURCE_PRIORITY = {
     "k8s": 50,
@@ -58,7 +58,7 @@ _SEVERITY_PRIORITY = {
 def _request_scope(request: NormalizedInvestigationRequest | CollectContextRequest) -> tuple[str, str]:
     if isinstance(request, NormalizedInvestigationRequest):
         return request.scope, request.profile
-    return _scope_from_target(request.target, request.profile), request.profile
+    return scope_from_target(request.target, request.profile), request.profile
 
 
 def _finding_score(scope: str, finding) -> int:

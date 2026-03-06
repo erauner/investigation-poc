@@ -20,12 +20,19 @@ spec:
         - name: api
           image: ghcr.io/erauner/investigation-poc:latest
           imagePullPolicy: Always
+          env:
+            - name: GUIDELINES_PATH
+              value: /etc/investigation-service/guidelines.yaml
           ports:
             - name: http
               containerPort: 8080
           envFrom:
             - configMapRef:
                 name: investigation-service-config
+          volumeMounts:
+            - name: guidelines
+              mountPath: /etc/investigation-service
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -45,3 +52,7 @@ spec:
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20
+      volumes:
+        - name: guidelines
+          configMap:
+            name: investigation-service-guidelines

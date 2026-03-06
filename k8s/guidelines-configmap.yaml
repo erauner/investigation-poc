@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: investigation-service-guidelines
+  namespace: kagent
+data:
+  guidelines.yaml: |-
+    guidelines:
+      - id: service-envoy-high-error-rate
+        priority: 300
+        match:
+          scope: service
+          alertname: EnvoyHighErrorRate
+          namespace: kagent
+          service_name: kagent-controller
+        actions:
+          - category: next_step
+            text: Inspect recent rollout and upstream dependency health before reading workload logs.
+            source: homelab
+          - category: data_source
+            text: Prefer service dashboards and traces before kubectl logs for this service.
+            source: homelab
+      - id: service-medium-confidence-observability
+        priority: 180
+        match:
+          scope: service
+          confidence: medium
+        actions:
+          - category: delegation
+            text: If service confidence remains medium after the first pass, use observability tooling before taking write actions.
+            agent: observability
+            source: homelab
+      - id: node-safety-default
+        priority: 120
+        match:
+          scope: node
+        actions:
+          - category: safety
+            text: Avoid recommending node restarts or drains until current workload placement and redundancy are confirmed.
+            source: homelab

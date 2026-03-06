@@ -35,3 +35,17 @@ def get_action_mode() -> str:
     if raw in {"disabled", "proposal-only"}:
         return raw
     return "disabled"
+
+
+def get_guidelines_enabled() -> bool:
+    raw = os.getenv("GUIDELINES_ENABLED", "true").strip().lower()
+    return raw not in {"false", "0", "no", "off"}
+
+
+def get_guidelines_path() -> str:
+    return os.getenv("GUIDELINES_PATH", "/etc/investigation-service/guidelines.yaml")
+
+
+def get_cluster_name() -> str | None:
+    value = os.getenv("CLUSTER_NAME", "").strip()
+    return value or None

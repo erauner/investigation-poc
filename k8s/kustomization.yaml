@@ -6,6 +6,7 @@ resources:
   - clusterrole.yaml
   - clusterrolebinding.yaml
   - configmap.yaml
+  - guidelines-configmap.yaml
   - investigation-skill-configmap.yaml
   - investigation-remotemcpserver.yaml
   - mcp-deployment.yaml

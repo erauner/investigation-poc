@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 ProfileType = Literal["workload", "service", "otel-pipeline"]
 ScopeType = Literal["workload", "service", "node", "otel-pipeline"]
 ConfidenceType = Literal["low", "medium", "high"]
+GuidelineCategory = Literal["interpretation", "data_source", "next_step", "delegation", "safety"]
 
 
 class TargetRef(BaseModel):
@@ -108,6 +109,42 @@ class InvestigationReportRequest(BaseModel):
     node_name: str | None = Field(default=None, description="Optional node override for alert-shaped node investigations")
 
 
+class GuidelineMatch(BaseModel):
+    scope: ScopeType | None = None
+    alertname: str | None = None
+    namespace: str | None = None
+    service_name: str | None = None
+    target_kind: str | None = None
+    target_name: str | None = None
+    diagnosis: str | None = None
+    cluster: str | None = None
+    confidence: ConfidenceType | None = None
+
+
+class GuidelineAction(BaseModel):
+    category: GuidelineCategory
+    text: str
+    agent: str | None = None
+    source: str | None = None
+
+
+class GuidelineRule(BaseModel):
+    id: str
+    priority: int = Field(default=100, ge=0, le=1000)
+    match: GuidelineMatch = Field(default_factory=GuidelineMatch)
+    actions: list[GuidelineAction] = Field(default_factory=list)
+
+
+class ResolvedGuideline(BaseModel):
+    id: str
+    category: GuidelineCategory
+    text: str
+    matched_on: list[str] = Field(default_factory=list)
+    priority: int
+    source: str | None = None
+    agent: str | None = None
+
+
 class Finding(BaseModel):
     severity: Literal["info", "warning", "critical"]
     source: Literal["k8s", "events", "logs", "prometheus", "heuristic"]
@@ -204,6 +241,7 @@ class InvestigationReport(BaseModel):
     limitations: list[str] = Field(default_factory=list)
     recommended_next_step: str
     suggested_follow_ups: list[str] = Field(default_factory=list)
+    guidelines: list[ResolvedGuideline] = Field(default_factory=list)
     normalization_notes: list[str] = Field(default_factory=list)
 
 

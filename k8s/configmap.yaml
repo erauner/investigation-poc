@@ -4,5 +4,6 @@ metadata:
   name: investigation-service-config
   namespace: kagent
 data:
+  CLUSTER_NAME: local-kind
   PROMETHEUS_URL: http://prometheus:9090
   LOG_TAIL_LINES: "200"

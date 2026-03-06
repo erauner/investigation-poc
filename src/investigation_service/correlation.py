@@ -10,7 +10,7 @@ from .k8s_adapter import (
     resolve_target,
 )
 from .models import CollectCorrelatedChangesRequest, CorrelatedChange, CorrelatedChangesResponse
-from .tools import _canonical_target, _scope_from_target
+from .routing import canonical_target, scope_from_target
 
 
 def _parse_timestamp(raw: str | None) -> datetime | None:
@@ -218,8 +218,8 @@ def _node_changes(target, lookback_minutes: int, anchor_timestamp: str | None) -
 
 
 def collect_correlated_changes(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
-    target_text = _canonical_target(req.target, req.profile, req.service_name)
-    scope = _scope_from_target(target_text, req.profile)
+    target_text = canonical_target(req.target, req.profile, req.service_name)
+    scope = scope_from_target(target_text, req.profile)
     resolved = resolve_runtime_target(resolve_target(req.namespace, target_text))
     changes: list[CorrelatedChange] = []
     limitations: list[str] = []

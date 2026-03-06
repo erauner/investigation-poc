@@ -22,6 +22,8 @@ spec:
           imagePullPolicy: Always
           command: ["python", "-m", "investigation_service.mcp_server"]
           env:
+            - name: GUIDELINES_PATH
+              value: /etc/investigation-service/guidelines.yaml
             - name: MCP_HOST
               value: "0.0.0.0"
             - name: MCP_PORT
@@ -31,6 +33,10 @@ spec:
           envFrom:
             - configMapRef:
                 name: investigation-service-config
+          volumeMounts:
+            - name: guidelines
+              mountPath: /etc/investigation-service
+              readOnly: true
           ports:
             - name: mcp
               containerPort: 8001
@@ -41,3 +47,7 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: guidelines
+          configMap:
+            name: investigation-service-guidelines
