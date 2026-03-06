@@ -9,6 +9,13 @@ make install
 make run
 ```
 
+By default, Prometheus is read from `http://localhost:9090`.
+Override if needed:
+
+```bash
+PROMETHEUS_URL=http://localhost:9090 make run
+```
+
 ## Test
 
 ```bash
