@@ -4,6 +4,19 @@ This directory contains a thin MCP Bundle client for Claude Desktop.
 
 It does not reimplement the investigation logic. It runs a local Node MCP server over stdio and forwards high-level requests to the `kagent-controller` MCP endpoint, which then invokes the investigation agent behind the scenes.
 
+## Which MCP server this uses
+
+This extension is intentionally pointed at the controller MCP endpoint, not the raw investigation tool server.
+
+- `kagent-controller` is the published, user-facing MCP surface. It exposes controller tools such as `list_agents` and `invoke_agent`.
+- `investigation-mcp-server` is the lower-level MCP server that lives behind the custom agent. It exposes the investigation tools consumed by the agent inside the cluster.
+
+The extension follows the product path:
+
+`Claude Desktop -> local .mcpb proxy -> kagent-controller -> homelab-k8s-custom-agent -> investigation-mcp-server`
+
+That is why `remote_mcp_url` should point at the controller route, for example `https://kagent-mcp.erauner.dev/mcp`.
+
 ## Why this exists
 
 - `Claude Code` is already easiest through repo-local `.mcp.json` or a managed remote MCP config.

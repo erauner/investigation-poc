@@ -63,6 +63,19 @@ kubectl apply -k k8s-overlays/local-kind
 This applies the MCP server path used by the agent (`RemoteMCPServer -> investigation-mcp-server`).
 The legacy HTTP debug API manifests are isolated in `k8s/optional-http/`.
 
+## MCP topology
+
+There are two different MCP surfaces in this setup, and they serve different roles:
+
+- `investigation-mcp-server`: the repo-local tool server defined in `k8s/`. It exposes the low-level investigation tools that the custom agent uses behind the scenes.
+- `kagent-controller`: the higher-level controller MCP endpoint. It exposes agent-oriented tools such as `list_agents` and `invoke_agent`.
+
+That distinction matters for clients:
+
+- `Claude Code` can talk directly to the controller MCP endpoint and then invoke `kagent/homelab-k8s-custom-agent`.
+- The `Claude Desktop` extension in this repo is intentionally controller-backed. It does not call raw investigation tools directly; it talks to the controller MCP endpoint and lets the controller invoke the custom agent.
+- The raw `investigation-mcp-server` is still the correct backend surface for the agent itself and for lower-level debugging inside the cluster.
+
 ## Repeatable local kind flow
 
 ```bash
@@ -154,7 +167,7 @@ make kind-enable-http-debug
 
 This repo now also includes a Desktop packaging path in [desktop-extension/README.md](/Users/erauner/git/side/investigation-poc/desktop-extension/README.md).
 
-Use that path when you want Claude Desktop to reach a remote MCP server through an installable `.mcpb` bundle. The extension is intentionally thin: it proxies a narrow investigation tool surface to a remote streamable HTTP MCP endpoint and leaves all diagnosis logic in the existing Python backend.
+Use that path when you want Claude Desktop to reach a remote MCP server through an installable `.mcpb` bundle. The extension is intentionally thin: it proxies a narrow investigation tool surface to the `kagent-controller` MCP endpoint and leaves diagnosis logic in the controller + agent + Python backend path.
 
 Build it with:
 
@@ -170,8 +183,10 @@ For a versioned release artifact plus SHA256 output:
 
 For this repo, the two client paths are:
 
-- `Claude Code`: keep using [.mcp.json](/Users/erauner/git/side/investigation-poc/.mcp.json) or a managed remote MCP configuration.
-- `Claude Desktop`: install the generated `.mcpb` and point it at the remote MCP URL you want Desktop users to reach.
+- `Claude Code`: keep using [.mcp.json](/Users/erauner/git/side/investigation-poc/.mcp.json) or a managed remote MCP configuration pointed at the controller MCP endpoint.
+- `Claude Desktop`: install the generated `.mcpb` and point it at the controller MCP URL you want Desktop users to reach.
+
+For the homelab deployment, that controller URL is the published route for `kagent-controller`, not the raw `investigation-mcp-server` service.
 
 You can also test the Desktop extension locally without Claude Desktop:
 

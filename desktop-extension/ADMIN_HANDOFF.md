@@ -24,6 +24,17 @@ Versioned release copy:
 - Proxies a high-level investigation surface to the `kagent-controller` MCP endpoint.
 - The controller invokes the investigation agent behind the scenes.
 
+## Endpoint distinction
+
+This package should be configured against the published controller MCP route, not the raw `investigation-mcp-server` service.
+
+- Deploy/publish for Desktop users: `kagent-controller` MCP endpoint
+- Backend tool server used behind the scenes by the agent: `investigation-mcp-server`
+
+Expected call path:
+
+`Claude Desktop -> local extension -> kagent-controller -> homelab-k8s-custom-agent -> investigation-mcp-server`
+
 ## Required user configuration
 
 - `remote_mcp_url`
