@@ -43,7 +43,7 @@ def collect_core_service_metrics(
     target: TargetRef, profile: str, service_name: str | None, lookback_minutes: int
 ) -> tuple[dict, list[str]]:
     lookback = f"{max(lookback_minutes, 1)}m"
-    escaped_ns = target.namespace.replace('"', '\\"')
+    escaped_ns = (target.namespace or "").replace('"', '\\"')
     escaped_name = target.name.replace('"', '\\"')
     effective_service = (service_name or target.name).replace('"', '\\"')
 
@@ -69,6 +69,38 @@ def collect_core_service_metrics(
         ),
         "up_targets": _safe_metric("sum(up)", limitations, "up_targets"),
     }
+
+    if target.kind == "node":
+        metrics["node_memory_allocatable_bytes"] = _safe_metric(
+            f'kube_node_status_allocatable{{node="{escaped_name}",resource="memory",unit="byte"}}',
+            limitations,
+            "node_memory_allocatable_bytes",
+        )
+        metrics["node_memory_working_set_bytes"] = _safe_metric(
+            f'sum(container_memory_working_set_bytes{{node="{escaped_name}",container!="",pod!=""}})',
+            limitations,
+            "node_memory_working_set_bytes",
+        )
+        metrics["node_memory_request_bytes"] = _safe_metric(
+            f'sum(kube_pod_container_resource_requests{{node="{escaped_name}",resource="memory",unit="byte"}})',
+            limitations,
+            "node_memory_request_bytes",
+        )
+        metrics["prometheus_available"] = any(
+            metrics[key] is not None
+            for key in (
+                "accepted_spans_per_sec",
+                "accepted_logs_per_sec",
+                "accepted_metric_points_per_sec",
+                "up_targets",
+                "node_memory_allocatable_bytes",
+                "node_memory_working_set_bytes",
+                "node_memory_request_bytes",
+            )
+        )
+        if not metrics["prometheus_available"]:
+            limitations.append("prometheus unavailable or returned no usable results")
+        return metrics, limitations
 
     # Workload-aligned signals. These are best-effort and may be absent if kube-state/cadvisor are not scraped.
     metrics["pod_restart_rate"] = _safe_metric(

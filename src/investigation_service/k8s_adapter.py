@@ -114,7 +114,68 @@ def get_k8s_object(target: TargetRef) -> dict:
         response["conditions"] = status.get("conditions", [])
         response["allocatable"] = status.get("allocatable", {})
         response["capacity"] = status.get("capacity", {})
+        response["top_pods_by_memory_request"] = _top_pods_for_node(target.name)
     return response
+
+
+def _parse_memory_to_bytes(raw: str | None) -> int:
+    if not raw:
+        return 0
+    value = raw.strip()
+    suffixes = {
+        "Ki": 1024,
+        "Mi": 1024**2,
+        "Gi": 1024**3,
+        "Ti": 1024**4,
+        "Pi": 1024**5,
+        "Ei": 1024**6,
+        "K": 1000,
+        "M": 1000**2,
+        "G": 1000**3,
+        "T": 1000**4,
+        "P": 1000**5,
+        "E": 1000**6,
+    }
+    for suffix, multiplier in suffixes.items():
+        if value.endswith(suffix):
+            number = value[: -len(suffix)] or "0"
+            return int(float(number) * multiplier)
+    try:
+        return int(value)
+    except ValueError:
+        return 0
+
+
+def _top_pods_for_node(node_name: str, limit: int = 5) -> list[dict]:
+    ok, pods_json = _run_kubectl(["get", "pods", "-A", "--field-selector", f"spec.nodeName={node_name}", "-o", "json"])
+    if not ok:
+        return []
+    try:
+        items = json.loads(pods_json).get("items", [])
+    except json.JSONDecodeError:
+        return []
+
+    pods: list[dict] = []
+    for item in items:
+        metadata = item.get("metadata", {})
+        spec = item.get("spec", {})
+        total_bytes = 0
+        for container in spec.get("containers", []):
+            total_bytes += _parse_memory_to_bytes(
+                container.get("resources", {}).get("requests", {}).get("memory")
+            )
+        if total_bytes <= 0:
+            continue
+        pods.append(
+            {
+                "namespace": metadata.get("namespace"),
+                "name": metadata.get("name"),
+                "memory_request_bytes": total_bytes,
+            }
+        )
+
+    pods.sort(key=lambda item: item["memory_request_bytes"], reverse=True)
+    return pods[:limit]
 
 
 def get_related_events(target: TargetRef, limit: int = 20) -> list[str]:

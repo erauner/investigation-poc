@@ -38,6 +38,19 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
                     evidence="Node condition MemoryPressure=True",
                 )
             )
+        request_bytes = metrics.get("node_memory_request_bytes")
+        allocatable_bytes = metrics.get("node_memory_allocatable_bytes")
+        if request_bytes is not None and allocatable_bytes and allocatable_bytes > 0:
+            utilization = request_bytes / allocatable_bytes
+            if utilization >= 0.85:
+                findings.append(
+                    Finding(
+                        severity="warning",
+                        source="prometheus",
+                        title="High Node Memory Allocation",
+                        evidence=f"Memory requests are at {utilization:.1%} of allocatable capacity",
+                    )
+                )
 
     event_blob = "\n".join(events).lower()
     if "crashloopbackoff" in event_blob or "backoff" in event_blob:
