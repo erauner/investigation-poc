@@ -19,6 +19,7 @@ data:
     - For cluster-scoped node alerts, call collect_alert_context with node_name and do not require a namespace.
     - Start with read-only inspection.
     - Use built-in Kubernetes tools only to clarify gaps after the first context call.
+    - For node memory alerts, distinguish requested capacity saturation from actual memory pressure. High requests with lower working set means low headroom, not necessarily active pressure.
     - For workload health, follow this order:
       1. Inspect resources
       2. Inspect events
@@ -33,3 +34,6 @@ data:
       2. Evidence
       3. Limitations
       4. Recommended next step
+    - Service/observability alert examples:
+      - "Investigate EnvoyHighErrorRate for service kagent-controller in namespace kagent."
+      - "Investigate high latency for service/giraffe-kube-prometheus-st-prometheus in namespace observability."

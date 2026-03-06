@@ -40,15 +40,27 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
             )
         request_bytes = metrics.get("node_memory_request_bytes")
         allocatable_bytes = metrics.get("node_memory_allocatable_bytes")
+        working_set_bytes = metrics.get("node_memory_working_set_bytes")
         if request_bytes is not None and allocatable_bytes and allocatable_bytes > 0:
-            utilization = request_bytes / allocatable_bytes
-            if utilization >= 0.85:
+            request_utilization = request_bytes / allocatable_bytes
+            working_set_utilization = (
+                working_set_bytes / allocatable_bytes
+                if working_set_bytes is not None and allocatable_bytes > 0
+                else None
+            )
+            if request_utilization >= 0.85:
+                evidence = f"Memory requests are at {request_utilization:.1%} of allocatable capacity"
+                if working_set_utilization is not None and working_set_utilization < 0.85:
+                    evidence += (
+                        f", while observed working set is {working_set_utilization:.1%}; "
+                        "this indicates request saturation more than active node memory pressure"
+                    )
                 findings.append(
                     Finding(
                         severity="warning",
                         source="prometheus",
-                        title="High Node Memory Allocation",
-                        evidence=f"Memory requests are at {utilization:.1%} of allocatable capacity",
+                        title="High Node Memory Request Saturation",
+                        evidence=evidence,
                     )
                 )
 

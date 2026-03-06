@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from investigation_service.analysis import derive_findings
 from investigation_service.main import app
 from investigation_service.models import CollectAlertContextRequest, CollectedContextResponse, Finding, TargetRef
 from investigation_service.tools import _infer_alert_inputs
@@ -189,3 +190,23 @@ def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
         "name": "api-123",
     }
     assert "alertname: PodCrashLooping" in body["limitations"]
+
+
+def test_node_findings_distinguish_request_saturation_from_pressure() -> None:
+    findings = derive_findings(
+        "workload",
+        {
+            "kind": "node",
+            "conditions": [{"type": "Ready", "status": "True"}],
+        },
+        [],
+        "",
+        {
+            "node_memory_allocatable_bytes": 100.0,
+            "node_memory_request_bytes": 99.0,
+            "node_memory_working_set_bytes": 55.0,
+        },
+    )
+
+    saturation_finding = next(item for item in findings if item.title == "High Node Memory Request Saturation")
+    assert "request saturation more than active node memory pressure" in saturation_finding.evidence
