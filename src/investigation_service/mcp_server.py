@@ -7,12 +7,14 @@ from .models import (
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
+    FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
 )
 from .tools import collect_alert_context as collect_alert_context_impl
 from .tools import collect_node_context as collect_node_context_impl
 from .tools import collect_service_context as collect_service_context_impl
 from .tools import collect_workload_context as collect_workload_context_impl
+from .tools import find_unhealthy_pod as find_unhealthy_pod_impl
 from .tools import find_unhealthy_workloads as find_unhealthy_workloads_impl
 from .tools import normalize_alert_input as normalize_alert_input_impl
 
@@ -137,6 +139,13 @@ def find_unhealthy_workloads(namespace: str, limit: int = 5) -> dict:
     response = find_unhealthy_workloads_impl(
         FindUnhealthyWorkloadsRequest(namespace=namespace, limit=limit)
     )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def find_unhealthy_pod(namespace: str) -> dict:
+    """Find the single best unhealthy pod candidate in a namespace."""
+    response = find_unhealthy_pod_impl(FindUnhealthyPodRequest(namespace=namespace))
     return response.model_dump(mode="json")
 
 

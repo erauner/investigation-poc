@@ -14,11 +14,13 @@ from .models import (
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
+    FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     CollectedContextResponse,
     NormalizedInvestigationRequest,
     RootCauseReport,
     ScopeType,
+    UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
 from .prom_adapter import collect_metrics_for_scope
@@ -233,6 +235,19 @@ def collect_workload_context(req: CollectContextRequest) -> CollectedContextResp
 
 def find_unhealthy_workloads(req: FindUnhealthyWorkloadsRequest) -> UnhealthyWorkloadsResponse:
     return find_unhealthy_workloads_impl(namespace=req.namespace, limit=req.limit)
+
+
+def find_unhealthy_pod(req: FindUnhealthyPodRequest) -> UnhealthyPodResponse:
+    workloads = find_unhealthy_workloads_impl(namespace=req.namespace, limit=1)
+    candidate = workloads.candidates[0] if workloads.candidates else None
+    limitations = list(workloads.limitations)
+    if candidate is None:
+        limitations.append("no unhealthy pod found in namespace")
+    return UnhealthyPodResponse(
+        namespace=req.namespace,
+        candidate=candidate,
+        limitations=sorted(set(limitations)),
+    )
 
 
 def collect_node_context(req: CollectNodeContextRequest) -> CollectedContextResponse:

@@ -10,6 +10,7 @@ from investigation_service.models import (
     CollectedContextResponse,
     Finding,
     TargetRef,
+    UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
 from investigation_service.tools import normalize_alert_input
@@ -277,6 +278,35 @@ def test_find_unhealthy_workloads_route_returns_candidates(monkeypatch) -> None:
     assert body["namespace"] == "kagent-smoke"
     assert body["candidates"][0]["target"] == "pod/crashy-abc123"
     assert body["candidates"][0]["reason"] == "CrashLoopBackOff"
+
+
+def test_find_unhealthy_pod_route_returns_best_candidate(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.find_unhealthy_pod",
+        lambda _req: UnhealthyPodResponse(
+            namespace="kagent-smoke",
+            candidate={
+                "target": "pod/crashy-abc123",
+                "namespace": "kagent-smoke",
+                "kind": "pod",
+                "name": "crashy-abc123",
+                "phase": "Running",
+                "reason": "CrashLoopBackOff",
+                "restart_count": 7,
+                "ready": False,
+                "summary": "CrashLoopBackOff; restarts=7",
+            },
+            limitations=[],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post("/tools/find_unhealthy_pod", json={"namespace": "kagent-smoke"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidate"]["target"] == "pod/crashy-abc123"
+    assert body["candidate"]["reason"] == "CrashLoopBackOff"
 
 
 def test_find_unhealthy_workloads_prefers_crashlooping_pods(monkeypatch) -> None:

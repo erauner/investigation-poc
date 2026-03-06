@@ -62,6 +62,10 @@ class FindUnhealthyWorkloadsRequest(BaseModel):
     limit: int = Field(default=5, ge=1, le=20, description="Maximum number of unhealthy workloads to return")
 
 
+class FindUnhealthyPodRequest(BaseModel):
+    namespace: str = Field(..., description="Kubernetes namespace")
+
+
 class InvestigateRequest(BaseModel):
     namespace: str = Field(..., description="Kubernetes namespace")
     target: str = Field(..., description="Target in form pod/name, deployment/name, service/name, or plain name")
@@ -103,6 +107,12 @@ class UnhealthyWorkloadCandidate(BaseModel):
 class UnhealthyWorkloadsResponse(BaseModel):
     namespace: str
     candidates: list[UnhealthyWorkloadCandidate]
+    limitations: list[str] = Field(default_factory=list)
+
+
+class UnhealthyPodResponse(BaseModel):
+    namespace: str
+    candidate: UnhealthyWorkloadCandidate | None = None
     limitations: list[str] = Field(default_factory=list)
 
 
