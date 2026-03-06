@@ -723,6 +723,57 @@ def test_collect_correlated_changes_for_node_includes_recent_scheduling(monkeypa
     assert response.changes[0].relation == "same_node"
 
 
+def test_collect_correlated_changes_ignores_non_change_like_workload_events(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.correlation.get_events",
+        lambda **_kwargs: [
+            {
+                "reason": "Started",
+                "message": "Started container crashy",
+                "lastTimestamp": _now_iso(),
+                "involvedObject": {"kind": "Pod", "name": "crashy-abc123", "namespace": "kagent-smoke"},
+                "metadata": {"namespace": "kagent-smoke"},
+            },
+            {
+                "reason": "SandboxChanged",
+                "message": "Pod sandbox changed",
+                "lastTimestamp": _now_iso(),
+                "involvedObject": {"kind": "Pod", "name": "crashy-abc123", "namespace": "kagent-smoke"},
+                "metadata": {"namespace": "kagent-smoke"},
+            },
+        ],
+    )
+
+    response = collect_correlated_changes(
+        CollectCorrelatedChangesRequest(namespace="kagent-smoke", target="pod/crashy-abc123")
+    )
+
+    assert len(response.changes) == 1
+    assert response.changes[0].summary.startswith("Started:")
+
+
+def test_collect_correlated_changes_reports_empty_when_no_meaningful_workload_changes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.correlation.get_events",
+        lambda **_kwargs: [
+            {
+                "reason": "SandboxChanged",
+                "message": "Pod sandbox changed",
+                "lastTimestamp": _now_iso(),
+                "involvedObject": {"kind": "Pod", "name": "crashy-abc123", "namespace": "kagent-smoke"},
+                "metadata": {"namespace": "kagent-smoke"},
+            }
+        ],
+    )
+
+    response = collect_correlated_changes(
+        CollectCorrelatedChangesRequest(namespace="kagent-smoke", target="pod/crashy-abc123")
+    )
+
+    assert response.changes == []
+    assert "no correlated changes found in the requested time window" in response.limitations
+
+
 def test_get_k8s_object_includes_pod_container_details(monkeypatch) -> None:
     payload = {
         "metadata": {"name": "crashy-abc123", "creationTimestamp": "2026-03-06T00:00:00Z"},

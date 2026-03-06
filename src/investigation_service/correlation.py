@@ -47,6 +47,35 @@ def _confidence_for_reason(reason: str) -> str:
     return "low"
 
 
+def _is_meaningful_event(reason: str, message: str, scope: str) -> bool:
+    normalized_reason = reason or ""
+    normalized_message = (message or "").lower()
+    if scope == "workload":
+        allowed = {
+            "BackOff",
+            "CrashLoopBackOff",
+            "Failed",
+            "FailedMount",
+            "FailedCreatePodSandBox",
+            "Killing",
+            "Pulled",
+            "Pulling",
+            "Created",
+            "Started",
+            "SuccessfulCreate",
+            "ScalingReplicaSet",
+        }
+        if normalized_reason in allowed:
+            return True
+        keywords = ("rollout", "image", "restart", "restarted", "pulled", "created", "killing", "back-off", "failed")
+        return any(keyword in normalized_message for keyword in keywords)
+    if scope == "service":
+        return True
+    if scope == "node":
+        return True
+    return False
+
+
 def _change_from_event(event: dict, relation: str) -> CorrelatedChange:
     involved = event.get("involvedObject", {})
     reason = event.get("reason") or "Event"
@@ -115,7 +144,11 @@ def _score(change: CorrelatedChange) -> int:
 def _workload_changes(target, lookback_minutes: int) -> list[CorrelatedChange]:
     changes: list[CorrelatedChange] = []
     for event in get_events(namespace=target.namespace, involved_kind=target.kind, involved_name=target.name, limit=20):
-        if _within_window(_event_timestamp(event), lookback_minutes):
+        reason = event.get("reason") or ""
+        message = event.get("message") or ""
+        if _within_window(_event_timestamp(event), lookback_minutes) and _is_meaningful_event(
+            reason, message, "workload"
+        ):
             changes.append(_change_from_event(event, "direct"))
     return changes
 
@@ -124,7 +157,9 @@ def _service_changes(target, service_name: str, lookback_minutes: int) -> tuple[
     changes: list[CorrelatedChange] = []
     limitations: list[str] = []
     for event in get_events(namespace=target.namespace, involved_kind="Service", involved_name=target.name, limit=20):
-        if _within_window(_event_timestamp(event), lookback_minutes):
+        if _within_window(_event_timestamp(event), lookback_minutes) and _is_meaningful_event(
+            event.get("reason") or "", event.get("message") or "", "service"
+        ):
             changes.append(_change_from_event(event, "direct"))
 
     deployments = get_service_related_deployments(target.namespace or "", service_name)
@@ -139,7 +174,9 @@ def _service_changes(target, service_name: str, lookback_minutes: int) -> tuple[
 def _node_changes(target, lookback_minutes: int) -> list[CorrelatedChange]:
     changes: list[CorrelatedChange] = []
     for event in get_events(namespace=None, involved_kind="Node", involved_name=target.name, limit=20):
-        if _within_window(_event_timestamp(event), lookback_minutes):
+        if _within_window(_event_timestamp(event), lookback_minutes) and _is_meaningful_event(
+            event.get("reason") or "", event.get("message") or "", "node"
+        ):
             changes.append(_change_from_event(event, "direct"))
     for item in get_pods_for_node(target.name, limit=10):
         if _within_window(item.get("creationTimestamp"), lookback_minutes):
