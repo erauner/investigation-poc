@@ -5,6 +5,7 @@ KIND_CLUSTER_NAME ?= investigation
 KIND_CONTEXT ?= kind-$(KIND_CLUSTER_NAME)
 KAGENT_NAMESPACE ?= kagent
 KAGENT_VERSION ?= 0.7.22
+K8S_OVERLAY ?= k8s-overlays/local-kind
 
 install:
 	@if command -v uv >/dev/null 2>&1; then \
@@ -84,7 +85,7 @@ kind-install-kagent:
 	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic kagent-openai \
 		--from-literal=OPENAI_API_KEY="$$OPENAI_API_KEY" \
 		--dry-run=client -o yaml | kubectl apply -f -
-	@kubectl apply -k k8s
+	@kubectl apply -k "$(K8S_OVERLAY)"
 	@kubectl apply -f k8s/modelconfig.yaml
 	@kubectl apply -f k8s/agent.yaml
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-controller --timeout=180s

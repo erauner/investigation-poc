@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: investigation-service-config
+  namespace: kagent
+data:
+  PROMETHEUS_URL: http://prometheus-gateway.kagent.svc.cluster.local:9090

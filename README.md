@@ -34,10 +34,10 @@ curl -s localhost:8080/investigate \
 
 ## Kubernetes deployment (MCP default)
 
-Manifests are in `k8s/`:
+Base manifests are in `k8s/`. Local kind flow uses the local overlay:
 
 ```bash
-kubectl apply -k k8s/
+kubectl apply -k k8s-overlays/local-kind
 ```
 
 This applies the MCP server path used by the agent (`RemoteMCPServer -> investigation-mcp-server`).
