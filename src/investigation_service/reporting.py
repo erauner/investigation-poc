@@ -182,8 +182,6 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
         )
         related_data, related_data_note = _filter_related_data(root_cause, correlated.changes)
         limitations.extend(correlated.limitations)
-        if related_data_note and related_data_note.startswith("no meaningful correlated changes"):
-            limitations.append(related_data_note)
         if related_data:
             suggested_follow_ups.append("Inspect the related changes timeline before taking write actions.")
 
