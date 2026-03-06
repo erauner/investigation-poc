@@ -89,7 +89,9 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
     target = resolve_runtime_target(requested_target)
     object_state = get_k8s_object(target)
     events = get_related_events(target)
-    logs = get_pod_logs(target, tail=get_log_tail_lines())
+    logs = ""
+    if target.kind in {"pod", "deployment"}:
+        logs = get_pod_logs(target, tail=get_log_tail_lines())
     lookback_minutes = req.lookback_minutes or get_default_lookback_minutes()
     metrics, metric_limitations = collect_metrics_for_scope(
         target=target,
@@ -103,7 +105,7 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
         limitations.append("kubernetes object query failed")
     if events == ["no related events"]:
         limitations.append("no related Kubernetes events found")
-    if logs.startswith("log query failed:") or logs.startswith("no pod found"):
+    if target.kind in {"pod", "deployment"} and (logs.startswith("log query failed:") or logs.startswith("no pod found")):
         limitations.append("pod logs unavailable for target")
     enrichment_hints = _build_enrichment_hints(target.kind, req.profile, metrics, limitations, findings)
 

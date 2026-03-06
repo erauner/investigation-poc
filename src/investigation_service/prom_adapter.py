@@ -6,6 +6,8 @@ from urllib.error import URLError
 from .models import TargetRef
 from .settings import get_prometheus_url
 
+_METRIC_METADATA_KEYS = {"profile", "prometheus_url", "lookback_minutes", "prometheus_available"}
+
 
 def query_instant(query: str) -> float | None:
     base_url = get_prometheus_url()
@@ -158,8 +160,17 @@ def collect_node_metrics(node_name: str, lookback_minutes: int) -> tuple[dict, l
 def collect_metrics_for_scope(
     target: TargetRef, profile: str, service_name: str | None, lookback_minutes: int
 ) -> tuple[dict, list[str]]:
-    metrics, limitations = collect_global_otel_metrics(lookback_minutes)
-    metrics["profile"] = profile
+    metrics = {
+        "profile": profile,
+        "prometheus_url": get_prometheus_url(),
+        "lookback_minutes": max(lookback_minutes, 1),
+    }
+    limitations: list[str] = []
+
+    if profile == "otel-pipeline":
+        otel_metrics, otel_limitations = collect_global_otel_metrics(lookback_minutes)
+        metrics.update(otel_metrics)
+        limitations.extend(otel_limitations)
 
     scoped_metrics: dict = {}
     scoped_limitations: list[str] = []
@@ -176,7 +187,9 @@ def collect_metrics_for_scope(
 
     metrics.update(scoped_metrics)
     limitations.extend(scoped_limitations)
-    metrics["prometheus_available"] = any(value is not None for key, value in metrics.items() if key != "profile")
+    metrics["prometheus_available"] = any(
+        value is not None for key, value in metrics.items() if key not in _METRIC_METADATA_KEYS
+    )
     if not metrics["prometheus_available"]:
         limitations.append("prometheus unavailable or returned no usable results")
     return metrics, limitations

@@ -64,6 +64,12 @@ def _normalized_request(req: InvestigationReportRequest) -> NormalizedInvestigat
 
     target = canonical_target(req.target, req.profile, req.service_name)
     scope = scope_from_target(target, req.profile)
+    profile = req.profile
+    notes = ["target normalized from manual request"]
+    if scope == "service" and profile == "workload":
+        profile = "service"
+        notes.append("profile promoted to service based on target")
+
     return NormalizedInvestigationRequest(
         source="manual",
         scope=scope,
@@ -71,9 +77,9 @@ def _normalized_request(req: InvestigationReportRequest) -> NormalizedInvestigat
         target=target,
         node_name=target.split("/", 1)[1] if scope == "node" and "/" in target else None,
         service_name=(req.service_name or target.split("/", 1)[1]) if scope == "service" and "/" in target else None,
-        profile=req.profile,
+        profile=profile,
         lookback_minutes=req.lookback_minutes,
-        normalization_notes=["target normalized from manual request"],
+        normalization_notes=notes,
     )
 
 
