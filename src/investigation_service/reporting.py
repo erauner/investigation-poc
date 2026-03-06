@@ -37,6 +37,11 @@ _VAGUE_WORKLOAD_TARGETS = {
 _EMPTY_CORRELATION_LIMITATION = "no correlated changes found in the requested time window"
 
 
+def _is_empty_correlation_limitation(value: str) -> bool:
+    normalized = value.strip().lower()
+    return "correlated changes" in normalized and "requested time window" in normalized
+
+
 def _normalized_request(req: InvestigationReportRequest) -> NormalizedInvestigationRequest:
     if req.alertname:
         return normalize_alert_input(
@@ -186,7 +191,7 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
         correlation_limitations = list(correlated.limitations)
         if not related_data and related_data_note:
             correlation_limitations = [
-                item for item in correlation_limitations if item != _EMPTY_CORRELATION_LIMITATION
+                item for item in correlation_limitations if not _is_empty_correlation_limitation(item)
             ]
         limitations.extend(correlation_limitations)
         if related_data:
