@@ -24,6 +24,14 @@ PROMETHEUS_URL=http://localhost:9090 make run
 make test
 ```
 
+For the most important end-to-end local validation path, use:
+
+```bash
+OPENAI_API_KEY=sk-... make kind-validate
+```
+
+This exercises the local kind stack, deploys the smoke workload, runs the standard investigation prompt, runs the explicit `build_investigation_report` prompt, and fails if the five-section report contract regresses.
+
 ## Example investigate request
 
 ```bash
@@ -71,6 +79,21 @@ Or one-shot:
 OPENAI_API_KEY=sk-... make kind-smoke-loop
 ```
 
+Full local contract validation:
+
+```bash
+OPENAI_API_KEY=sk-... make kind-validate
+```
+
+Use [DEMO.md](/Users/erauner/git/side/investigation-poc/DEMO.md) as the repo-local source of truth for:
+
+- the end-to-end kind demo
+- the single-run local validation entrypoint
+- the five-section investigation prompts
+- expected output semantics for Evidence, Related Data, and Limitations
+
+This repo should be sufficient for local validation. The production GitOps rollout still happens from `homelab-k8s`, but the fast feedback loop should stay here.
+
 ## Use from Claude Code
 
 After `make kind-install-kagent`, port-forward the controller MCP endpoint:
@@ -95,14 +118,14 @@ Use the kagent MCP server to list available agents and show their names.
 
 ```text
 Use the kagent MCP server to invoke kagent/investigation-agent.
-Task: Investigate the unhealthy pod in namespace kagent-smoke and return Diagnosis, Evidence, Recommendation.
+Task: Investigate the unhealthy pod in namespace kagent-smoke and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
 ```
 
 To prove the custom MCP tool is in the loop, run:
 
 ```bash
 make kagent-smoke-apply
-make kagent-smoke-test TASK="Before answering, call functions.collect_workload_context exactly once with namespace kagent-smoke and target pod/crashy. Then return Diagnosis, Evidence, Recommendation."
+make kagent-smoke-test TASK="Investigate the unhealthy pod in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step."
 make kagent-smoke-clean
 ```
 
