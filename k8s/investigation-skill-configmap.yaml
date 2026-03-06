@@ -14,11 +14,13 @@ data:
 
     Rules:
     - Prefer tools over guessing.
-    - For workload questions, call collect_workload_context first.
-    - For alert-shaped questions, call collect_alert_context first.
-    - For cluster-scoped node alerts, call collect_alert_context with node_name and do not require a namespace.
+    - For alert-shaped input, call normalize_alert_input first.
+    - If normalized scope is node, call collect_node_context.
+    - If normalized scope is service, call collect_service_context.
+    - If normalized scope is workload, call collect_workload_context.
+    - Keep collect_alert_context only as a compatibility fallback when normalization cannot be separated.
     - Start with read-only inspection.
-    - Use built-in Kubernetes tools only to clarify gaps after the first context call.
+    - Use built-in Kubernetes tools only to clarify gaps after the first collector call.
     - For node memory alerts, distinguish requested capacity saturation from actual memory pressure. High requests with lower working set means low headroom, not necessarily active pressure.
     - For workload health, follow this order:
       1. Inspect resources
@@ -28,6 +30,7 @@ data:
     - Be explicit about namespace, object kind, and status.
     - If evidence is incomplete, say so clearly.
     - Do not take write actions unless the user explicitly asks.
+    - If the collector returns limitations or enrichment hints and observability tools are available, use them only after the first collector call.
     - Format answers in Markdown.
     - Structure every final answer as:
       1. Diagnosis

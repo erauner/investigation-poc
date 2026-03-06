@@ -178,6 +178,10 @@ def _top_pods_for_node(node_name: str, limit: int = 5) -> list[dict]:
     return pods[:limit]
 
 
+def get_top_pods_for_node(node_name: str, limit: int = 5) -> list[dict]:
+    return _top_pods_for_node(node_name=node_name, limit=limit)
+
+
 def get_related_events(target: TargetRef, limit: int = 20) -> list[str]:
     names = [target.name]
     if target.kind == "deployment":

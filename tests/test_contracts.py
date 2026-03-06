@@ -2,30 +2,40 @@ from fastapi.testclient import TestClient
 
 from investigation_service.analysis import derive_findings
 from investigation_service.main import app
-from investigation_service.models import CollectAlertContextRequest, CollectedContextResponse, Finding, TargetRef
-from investigation_service.tools import _infer_alert_inputs
+from investigation_service.models import (
+    CollectAlertContextRequest,
+    CollectedContextResponse,
+    Finding,
+    TargetRef,
+)
+from investigation_service.tools import normalize_alert_input
+
+
+def _sample_response(target: TargetRef) -> CollectedContextResponse:
+    return CollectedContextResponse(
+        target=target,
+        object_state={"namespace": target.namespace, "kind": target.kind, "name": target.name},
+        events=["no related events"],
+        log_excerpt="ok",
+        metrics={"prometheus_available": True},
+        findings=[
+            Finding(
+                severity="info",
+                source="heuristic",
+                title="No Critical Signals Found",
+                evidence="No obvious failure signature detected from current inputs",
+            )
+        ],
+        limitations=["metric unavailable: service_latency_p95_seconds"],
+        enrichment_hints=["service metrics unavailable; use observability MCP for logs, traces, or dashboards"],
+    )
 
 
 def test_collect_context_accepts_profile_fields(monkeypatch) -> None:
-    def fake_collect(_req):
-        return CollectedContextResponse(
-            target=TargetRef(namespace="default", kind="pod", name="api-123"),
-            object_state={"namespace": "default", "kind": "pod", "name": "api-123"},
-            events=["no related events"],
-            log_excerpt="ok",
-            metrics={"prometheus_available": True},
-            findings=[
-                Finding(
-                    severity="info",
-                    source="heuristic",
-                    title="No Critical Signals Found",
-                    evidence="No obvious failure signature detected from current inputs",
-                )
-            ],
-            limitations=["metric unavailable: service_latency_p95_seconds"],
-        )
-
-    monkeypatch.setattr("investigation_service.main.collect_workload_context", fake_collect)
+    monkeypatch.setattr(
+        "investigation_service.main.collect_workload_context",
+        lambda _req: _sample_response(TargetRef(namespace="default", kind="pod", name="api-123")),
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -43,11 +53,13 @@ def test_collect_context_accepts_profile_fields(monkeypatch) -> None:
     body = response.json()
     assert body["target"]["name"] == "api-123"
     assert body["limitations"] == ["metric unavailable: service_latency_p95_seconds"]
+    assert body["enrichment_hints"]
 
 
 def test_investigate_includes_limitations(monkeypatch) -> None:
-    def fake_collect(_req):
-        return CollectedContextResponse(
+    monkeypatch.setattr(
+        "investigation_service.main.collect_workload_context",
+        lambda _req: CollectedContextResponse(
             target=TargetRef(namespace="default", kind="deployment", name="api"),
             object_state={"namespace": "default", "kind": "deployment", "name": "api"},
             events=["Normal Created"],
@@ -62,9 +74,9 @@ def test_investigate_includes_limitations(monkeypatch) -> None:
                 )
             ],
             limitations=["prometheus unavailable or returned no usable results"],
-        )
-
-    monkeypatch.setattr("investigation_service.main.collect_workload_context", fake_collect)
+            enrichment_hints=["service metrics unavailable; use observability MCP for logs, traces, or dashboards"],
+        ),
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -82,8 +94,8 @@ def test_investigate_includes_limitations(monkeypatch) -> None:
     assert any("Limitations:" in item for item in evidence)
 
 
-def test_collect_alert_context_infers_target(monkeypatch) -> None:
-    normalized = _infer_alert_inputs(
+def test_normalize_alert_input_infers_workload_target() -> None:
+    normalized = normalize_alert_input(
         CollectAlertContextRequest(
             alertname="PodCrashLooping",
             labels={"namespace": "kagent-smoke", "pod": "api-123"},
@@ -92,12 +104,14 @@ def test_collect_alert_context_infers_target(monkeypatch) -> None:
 
     assert normalized.namespace == "kagent-smoke"
     assert normalized.target == "pod/api-123"
+    assert normalized.scope == "workload"
     assert normalized.profile == "workload"
     assert normalized.service_name is None
+    assert normalized.normalization_notes
 
 
-def test_collect_alert_context_infers_service_profile() -> None:
-    normalized = _infer_alert_inputs(
+def test_normalize_alert_input_infers_service_profile() -> None:
+    normalized = normalize_alert_input(
         CollectAlertContextRequest(
             alertname="EnvoyHighErrorRate",
             labels={"namespace": "kagent", "service": "kagent-controller"},
@@ -106,12 +120,13 @@ def test_collect_alert_context_infers_service_profile() -> None:
 
     assert normalized.namespace == "kagent"
     assert normalized.target == "service/kagent-controller"
+    assert normalized.scope == "service"
     assert normalized.profile == "service"
     assert normalized.service_name == "kagent-controller"
 
 
-def test_collect_alert_context_accepts_explicit_service_name() -> None:
-    normalized = _infer_alert_inputs(
+def test_normalize_alert_input_accepts_explicit_service_name() -> None:
+    normalized = normalize_alert_input(
         CollectAlertContextRequest(
             alertname="EnvoyHighErrorRate",
             namespace="kagent",
@@ -121,12 +136,13 @@ def test_collect_alert_context_accepts_explicit_service_name() -> None:
 
     assert normalized.namespace == "kagent"
     assert normalized.target == "service/kagent-controller"
+    assert normalized.scope == "service"
     assert normalized.profile == "service"
     assert normalized.service_name == "kagent-controller"
 
 
-def test_collect_alert_context_infers_node_target_from_summary() -> None:
-    normalized = _infer_alert_inputs(
+def test_normalize_alert_input_infers_node_target_from_summary() -> None:
+    normalized = normalize_alert_input(
         CollectAlertContextRequest(
             alertname="NodeHighMemoryAllocation",
             annotations={"summary": "Node worker3 memory allocation at 86.8%"},
@@ -135,11 +151,12 @@ def test_collect_alert_context_infers_node_target_from_summary() -> None:
 
     assert normalized.namespace is None
     assert normalized.target == "node/worker3"
-    assert normalized.profile == "workload"
+    assert normalized.scope == "node"
+    assert normalized.node_name == "worker3"
 
 
-def test_collect_alert_context_accepts_explicit_node_target() -> None:
-    normalized = _infer_alert_inputs(
+def test_normalize_alert_input_accepts_explicit_node_target() -> None:
+    normalized = normalize_alert_input(
         CollectAlertContextRequest(
             alertname="NodeHighMemoryAllocation",
             target="node/worker3",
@@ -148,11 +165,11 @@ def test_collect_alert_context_accepts_explicit_node_target() -> None:
 
     assert normalized.namespace is None
     assert normalized.target == "node/worker3"
-    assert normalized.profile == "workload"
+    assert normalized.scope == "node"
 
 
-def test_collect_alert_context_accepts_explicit_node_name() -> None:
-    normalized = _infer_alert_inputs(
+def test_normalize_alert_input_accepts_explicit_node_name() -> None:
+    normalized = normalize_alert_input(
         CollectAlertContextRequest(
             alertname="NodeHighMemoryAllocation",
             node_name="worker3",
@@ -161,12 +178,72 @@ def test_collect_alert_context_accepts_explicit_node_name() -> None:
 
     assert normalized.namespace is None
     assert normalized.target == "node/worker3"
-    assert normalized.profile == "workload"
+    assert normalized.scope == "node"
+    assert normalized.node_name == "worker3"
+
+
+def test_normalize_alert_route_returns_normalized_request(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.normalize_alert_input",
+        lambda _req: normalize_alert_input(
+            CollectAlertContextRequest(
+                alertname="NodeHighMemoryAllocation",
+                node_name="worker3",
+            )
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/normalize_alert_input",
+        json={"alertname": "NodeHighMemoryAllocation", "node_name": "worker3"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scope"] == "node"
+    assert body["target"] == "node/worker3"
+
+
+def test_collect_node_context_route_returns_context(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.collect_node_context",
+        lambda _req: _sample_response(TargetRef(namespace=None, kind="node", name="worker3")),
+    )
+    client = TestClient(app)
+
+    response = client.post("/tools/collect_node_context", json={"node_name": "worker3"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"] == {"namespace": None, "kind": "node", "name": "worker3"}
+
+
+def test_collect_service_context_route_returns_context(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.collect_service_context",
+        lambda _req: _sample_response(TargetRef(namespace="kagent", kind="service", name="kagent-controller")),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/collect_service_context",
+        json={"namespace": "kagent", "service_name": "kagent-controller"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"] == {
+        "namespace": "kagent",
+        "kind": "service",
+        "name": "kagent-controller",
+    }
 
 
 def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
-    def fake_collect(_req):
-        return CollectedContextResponse(
+    monkeypatch.setattr(
+        "investigation_service.main.collect_alert_context",
+        lambda _req: CollectedContextResponse(
             target=TargetRef(namespace="kagent-smoke", kind="pod", name="api-123"),
             object_state={"namespace": "kagent-smoke", "kind": "pod", "name": "api-123"},
             events=["BackOff restarting failed container"],
@@ -181,9 +258,9 @@ def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
                 )
             ],
             limitations=["alertname: PodCrashLooping"],
-        )
-
-    monkeypatch.setattr("investigation_service.main.collect_alert_context", fake_collect)
+            enrichment_hints=["normalization completed before collection"],
+        ),
+    )
     client = TestClient(app)
 
     response = client.post(

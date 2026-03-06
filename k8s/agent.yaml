@@ -28,6 +28,9 @@ spec:
           name: investigation-mcp-server
           kind: RemoteMCPServer
           toolNames:
+            - normalize_alert_input
+            - collect_node_context
+            - collect_service_context
             - collect_workload_context
             - collect_alert_context
     a2aConfig:

@@ -3,11 +3,20 @@ from fastapi import FastAPI
 from .models import (
     CollectAlertContextRequest,
     CollectContextRequest,
+    CollectNodeContextRequest,
+    CollectServiceContextRequest,
     CollectedContextResponse,
     InvestigateRequest,
     InvestigationResponse,
 )
-from .tools import collect_alert_context, collect_workload_context
+from .tools import (
+    build_root_cause_report,
+    collect_alert_context,
+    collect_node_context,
+    collect_service_context,
+    collect_workload_context,
+    normalize_alert_input,
+)
 
 app = FastAPI(title="Investigation Service", version="0.2.0")
 
@@ -27,6 +36,21 @@ def collect_alert(req: CollectAlertContextRequest) -> CollectedContextResponse:
     return collect_alert_context(req)
 
 
+@app.post("/tools/normalize_alert_input")
+def normalize_alert(req: CollectAlertContextRequest) -> dict:
+    return normalize_alert_input(req).model_dump(mode="json")
+
+
+@app.post("/tools/collect_node_context", response_model=CollectedContextResponse)
+def collect_node(req: CollectNodeContextRequest) -> CollectedContextResponse:
+    return collect_node_context(req)
+
+
+@app.post("/tools/collect_service_context", response_model=CollectedContextResponse)
+def collect_service(req: CollectServiceContextRequest) -> CollectedContextResponse:
+    return collect_service_context(req)
+
+
 @app.post("/investigate", response_model=InvestigationResponse)
 def investigate(req: InvestigateRequest) -> InvestigationResponse:
     context = collect_workload_context(
@@ -38,22 +62,25 @@ def investigate(req: InvestigateRequest) -> InvestigationResponse:
             lookback_minutes=req.lookback_minutes,
         )
     )
-
-    critical = [f for f in context.findings if f.severity == "critical"]
-    if critical:
-        diagnosis = critical[0].title
-        recommendation = "Inspect pod spec, recent events, and logs; restart only after root cause is confirmed."
-    else:
-        diagnosis = "No critical issue detected by deterministic checks."
-        recommendation = "Continue with deeper service-level checks and confirm traffic/error trends."
-
+    report = build_root_cause_report(
+        context,
+        CollectContextRequest(
+            namespace=req.namespace,
+            target=req.target,
+            profile=req.profile,
+            service_name=req.service_name,
+            lookback_minutes=req.lookback_minutes,
+        ),
+    )
     evidence = [
         f"Target: {context.target.kind}/{context.target.name} in namespace {context.target.namespace}",
         f"Profile: {req.profile}",
-        f"K8s object: {context.object_state}",
-        f"Top findings: {[f.title for f in context.findings]}",
+        *report.evidence,
         f"Prometheus metrics: {context.metrics}",
         f"Limitations: {context.limitations}",
     ]
-
-    return InvestigationResponse(diagnosis=diagnosis, evidence=evidence, recommendation=recommendation)
+    return InvestigationResponse(
+        diagnosis=report.diagnosis,
+        evidence=evidence,
+        recommendation=report.recommended_next_step,
+    )
