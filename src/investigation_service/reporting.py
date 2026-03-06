@@ -1,4 +1,5 @@
 from .correlation import collect_correlated_changes
+from .event_fingerprints import canonicalize_event_fingerprint
 from .guidelines import load_guideline_rules, resolve_guidelines
 from .models import (
     BuildRootCauseReportRequest,
@@ -135,8 +136,15 @@ def _collect_context_for_normalized_request(normalized: NormalizedInvestigationR
 
 
 def _filter_related_data(report: RootCauseReport, changes: list[CorrelatedChange]) -> tuple[list[CorrelatedChange], str | None]:
-    primary_fingerprints = {item.fingerprint for item in report.evidence_items}
-    filtered = [change for change in changes if change.fingerprint not in primary_fingerprints]
+    def dedupe_key(value: str) -> str:
+        canonical = canonicalize_event_fingerprint(value)
+        parts = canonical.split("|")
+        if len(parts) == 6 and parts[0] == "event":
+            return "|".join([parts[0], parts[1], parts[3], parts[4], parts[5]])
+        return canonical
+
+    primary_fingerprints = {dedupe_key(item.fingerprint) for item in report.evidence_items}
+    filtered = [change for change in changes if dedupe_key(change.fingerprint) not in primary_fingerprints]
     omitted = len(changes) - len(filtered)
     if filtered:
         if omitted:

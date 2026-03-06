@@ -1,4 +1,5 @@
 from investigation_service.correlation import _change_from_event
+from investigation_service.event_fingerprints import canonicalize_event_fingerprint
 from investigation_service.models import CollectedContextResponse, CorrelatedChange, EvidenceItem, RootCauseReport, TargetRef
 from investigation_service.reporting import _filter_related_data
 from investigation_service.synthesis import build_primary_evidence
@@ -79,3 +80,11 @@ def test_filter_related_data_omits_duplicate_event_change() -> None:
 
     assert filtered == []
     assert note == "all correlated changes duplicated primary evidence"
+
+
+def test_canonicalize_event_fingerprint_accepts_legacy_shape() -> None:
+    legacy = "event|pod/crashy-abc123|backoff|restarting failed container"
+    current = "event|pod|cluster|crashy-abc123|backoff|restarting failed container"
+
+    assert canonicalize_event_fingerprint(legacy) == current
+    assert canonicalize_event_fingerprint(current) == current
