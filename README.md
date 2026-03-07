@@ -71,6 +71,7 @@ kubectl apply -k k8s-overlays/local-kind
 This applies the MCP server path used by the agent (`RemoteMCPServer -> investigation-mcp-server`).
 The legacy HTTP debug API manifests are isolated in `k8s/optional-http/`.
 For `make kind-install-kagent`, `make kind-validate`, and `make kind-validate-operator`, the local kind flow now builds `investigation-poc:local` from the current checkout, loads it into kind, and rewrites the local overlay to use that image instead of `ghcr.io/erauner/investigation-poc:latest`.
+The default `local-kind` overlay now also includes an in-cluster Prometheus plus kube-state-metrics bundle. If you want the older host-backed path instead, use `K8S_OVERLAY=k8s-overlays/local-kind-host-prometheus`.
 
 ## MCP topology
 
@@ -113,6 +114,12 @@ Full local contract validation:
 OPENAI_API_KEY=sk-... make kind-validate
 ```
 
+Local metrics validation:
+
+```bash
+OPENAI_API_KEY=sk-... make kind-validate-metrics
+```
+
 Operator-backed local contract validation:
 
 ```bash
@@ -137,6 +144,8 @@ This repo should be sufficient for local validation. The production GitOps rollo
 If you are preparing to fork this into a non-homelab environment, use [PRE_FORK_PLAN.md](/Users/erauner/git/side/investigation-poc/PRE_FORK_PLAN.md) as the repo-local checklist for separating platform code, runtime overlays, and domain-specific behavior.
 
 Shared client-facing semantics for Desktop and Claude Code live in [docs/interface-contract.md](/Users/erauner/git/side/investigation-poc/docs/interface-contract.md).
+
+The next local metrics implementation phase is tracked in [docs/prometheus-kind-checklist.md](/Users/erauner/git/side/investigation-poc/docs/prometheus-kind-checklist.md).
 
 ## Use from Claude Code
 

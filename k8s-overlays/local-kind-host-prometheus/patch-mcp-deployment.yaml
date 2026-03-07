@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: investigation-mcp-server
+  namespace: kagent
+spec:
+  template:
+    spec:
+      containers:
+        - name: mcp-server
+          imagePullPolicy: IfNotPresent

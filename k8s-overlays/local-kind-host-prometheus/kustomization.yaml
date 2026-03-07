@@ -3,7 +3,7 @@ kind: Kustomization
 
 resources:
   - ../../k8s
-  - ../../k8s/optional-prometheus
+  - prometheus-gateway.yaml
 
 images:
   - name: ghcr.io/erauner/investigation-poc
@@ -12,4 +12,5 @@ images:
 
 patches:
   - path: patch-configmap.yaml
+  - path: patch-cluster-registry-configmap.yaml
   - path: patch-mcp-deployment.yaml
