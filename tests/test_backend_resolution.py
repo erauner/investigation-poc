@@ -24,6 +24,7 @@ def test_backend_resolution_notes_fallback_when_backend_lookup_fails(monkeypatch
 
     assert normalized.cluster == "erauner-home"
     assert normalized.target == "deployment/crashy"
+    assert normalized.service_name == "crashy"
     assert "resolved Backend/crashy to deployment/crashy" in normalized.normalization_notes
     assert "backend lookup failed; using deployment fallback" in normalized.normalization_notes
 
@@ -50,6 +51,7 @@ def test_frontend_resolution_notes_fallback_when_frontend_lookup_fails(monkeypat
 
     assert normalized.cluster == "erauner-home"
     assert normalized.target == "deployment/landing"
+    assert normalized.service_name == "landing"
     assert "resolved Frontend/landing to deployment/landing" in normalized.normalization_notes
     assert "frontend lookup failed; using deployment/landing fallback" in normalized.normalization_notes
 
@@ -137,6 +139,7 @@ def test_cluster_resolution_picks_first_failing_component(monkeypatch) -> None:
 
     assert normalized.cluster == "erauner-home"
     assert normalized.target == "deployment/api"
+    assert normalized.service_name == "api"
     assert "resolved Cluster/testapp to failing component Backend/api" in normalized.normalization_notes
     assert "resolved Backend/api to deployment/api" in normalized.normalization_notes
 
@@ -231,3 +234,4 @@ def test_backend_explicit_current_context_resolves_in_legacy_mode(monkeypatch) -
 
     assert normalized.cluster is None
     assert normalized.target == "deployment/crashy"
+    assert normalized.service_name == "crashy"

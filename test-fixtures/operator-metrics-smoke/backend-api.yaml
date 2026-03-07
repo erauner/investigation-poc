@@ -1,0 +1,18 @@
+apiVersion: homelab.erauner.dev/v1alpha1
+kind: Backend
+metadata:
+  name: api
+  namespace: operator-metrics-smoke
+spec:
+  image: metrics-smoke-app:local
+  replicas: 1
+  port: 8080
+  servicePort: 8080
+  healthCheck:
+    path: /health
+    initialDelaySeconds: 2
+    periodSeconds: 5
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: /metrics

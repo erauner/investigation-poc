@@ -1,0 +1,25 @@
+apiVersion: homelab.erauner.dev/v1alpha1
+kind: Cluster
+metadata:
+  name: tenant-a
+  namespace: operator-metrics-smoke
+spec:
+  environment: dev
+  components:
+    - name: api
+      kind: Backend
+      wave: 0
+  gitRepository:
+    url: https://example.invalid/operator-metrics-smoke.git
+    branch: main
+    path: manifests/
+  deploymentStrategy:
+    type: WaveSequential
+    waveTimeout: 180
+    healthCheckInterval: 5
+    rollbackOnFailure: false
+  syncPolicy:
+    automated: false
+    prune: false
+    selfHeal: false
+    pollInterval: 60

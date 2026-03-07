@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean kind-validate kind-validate-metrics kind-validate-service-metrics kind-validate-operator kind-validate-multi kind-down
+.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-metrics kind-validate-service-metrics kind-validate-operator kind-validate-operator-service-metrics kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -114,6 +114,7 @@ kind-install-kagent:
 	@kubectl apply -k "$(K8S_OVERLAY)"
 	@kubectl apply -f k8s/modelconfig.yaml
 	@kubectl apply -f k8s/agent.yaml
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/investigation-mcp-server >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-controller --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-ui --timeout=180s
 	@if kubectl -n "$(KAGENT_NAMESPACE)" get deploy/prometheus >/dev/null 2>&1; then \
@@ -148,6 +149,12 @@ operator-smoke-apply:
 operator-smoke-clean:
 	@./scripts/operator-smoke.sh delete
 
+operator-metrics-smoke-apply:
+	@./scripts/operator-metrics-smoke.sh apply
+
+operator-metrics-smoke-clean:
+	@./scripts/operator-metrics-smoke.sh delete
+
 kind-validate:
 	@./scripts/kind-validate.sh
 
@@ -159,6 +166,9 @@ kind-validate-service-metrics:
 
 kind-validate-operator:
 	@./scripts/kind-validate-operator.sh
+
+kind-validate-operator-service-metrics:
+	@./scripts/kind-validate-operator-service-metrics.sh
 
 kind-validate-multi:
 	@./scripts/kind-validate-multi.sh

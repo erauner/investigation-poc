@@ -23,9 +23,11 @@ _SCOPE_TITLE_PRIORITY = {
     "workload": {
         "Container Restart Failure Details": 80,
         "Crash Loop Detected": 70,
+        "Service Returning 5xx Responses": 68,
+        "High Service Latency": 62,
         "Possible OOM Condition": 65,
         "Target Not Found": 60,
-        "Error-like Log Patterns": 20,
+        "Error-like Log Patterns": 5,
         "Pod Restarts Increasing": 15,
         "No Critical Signals Found": 0,
     },
@@ -189,6 +191,18 @@ def build_primary_evidence(context: CollectedContextResponse, scope: str) -> lis
         )
         for item in _ranked_findings(context, scope)[:5]
     ]
+    service_request_rate = context.metrics.get("service_request_rate")
+    if service_request_rate is not None and service_request_rate > 0:
+        request_rate_item = EvidenceItem(
+            fingerprint=f"metric|{scope}|service_request_rate|{service_request_rate:.4f}",
+            source="prometheus",
+            kind="metric",
+            severity="info",
+            summary="prometheus: Service Request Rate",
+            detail=f"request rate over lookback window: {service_request_rate:.4f}/s",
+        )
+        if request_rate_item.fingerprint not in {item.fingerprint for item in evidence_items}:
+            evidence_items.append(request_rate_item)
     if context.events and context.events != ["no related events"]:
         first_event = context.events[0]
         reason, message = parse_compact_event_text(first_event)
