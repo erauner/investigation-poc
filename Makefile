@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean kind-validate kind-validate-operator kind-validate-multi kind-down
+.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean kind-validate kind-validate-metrics kind-validate-operator kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -6,6 +6,7 @@ KIND_CONTEXT ?= kind-$(KIND_CLUSTER_NAME)
 KAGENT_NAMESPACE ?= kagent
 KAGENT_VERSION ?= 0.7.22
 K8S_OVERLAY ?= k8s-overlays/local-kind
+HOST_PROMETHEUS_OVERLAY ?= k8s-overlays/local-kind-host-prometheus
 HTTP_DEBUG_OVERLAY ?= k8s-overlays/local-kind-optional-http
 INVESTIGATION_IMAGE ?= investigation-poc:local
 HOMELAB_OPERATOR_DIR ?= ../homelab-operator
@@ -102,6 +103,12 @@ kind-install-kagent:
 	@kubectl apply -f k8s/agent.yaml
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-controller --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-ui --timeout=180s
+	@if kubectl -n "$(KAGENT_NAMESPACE)" get deploy/prometheus >/dev/null 2>&1; then \
+		kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/prometheus --timeout=180s; \
+	fi
+	@if kubectl -n "$(KAGENT_NAMESPACE)" get deploy/kube-state-metrics >/dev/null 2>&1; then \
+		kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kube-state-metrics --timeout=180s; \
+	fi
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-mcp-server --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/investigation-agent --timeout=180s
 
@@ -130,6 +137,9 @@ operator-smoke-clean:
 
 kind-validate:
 	@./scripts/kind-validate.sh
+
+kind-validate-metrics:
+	@./scripts/kind-validate-metrics.sh
 
 kind-validate-operator:
 	@./scripts/kind-validate-operator.sh
