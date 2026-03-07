@@ -1,9 +1,11 @@
-from typing import Literal
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 ProfileType = Literal["workload", "service", "otel-pipeline"]
 ScopeType = Literal["workload", "service", "node", "otel-pipeline"]
+InvestigationMode = Literal["generic", "alert"]
 ConfidenceType = Literal["low", "medium", "high"]
 GuidelineCategory = Literal["interpretation", "data_source", "next_step", "delegation", "safety"]
 
@@ -47,6 +49,13 @@ class NormalizedInvestigationRequest(BaseModel):
     profile: ProfileType = Field(default="workload", description="Investigation profile")
     lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
     normalization_notes: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PlannedInvestigation:
+    mode: InvestigationMode
+    normalized: NormalizedInvestigationRequest
+    context: Any
 
 
 class CollectNodeContextRequest(BaseModel):

@@ -96,6 +96,42 @@ def test_operator_ownership_hint_flows_into_follow_ups() -> None:
     assert any("Backend/crashy" in item for item in report.suggested_follow_ups)
 
 
+def test_backend_normalization_note_flows_into_follow_ups() -> None:
+    request = NormalizedInvestigationRequest(
+        source="manual",
+        scope="workload",
+        namespace="operator-smoke",
+        target="deployment/crashy",
+        service_name="crashy",
+        profile="workload",
+        lookback_minutes=15,
+        normalization_notes=["resolved Backend/crashy to deployment/crashy"],
+    )
+    report = build_root_cause_report(
+        CollectedContextResponse(
+            target=TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+            object_state={"kind": "deployment", "name": "crashy"},
+            events=["BackOff restarting failed container"],
+            log_excerpt="starting",
+            metrics={"pod_restart_rate": 0.0034},
+            findings=[
+                Finding(
+                    severity="critical",
+                    source="events",
+                    title="Crash Loop Detected",
+                    evidence="Events indicate BackOff/CrashLoopBackOff behavior",
+                )
+            ],
+            limitations=[],
+            enrichment_hints=[],
+        ),
+        request,
+    )
+
+    assert any("Backend/crashy" in item for item in report.suggested_follow_ups)
+    assert any("resolved to deployment/crashy" in item for item in report.suggested_follow_ups)
+
+
 def test_workload_findings_include_service_enrichment_when_present() -> None:
     findings = derive_findings(
         "workload",
