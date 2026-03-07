@@ -53,8 +53,10 @@ Expected call path:
 
 ## Exposed tools
 
+- `investigate`
 - `list_investigation_agents`
-- `investigate_with_agent`
+
+`investigate` is the primary user-facing action. `list_investigation_agents` is a secondary/debug surface.
 
 ## Recommended rollout notes
 

@@ -121,6 +121,8 @@ This repo should be sufficient for local validation. The production GitOps rollo
 
 If you are preparing to fork this into a non-homelab environment, use [PRE_FORK_PLAN.md](/Users/erauner/git/side/investigation-poc/PRE_FORK_PLAN.md) as the repo-local checklist for separating platform code, runtime overlays, and domain-specific behavior.
 
+Shared client-facing semantics for Desktop and Claude Code live in [docs/interface-contract.md](/Users/erauner/git/side/investigation-poc/docs/interface-contract.md).
+
 ## Use from Claude Code
 
 After `make kind-install-kagent`, port-forward the controller MCP endpoint:
@@ -183,6 +185,12 @@ Local test flow:
 
 ```bash
 ./scripts/port-forward-controller-mcp.sh
+```
+
+For the plugin-dir or marketplace path, set the plugin MCP URL in your shell first:
+
+```bash
+export INVESTIGATION_REMOTE_MCP_URL="http://127.0.0.1:8083/mcp"
 ```
 
 2. In Claude Code, add the repo-local marketplace and install the plugin:

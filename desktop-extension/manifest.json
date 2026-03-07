@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "homelab-investigation-remote",
   "display_name": "Homelab Investigation Remote",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Thin Claude Desktop extension that proxies investigation tools to a remote streamable HTTP MCP server.",
   "long_description": "Claude Desktop extension for the homelab investigation stack. This bundle runs a local Node MCP server over stdio and forwards high-level investigation requests to the kagent controller MCP endpoint. The controller invokes the investigation agent behind the scenes, which keeps the user-facing path aligned with the intended product architecture.",
   "author": {
@@ -27,21 +27,21 @@
         "${__dirname}/server/index.js"
       ],
       "env": {
-        "REMOTE_MCP_URL": "${user_config.remote_mcp_url}",
-        "REMOTE_MCP_BEARER_TOKEN": "${user_config.remote_mcp_bearer_token}",
+        "INVESTIGATION_REMOTE_MCP_URL": "${user_config.remote_mcp_url}",
+        "INVESTIGATION_REMOTE_MCP_TOKEN": "${user_config.remote_mcp_bearer_token}",
         "ALLOW_INSECURE_TLS": "${user_config.allow_insecure_tls}",
-        "DEFAULT_AGENT_REF": "${user_config.default_agent_ref}"
+        "INVESTIGATION_DEFAULT_AGENT_REF": "${user_config.default_agent_ref}"
       }
     }
   },
   "tools": [
     {
-      "name": "list_investigation_agents",
-      "description": "List invokable investigation agents exposed by the controller."
+      "name": "investigate",
+      "description": "Investigate a Kubernetes issue through the controller-backed investigation path."
     },
     {
-      "name": "investigate_with_agent",
-      "description": "Invoke the investigation agent through the controller."
+      "name": "list_investigation_agents",
+      "description": "List invokable investigation agents exposed by the controller."
     }
   ],
   "keywords": [

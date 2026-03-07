@@ -27,8 +27,10 @@ That is why `remote_mcp_url` should point at the controller route, for example `
 
 The extension intentionally exposes a higher-level, human-facing surface:
 
+- `investigate`
 - `list_investigation_agents`
-- `investigate_with_agent`
+
+`investigate` is the primary product-facing action. `list_investigation_agents` is retained as a secondary/debug surface.
 
 If you want more tools later, add them in [server/index.js](/Users/erauner/git/side/investigation-poc/desktop-extension/server/index.js) and [manifest.json](/Users/erauner/git/side/investigation-poc/desktop-extension/manifest.json).
 
@@ -82,3 +84,4 @@ Admin handoff notes live in [ADMIN_HANDOFF.md](/Users/erauner/git/side/investiga
 
 - `allow_insecure_tls` exists only for lab-grade self-signed endpoints.
 - The extension is for Claude Desktop. Claude Code should keep using `.mcp.json` or a managed remote MCP server.
+- The Desktop and Claude Code surfaces are intended to represent the same product action: `Investigate`.

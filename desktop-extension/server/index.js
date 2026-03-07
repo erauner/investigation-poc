@@ -4,17 +4,8 @@ import process from "node:process";
 
 const TOOLS = [
   {
-    name: "list_investigation_agents",
-    description: "List invokable kagent agents from the controller MCP endpoint.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-      additionalProperties: false
-    }
-  },
-  {
-    name: "investigate_with_agent",
-    description: "Invoke the investigation agent through the kagent controller MCP endpoint.",
+    name: "investigate",
+    description: "Investigate a Kubernetes issue through the controller-backed investigation path.",
     inputSchema: {
       type: "object",
       properties: {
@@ -34,6 +25,15 @@ const TOOLS = [
       required: ["task"],
       additionalProperties: false
     }
+  },
+  {
+    name: "list_investigation_agents",
+    description: "List invokable kagent agents from the controller MCP endpoint.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    }
   }
 ];
 
@@ -43,14 +43,26 @@ let requestId = 0;
 let remoteInitialized = false;
 
 function controllerConfig() {
-  const remoteUrl = (process.env.REMOTE_MCP_URL || "").trim();
+  const remoteUrl = (
+    process.env.INVESTIGATION_REMOTE_MCP_URL ||
+    process.env.REMOTE_MCP_URL ||
+    ""
+  ).trim();
   if (!remoteUrl) {
-    throw new Error("REMOTE_MCP_URL is required");
+    throw new Error("INVESTIGATION_REMOTE_MCP_URL is required");
   }
 
-  const bearerToken = (process.env.REMOTE_MCP_BEARER_TOKEN || "").trim();
+  const bearerToken = (
+    process.env.INVESTIGATION_REMOTE_MCP_TOKEN ||
+    process.env.REMOTE_MCP_BEARER_TOKEN ||
+    ""
+  ).trim();
   const defaultAgentRef =
-    (process.env.DEFAULT_AGENT_REF || "").trim() || "kagent/homelab-k8s-custom-agent";
+    (
+      process.env.INVESTIGATION_DEFAULT_AGENT_REF ||
+      process.env.DEFAULT_AGENT_REF ||
+      ""
+    ).trim() || "kagent/homelab-k8s-custom-agent";
   const allowInsecureTls =
     (process.env.ALLOW_INSECURE_TLS || "").trim().toLowerCase() === "true";
 
@@ -195,7 +207,7 @@ async function ensureRemoteInitialized() {
     capabilities: {},
     clientInfo: {
       name: "homelab-investigation-remote",
-      version: "0.1.4"
+      version: "0.1.5"
     }
   });
 
@@ -260,7 +272,7 @@ async function handleMessage(message) {
       },
       serverInfo: {
         name: "homelab-investigation-remote",
-        version: "0.1.4"
+        version: "0.1.5"
       }
     });
     return;
@@ -283,7 +295,7 @@ async function handleMessage(message) {
       return;
     }
 
-    if (name === "investigate_with_agent") {
+    if (name === "investigate" || name === "investigate_with_agent") {
       writeResult(message.id, await investigateResult(args));
       return;
     }
