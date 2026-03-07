@@ -147,3 +147,54 @@ def test_manual_cluster_target_stays_workload_scope_even_with_service_profile() 
 
     assert normalized.scope == "workload"
     assert normalized.profile == "service"
+
+
+def test_collect_context_for_workload_enriches_with_service_metrics(monkeypatch) -> None:
+    target = TargetRef(namespace="metrics-smoke", kind="deployment", name="metrics-api")
+    monkeypatch.setattr("investigation_service.tools.resolve_target", lambda namespace, value: target)
+    monkeypatch.setattr("investigation_service.tools.resolve_runtime_target", lambda value: value)
+    monkeypatch.setattr(
+        "investigation_service.tools.get_k8s_object",
+        lambda value: {"namespace": "metrics-smoke", "kind": "deployment", "name": "metrics-api"},
+    )
+    monkeypatch.setattr("investigation_service.tools.get_related_events", lambda value: ["deployment available"])
+    monkeypatch.setattr("investigation_service.tools.get_pod_logs", lambda value, tail=200: "healthy")
+    monkeypatch.setattr(
+        "investigation_service.tools.collect_metrics_for_scope",
+        lambda target, profile, service_name, lookback_minutes: (
+            {
+                "profile": "workload",
+                "prometheus_available": True,
+                "pod_restart_rate": 0.0,
+            },
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        "investigation_service.tools.collect_service_enrichment_metrics",
+        lambda namespace, service_name, lookback_minutes: (
+            {
+                "service_request_rate": 4.2,
+                "service_error_rate": 0.3,
+                "service_latency_p95_seconds": 1.7,
+            },
+            [],
+        ),
+    )
+
+    context = _collect_context(
+        CollectContextRequest(
+            namespace="metrics-smoke",
+            target="deployment/metrics-api",
+            profile="workload",
+            service_name="metrics-api",
+            lookback_minutes=15,
+        )
+    )
+
+    assert context.metrics["service_request_rate"] == 4.2
+    assert context.metrics["service_error_rate"] == 0.3
+    assert context.metrics["service_latency_p95_seconds"] == 1.7
+    titles = {item.title for item in context.findings}
+    assert "Service Returning 5xx Responses" in titles
+    assert "High Service Latency" in titles

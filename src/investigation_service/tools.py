@@ -23,7 +23,7 @@ from .models import (
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
-from .prom_adapter import collect_metrics_for_scope
+from .prom_adapter import collect_metrics_for_scope, collect_service_enrichment_metrics
 from .routing import canonical_target as _canonical_target
 from .routing import scope_from_target as _scope_from_target
 from .settings import get_default_lookback_minutes, get_log_tail_lines
@@ -148,6 +148,19 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
         lookback_minutes=lookback_minutes,
         cluster=cluster,
     )
+    if effective_profile == "workload" and effective_service_name and target.kind in {"pod", "deployment"}:
+        service_metrics, _ = _call_with_optional_cluster(
+            collect_service_enrichment_metrics,
+            namespace=target.namespace or req.namespace or "",
+            service_name=effective_service_name,
+            lookback_minutes=lookback_minutes,
+            cluster=cluster,
+        )
+        for key, value in service_metrics.items():
+            if value is not None:
+                metrics[key] = value
+        if any(value is not None for value in service_metrics.values()):
+            metrics["prometheus_available"] = True
     findings = derive_findings(effective_profile, object_state, events, logs, metrics)
     limitations = list(metric_limitations)
     if object_state.get("error"):

@@ -94,3 +94,21 @@ def test_operator_ownership_hint_flows_into_follow_ups() -> None:
     )
 
     assert any("Backend/crashy" in item for item in report.suggested_follow_ups)
+
+
+def test_workload_findings_include_service_enrichment_when_present() -> None:
+    findings = derive_findings(
+        "workload",
+        {"kind": "deployment", "name": "metrics-api"},
+        ["deployment available"],
+        "healthy",
+        {
+            "pod_restart_rate": 0.0,
+            "service_error_rate": 0.2,
+            "service_latency_p95_seconds": 1.8,
+        },
+    )
+
+    titles = {item.title for item in findings}
+    assert "Service Returning 5xx Responses" in titles
+    assert "High Service Latency" in titles

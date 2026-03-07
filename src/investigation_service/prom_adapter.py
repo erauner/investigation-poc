@@ -167,6 +167,21 @@ def collect_service_metrics(
     return metrics, limitations
 
 
+def collect_service_enrichment_metrics(
+    namespace: str,
+    service_name: str,
+    lookback_minutes: int,
+    cluster: ResolvedCluster | None = None,
+) -> tuple[dict, list[str]]:
+    prometheus_url = _effective_prometheus_url(cluster)
+    return collect_service_metrics(
+        namespace=namespace,
+        service_name=service_name,
+        lookback_minutes=lookback_minutes,
+        prometheus_url=prometheus_url,
+    )
+
+
 def collect_node_metrics(node_name: str, *, prometheus_url: str) -> tuple[dict, list[str]]:
     escaped_name = node_name.replace('"', '\\"')
     limitations: list[str] = []

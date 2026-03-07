@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean kind-validate kind-validate-metrics kind-validate-operator kind-validate-multi kind-down
+.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean kind-validate kind-validate-metrics kind-validate-service-metrics kind-validate-operator kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -9,6 +9,7 @@ K8S_OVERLAY ?= k8s-overlays/local-kind
 HOST_PROMETHEUS_OVERLAY ?= k8s-overlays/local-kind-host-prometheus
 HTTP_DEBUG_OVERLAY ?= k8s-overlays/local-kind-optional-http
 INVESTIGATION_IMAGE ?= investigation-poc:local
+METRICS_SMOKE_IMAGE ?= metrics-smoke-app:local
 HOMELAB_OPERATOR_DIR ?= ../homelab-operator
 OPERATOR_IMAGE ?= homelab-operator:local
 
@@ -47,6 +48,12 @@ kind-build-investigation-image:
 kind-load-investigation-image:
 	@kind load docker-image "$(INVESTIGATION_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
 
+kind-build-metrics-smoke-image:
+	@docker build -t "$(METRICS_SMOKE_IMAGE)" testapps/metrics_smoke
+
+kind-load-metrics-smoke-image:
+	@kind load docker-image "$(METRICS_SMOKE_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
+
 kagent-smoke-apply:
 	@./scripts/smoke-workload.sh apply
 
@@ -61,6 +68,12 @@ kagent-smoke-loop:
 	@$(MAKE) kagent-smoke-apply
 	@$(MAKE) kagent-smoke-test
 	@$(MAKE) kagent-smoke-clean
+
+metrics-smoke-apply:
+	@./scripts/metrics-smoke.sh apply
+
+metrics-smoke-clean:
+	@./scripts/metrics-smoke.sh delete
 
 kind-up:
 	@if ! command -v kind >/dev/null 2>&1; then \
@@ -140,6 +153,9 @@ kind-validate:
 
 kind-validate-metrics:
 	@./scripts/kind-validate-metrics.sh
+
+kind-validate-service-metrics:
+	@./scripts/kind-validate-service-metrics.sh
 
 kind-validate-operator:
 	@./scripts/kind-validate-operator.sh
