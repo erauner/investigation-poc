@@ -6,6 +6,7 @@ SMOKE_NAMESPACE="${SMOKE_NAMESPACE:-operator-smoke}"
 KEEP_SMOKE="${KEEP_SMOKE:-0}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 WORKLOAD_PROMPT="${WORKLOAD_PROMPT:-Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE}. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
+DIRECT_TARGET_PROMPT="${DIRECT_TARGET_PROMPT:-Investigate Backend/crashy in namespace ${SMOKE_NAMESPACE}. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 TOP_LEVEL_PROMPT="${TOP_LEVEL_PROMPT:-Use build_investigation_report for the investigation. Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE} and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 
 need_cmd() {
@@ -140,7 +141,9 @@ fi
 tmp_dir="$(mktemp -d)"
 standard_output="${tmp_dir}/standard.md"
 top_level_output="${tmp_dir}/top-level.md"
+direct_target_output="${tmp_dir}/direct-target.md"
 standard_raw="${tmp_dir}/standard.raw"
+direct_target_raw="${tmp_dir}/direct-target.raw"
 top_level_raw="${tmp_dir}/top-level.raw"
 
 echo "==> Setting up local kind stack"
@@ -176,6 +179,20 @@ if grep -Eiq "correlated changes|related data available" <<<"${limitations_secti
   echo "Limitations still include correlated-change leakage" >&2
   echo "--- Limitations ---" >&2
   echo "${limitations_section}" >&2
+  exit 1
+fi
+
+echo "==> Running direct operator target validation prompt"
+run_make kagent-smoke-test TASK="${DIRECT_TARGET_PROMPT}" >"${direct_target_raw}"
+normalize_agent_output "${direct_target_raw}" "${direct_target_output}"
+cat "${direct_target_output}"
+
+for heading in "Diagnosis" "Evidence" "Related Data" "Limitations" "Recommended next step"; do
+  require_heading "${heading}" "${direct_target_output}"
+done
+
+if ! grep -Eiq 'Backend/crashy|operator-managed workload|homelab-operator' "${direct_target_output}"; then
+  echo "Expected direct operator target output to retain operator target context" >&2
   exit 1
 fi
 
