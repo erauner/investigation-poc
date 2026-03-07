@@ -65,6 +65,48 @@ def _run_kubectl(args: list[str], cluster: ResolvedCluster | None = None) -> tup
     return True, completed.stdout
 
 
+def get_backend_cr(namespace: str, name: str, cluster: ResolvedCluster | None = None) -> dict:
+    ok, output = _run_kubectl(
+        ["-n", namespace, "get", "backends.homelab.erauner.dev", name, "-o", "json"],
+        cluster=cluster,
+    )
+    if not ok:
+        return {"error": output, "namespace": namespace, "kind": "Backend", "name": name}
+
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        return {"error": "invalid kubectl json", "raw": output[:400], "namespace": namespace, "kind": "Backend", "name": name}
+
+
+def get_frontend_cr(namespace: str, name: str, cluster: ResolvedCluster | None = None) -> dict:
+    ok, output = _run_kubectl(
+        ["-n", namespace, "get", "frontends.homelab.erauner.dev", name, "-o", "json"],
+        cluster=cluster,
+    )
+    if not ok:
+        return {"error": output, "namespace": namespace, "kind": "Frontend", "name": name}
+
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        return {"error": "invalid kubectl json", "raw": output[:400], "namespace": namespace, "kind": "Frontend", "name": name}
+
+
+def get_cluster_cr(namespace: str, name: str, cluster: ResolvedCluster | None = None) -> dict:
+    ok, output = _run_kubectl(
+        ["-n", namespace, "get", "clusters.homelab.erauner.dev", name, "-o", "json"],
+        cluster=cluster,
+    )
+    if not ok:
+        return {"error": output, "namespace": namespace, "kind": "Cluster", "name": name}
+
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        return {"error": "invalid kubectl json", "raw": output[:400], "namespace": namespace, "kind": "Cluster", "name": name}
+
+
 def _resource_exists(namespace: str, kind: str, name: str, cluster: ResolvedCluster | None = None) -> bool:
     if kind == "node":
         ok, _ = _call_with_optional_cluster(_run_kubectl, ["get", kind, name, "-o", "name"], cluster=cluster)
@@ -131,6 +173,8 @@ def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) ->
         "namespace": target.namespace,
         "kind": target.kind,
         "name": target.name,
+        "labels": metadata.get("labels") or {},
+        "ownerReferences": metadata.get("ownerReferences") or [],
         "phase": status.get("phase"),
         "readyReplicas": status.get("readyReplicas"),
         "replicas": status.get("replicas"),

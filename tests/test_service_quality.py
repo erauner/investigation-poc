@@ -54,6 +54,46 @@ def test_collect_context_for_service_skips_pod_logs(monkeypatch) -> None:
 
     assert context.log_excerpt == ""
     assert "pod logs unavailable for target" not in context.limitations
+    assert not any("operator-managed workload" in item for item in context.enrichment_hints)
+
+
+def test_collect_context_adds_operator_ownership_hint_for_workload(monkeypatch) -> None:
+    target = TargetRef(namespace="operator-smoke", kind="pod", name="crashy-abc123")
+    monkeypatch.setattr("investigation_service.tools.resolve_target", lambda namespace, value: target)
+    monkeypatch.setattr("investigation_service.tools.resolve_runtime_target", lambda value: value)
+    monkeypatch.setattr(
+        "investigation_service.tools.get_k8s_object",
+        lambda value: {
+            "namespace": "operator-smoke",
+            "kind": "pod",
+            "name": "crashy-abc123",
+            "labels": {
+                "app.kubernetes.io/managed-by": "homelab-operator",
+                "homelab.erauner.dev/owner-kind": "Backend",
+                "homelab.erauner.dev/owner-name": "crashy",
+            },
+            "ownerReferences": [{"kind": "ReplicaSet", "name": "crashy-65f89648f4"}],
+        },
+    )
+    monkeypatch.setattr("investigation_service.tools.get_related_events", lambda value: ["no related events"])
+    monkeypatch.setattr("investigation_service.tools.get_pod_logs", lambda value, tail=200: "starting\nexit 17")
+    monkeypatch.setattr(
+        "investigation_service.tools.collect_metrics_for_scope",
+        lambda target, profile, service_name, lookback_minutes: ({"prometheus_available": True}, []),
+    )
+    monkeypatch.setattr("investigation_service.tools.derive_findings", lambda profile, object_state, events, logs, metrics: [])
+
+    context = _collect_context(
+        CollectContextRequest(
+            namespace="operator-smoke",
+            target="pod/crashy-abc123",
+            profile="workload",
+            lookback_minutes=15,
+        )
+    )
+
+    assert any("operator-managed workload (homelab-operator)" in item for item in context.enrichment_hints)
+    assert any("Backend/crashy" in item for item in context.enrichment_hints)
 
 
 def test_manual_service_request_promotes_profile_to_service() -> None:
@@ -68,3 +108,42 @@ def test_manual_service_request_promotes_profile_to_service() -> None:
     assert normalized.scope == "service"
     assert normalized.profile == "service"
     assert "profile promoted to service based on target" in normalized.normalization_notes
+
+
+def test_manual_backend_target_stays_workload_scope_even_with_service_profile() -> None:
+    normalized = _normalized_request(
+        InvestigationReportRequest(
+            namespace="operator-smoke",
+            target="Backend/crashy",
+            profile="service",
+        )
+    )
+
+    assert normalized.scope == "workload"
+    assert normalized.profile == "service"
+
+
+def test_manual_frontend_target_stays_workload_scope_even_with_service_profile() -> None:
+    normalized = _normalized_request(
+        InvestigationReportRequest(
+            namespace="operator-smoke",
+            target="Frontend/landing",
+            profile="service",
+        )
+    )
+
+    assert normalized.scope == "workload"
+    assert normalized.profile == "service"
+
+
+def test_manual_cluster_target_stays_workload_scope_even_with_service_profile() -> None:
+    normalized = _normalized_request(
+        InvestigationReportRequest(
+            namespace="operator-smoke",
+            target="Cluster/testapp",
+            profile="service",
+        )
+    )
+
+    assert normalized.scope == "workload"
+    assert normalized.profile == "service"

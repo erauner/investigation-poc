@@ -117,6 +117,16 @@ def _legacy_cluster() -> ResolvedCluster:
 def resolve_cluster(requested_cluster: str | None, labels: dict[str, str] | None = None) -> ResolvedCluster:
     registry = load_cluster_registry()
     requested_alias = _normalize_alias(requested_cluster)
+    legacy_aliases = {"current-context"}
+    configured_legacy_alias = _normalize_alias(get_cluster_name())
+    if configured_legacy_alias:
+        legacy_aliases.add(configured_legacy_alias)
+
+    if not registry.clusters:
+        if requested_alias is None or requested_alias in legacy_aliases:
+            return _legacy_cluster()
+        raise ValueError(f"unknown cluster alias: {requested_cluster}")
+
     if requested_alias:
         config = registry.clusters.get(requested_alias)
         if config is None:

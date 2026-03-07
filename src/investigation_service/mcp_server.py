@@ -41,7 +41,7 @@ def collect_workload_context(
     service_name: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Collect structured workload context (state, events, logs, metrics, findings)."""
+    """Collect structured workload context (state, events, logs, metrics, findings) for drill-down after the top-level report."""
     response = collect_workload_context_impl(
         CollectContextRequest(
             cluster=cluster,
@@ -68,7 +68,7 @@ def collect_alert_context(
     service_name: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Collect structured context for an alert-shaped input by inferring the investigation target."""
+    """Collect structured context for an alert-shaped input by inferring the investigation target. Prefer build_investigation_report first for normal investigations."""
     response = collect_alert_context_impl(
         CollectAlertContextRequest(
             alertname=alertname,
@@ -99,7 +99,7 @@ def normalize_alert_input(
     service_name: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Normalize alert-shaped input into a typed investigation request without collecting data."""
+    """Normalize alert-shaped input into a typed investigation request without collecting data. Use mainly for debugging or explicit routing inspection."""
     response = normalize_alert_input_impl(
         CollectAlertContextRequest(
             alertname=alertname,
@@ -119,7 +119,7 @@ def normalize_alert_input(
 
 @mcp.tool()
 def collect_node_context(node_name: str, lookback_minutes: int = 15, cluster: str | None = None) -> dict:
-    """Collect structured context for a cluster node target."""
+    """Collect structured context for a cluster node target as a lower-level follow-up tool."""
     response = collect_node_context_impl(
         CollectNodeContextRequest(cluster=cluster, node_name=node_name, lookback_minutes=lookback_minutes)
     )
@@ -134,7 +134,7 @@ def collect_service_context(
     target: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Collect structured context for a namespaced service target."""
+    """Collect structured context for a namespaced service target as a lower-level follow-up tool."""
     response = collect_service_context_impl(
         CollectServiceContextRequest(
             cluster=cluster,
@@ -149,7 +149,7 @@ def collect_service_context(
 
 @mcp.tool()
 def find_unhealthy_workloads(namespace: str, limit: int = 5, cluster: str | None = None) -> dict:
-    """List concrete unhealthy pod targets in a namespace for vague workload requests."""
+    """List concrete unhealthy pod targets in a namespace for vague workload requests when the user did not name a target."""
     response = find_unhealthy_workloads_impl(
         FindUnhealthyWorkloadsRequest(cluster=cluster, namespace=namespace, limit=limit)
     )
@@ -158,7 +158,7 @@ def find_unhealthy_workloads(namespace: str, limit: int = 5, cluster: str | None
 
 @mcp.tool()
 def find_unhealthy_pod(namespace: str, cluster: str | None = None) -> dict:
-    """Find the single best unhealthy pod candidate in a namespace."""
+    """Find the single best unhealthy pod candidate in a namespace for vague workload requests."""
     response = find_unhealthy_pod_impl(FindUnhealthyPodRequest(cluster=cluster, namespace=namespace))
     return response.model_dump(mode="json")
 
@@ -172,7 +172,7 @@ def build_root_cause_report(
     service_name: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Collect context for a normalized target and return a typed root-cause report."""
+    """Collect context for a normalized target and return a typed root-cause report. Prefer build_investigation_report for the default user-facing flow."""
     response = build_root_cause_report_impl(
         BuildRootCauseReportRequest(
             cluster=cluster,
@@ -203,7 +203,7 @@ def build_investigation_report(
     annotations: dict[str, str] | None = None,
     node_name: str | None = None,
 ) -> dict:
-    """Build the final typed investigation report with backend-owned section composition and dedupe."""
+    """Build the final typed investigation report for normal investigations. Use this first when namespace and target are already known, including Backend/<name>, Frontend/<name>, and Cluster/<name> convenience targets, because backend routing resolves them to the correct deployment or service target automatically."""
     response = build_investigation_report_impl(
         InvestigationReportRequest(
             cluster=cluster,
@@ -236,7 +236,7 @@ def collect_correlated_changes(
     anchor_timestamp: str | None = None,
     limit: int = 10,
 ) -> dict:
-    """Collect bounded, ranked correlated changes for a normalized target."""
+    """Collect bounded, ranked correlated changes for a normalized target as follow-up after the top-level report when deeper inspection is needed."""
     response = collect_correlated_changes_impl(
         CollectCorrelatedChangesRequest(
             cluster=cluster,

@@ -2,9 +2,12 @@ from .models import ScopeType
 
 
 def scope_from_target(target: str, profile: str) -> ScopeType:
-    if target.startswith("node/"):
+    lowered = target.lower()
+    if lowered.startswith("node/"):
         return "node"
-    if target.startswith("service/") or profile == "service":
+    if lowered.startswith(("backend/", "frontend/", "cluster/")):
+        return "workload"
+    if lowered.startswith("service/") or profile == "service":
         return "service"
     if profile == "otel-pipeline":
         return "otel-pipeline"

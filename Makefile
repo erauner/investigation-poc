@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-setup kind-smoke-loop kind-validate kind-validate-multi kind-down
+.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-enable-http-debug kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean kind-validate kind-validate-operator kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -6,6 +6,10 @@ KIND_CONTEXT ?= kind-$(KIND_CLUSTER_NAME)
 KAGENT_NAMESPACE ?= kagent
 KAGENT_VERSION ?= 0.7.22
 K8S_OVERLAY ?= k8s-overlays/local-kind
+HTTP_DEBUG_OVERLAY ?= k8s-overlays/local-kind-optional-http
+INVESTIGATION_IMAGE ?= investigation-poc:local
+HOMELAB_OPERATOR_DIR ?= ../homelab-operator
+OPERATOR_IMAGE ?= homelab-operator:local
 
 install:
 	@if command -v uv >/dev/null 2>&1; then \
@@ -35,6 +39,12 @@ run-mcp:
 	else \
 		MCP_HOST=0.0.0.0 MCP_PORT=8001 MCP_PATH=/mcp $(PYTHON) -m investigation_service.mcp_server; \
 	fi
+
+kind-build-investigation-image:
+	@docker build -t "$(INVESTIGATION_IMAGE)" .
+
+kind-load-investigation-image:
+	@kind load docker-image "$(INVESTIGATION_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
 
 kagent-smoke-apply:
 	@./scripts/smoke-workload.sh apply
@@ -79,6 +89,8 @@ kind-install-kagent:
 		echo "Example: OPENAI_API_KEY=sk-... make kind-install-kagent"; \
 		exit 1; \
 	fi
+	@$(MAKE) kind-build-investigation-image
+	@$(MAKE) kind-load-investigation-image
 	@kubectl create namespace "$(KAGENT_NAMESPACE)" --dry-run=client -o yaml | kubectl apply -f -
 	@helm upgrade --install kagent-crds oci://ghcr.io/kagent-dev/kagent/helm/kagent-crds --version "$(KAGENT_VERSION)" -n "$(KAGENT_NAMESPACE)"
 	@helm upgrade --install kagent oci://ghcr.io/kagent-dev/kagent/helm/kagent --version "$(KAGENT_VERSION)" -n "$(KAGENT_NAMESPACE)"
@@ -93,8 +105,13 @@ kind-install-kagent:
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-mcp-server --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/investigation-agent --timeout=180s
 
+kind-install-operator:
+	@KIND_CLUSTER_NAME="$(KIND_CLUSTER_NAME)" KIND_CONTEXT="$(KIND_CONTEXT)" HOMELAB_OPERATOR_DIR="$(HOMELAB_OPERATOR_DIR)" OPERATOR_IMAGE="$(OPERATOR_IMAGE)" ./scripts/operator-install.sh
+
 kind-enable-http-debug:
-	@kubectl apply -k k8s/optional-http
+	@$(MAKE) kind-build-investigation-image
+	@$(MAKE) kind-load-investigation-image
+	@kubectl apply -k "$(HTTP_DEBUG_OVERLAY)"
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-service --timeout=180s
 
 kind-setup:
@@ -105,8 +122,17 @@ kind-smoke-loop:
 	@$(MAKE) kind-setup
 	@$(MAKE) kagent-smoke-loop
 
+operator-smoke-apply:
+	@./scripts/operator-smoke.sh apply
+
+operator-smoke-clean:
+	@./scripts/operator-smoke.sh delete
+
 kind-validate:
 	@./scripts/kind-validate.sh
+
+kind-validate-operator:
+	@./scripts/kind-validate-operator.sh
 
 kind-validate-multi:
 	@./scripts/kind-validate-multi.sh

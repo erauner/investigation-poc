@@ -28,6 +28,7 @@ spec:
           name: investigation-mcp-server
           kind: RemoteMCPServer
           toolNames:
+            - build_investigation_report
             - normalize_alert_input
             - find_unhealthy_pod
             - find_unhealthy_workloads
@@ -36,7 +37,6 @@ spec:
             - collect_workload_context
             - collect_alert_context
             - build_root_cause_report
-            - build_investigation_report
             - collect_correlated_changes
     a2aConfig:
       skills:
@@ -50,3 +50,6 @@ spec:
             - "Investigate the unhealthy pod in namespace kagent-smoke."
             - "Why is crashy failing?"
             - "Summarize diagnosis, evidence, and recommendation for pod/crashy."
+            - "Investigate Backend/crashy in namespace operator-smoke."
+            - "Investigate Frontend/landing in namespace operator-smoke for high latency."
+            - "Investigate Cluster/testapp in namespace operator-smoke."

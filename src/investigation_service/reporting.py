@@ -16,6 +16,8 @@ from .models import (
     ResolvedGuideline,
     RootCauseReport,
 )
+from .cluster_registry import resolve_cluster
+from .k8s_adapter import get_backend_cr, get_cluster_cr, get_frontend_cr
 from .routing import canonical_target, scope_from_target
 from .synthesis import build_root_cause_report as build_root_cause_report_impl
 from .tools import (
@@ -107,6 +109,163 @@ def _resolve_vague_workload_target(normalized: NormalizedInvestigationRequest) -
     notes = list(normalized.normalization_notes)
     notes.append(f"resolved vague workload target to {candidate.target}")
     return normalized.model_copy(update={"target": candidate.target, "normalization_notes": notes})
+
+
+def _resolved_cluster_value(cluster) -> str | None:
+    if getattr(cluster, "source", None) == "legacy_current_context":
+        return None
+    return cluster.alias
+
+
+def _resolve_backend_convenience_target(normalized: NormalizedInvestigationRequest) -> NormalizedInvestigationRequest:
+    raw_target = normalized.target.strip()
+    if "/" not in raw_target:
+        return normalized
+
+    kind, name = raw_target.split("/", 1)
+    if kind.lower() != "backend":
+        return normalized
+    if not name:
+        raise ValueError("backend target name is required")
+    if not normalized.namespace:
+        raise ValueError("namespace is required for Backend targets")
+
+    cluster = resolve_cluster(normalized.cluster)
+    backend = get_backend_cr(normalized.namespace, name, cluster=cluster)
+    resolved_target = f"deployment/{name}"
+    notes = list(normalized.normalization_notes)
+    notes.append(f"resolved Backend/{name} to {resolved_target}")
+    if backend.get("error"):
+        notes.append("backend lookup failed; using deployment fallback")
+
+    return normalized.model_copy(
+        update={
+            "cluster": _resolved_cluster_value(cluster),
+            "scope": "workload",
+            "profile": "workload",
+            "service_name": None,
+            "target": resolved_target,
+            "normalization_notes": notes,
+        }
+    )
+
+
+def _resolve_frontend_convenience_target(normalized: NormalizedInvestigationRequest) -> NormalizedInvestigationRequest:
+    raw_target = normalized.target.strip()
+    if "/" not in raw_target:
+        return normalized
+
+    kind, name = raw_target.split("/", 1)
+    if kind.lower() != "frontend":
+        return normalized
+    if not name:
+        raise ValueError("frontend target name is required")
+    if not normalized.namespace:
+        raise ValueError("namespace is required for Frontend targets")
+
+    cluster = resolve_cluster(normalized.cluster)
+    frontend = get_frontend_cr(normalized.namespace, name, cluster=cluster)
+    if normalized.profile == "service":
+        resolved_target = f"service/{name}"
+        scope = "service"
+        profile = "service"
+        service_name = name
+    else:
+        resolved_target = f"deployment/{name}"
+        scope = "workload"
+        profile = "workload"
+        service_name = None
+    notes = list(normalized.normalization_notes)
+    notes.append(f"resolved Frontend/{name} to {resolved_target}")
+    if frontend.get("error"):
+        notes.append(f"frontend lookup failed; using {resolved_target} fallback")
+
+    return normalized.model_copy(
+        update={
+            "cluster": _resolved_cluster_value(cluster),
+            "scope": scope,
+            "profile": profile,
+            "service_name": service_name,
+            "target": resolved_target,
+            "normalization_notes": notes,
+        }
+    )
+
+
+def _cluster_component_priority(item: dict) -> tuple[int, int, str]:
+    phase = (item.get("phase") or "").lower()
+    ready = bool(item.get("ready"))
+    if phase == "failed":
+        rank = 0
+    elif phase == "degraded":
+        rank = 1
+    elif not ready:
+        rank = 2
+    elif phase in {"deploying", "waitingfordeps", "pending"}:
+        rank = 3
+    else:
+        rank = 4
+    return (rank, int(item.get("wave", 0)), item.get("name") or "")
+
+
+def _component_target(kind: str, name: str, profile: str) -> tuple[str, str, str, str | None]:
+    lowered = kind.lower()
+    if lowered == "frontend" and profile == "service":
+        return (f"service/{name}", "service", "service", name)
+    if lowered in {"backend", "frontend", "deployment"}:
+        return (f"deployment/{name}", "workload", "workload", None)
+    if lowered == "service":
+        return (f"service/{name}", "service", "service", name)
+    if lowered == "statefulset":
+        return (f"deployment/{name}", "workload", "workload", None)
+    raise ValueError(f"unsupported cluster component kind for investigation: {kind}")
+
+
+def _resolve_cluster_convenience_target(normalized: NormalizedInvestigationRequest) -> NormalizedInvestigationRequest:
+    raw_target = normalized.target.strip()
+    if "/" not in raw_target:
+        return normalized
+
+    kind, name = raw_target.split("/", 1)
+    if kind.lower() != "cluster":
+        return normalized
+    if not name:
+        raise ValueError("cluster target name is required")
+    if not normalized.namespace:
+        raise ValueError("namespace is required for Cluster targets")
+
+    cluster = resolve_cluster(normalized.cluster)
+    cluster_cr = get_cluster_cr(normalized.namespace, name, cluster=cluster)
+    if cluster_cr.get("error"):
+        raise ValueError(f"cluster lookup failed for {name}: {cluster_cr['error']}")
+
+    statuses = cluster_cr.get("status", {}).get("componentStatuses") or []
+    if not statuses:
+        raise ValueError(f"cluster {name} has no componentStatuses to investigate")
+
+    selected = sorted(statuses, key=_cluster_component_priority)[0]
+    component_kind = selected.get("kind") or ""
+    component_name = selected.get("name") or ""
+    if not component_kind or not component_name:
+        raise ValueError(f"cluster {name} has an incomplete component status entry")
+
+    resolved_target, scope, profile, service_name = _component_target(
+        component_kind, component_name, normalized.profile
+    )
+    notes = list(normalized.normalization_notes)
+    notes.append(f"resolved Cluster/{name} to failing component {component_kind}/{component_name}")
+    notes.append(f"resolved {component_kind}/{component_name} to {resolved_target}")
+
+    return normalized.model_copy(
+        update={
+            "cluster": _resolved_cluster_value(cluster),
+            "scope": scope,
+            "profile": profile,
+            "service_name": service_name,
+            "target": resolved_target,
+            "normalization_notes": notes,
+        }
+    )
 
 
 def _collect_context_for_normalized_request(normalized: NormalizedInvestigationRequest):
@@ -284,7 +443,11 @@ def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport
 
 
 def build_investigation_report(req: InvestigationReportRequest) -> InvestigationReport:
-    normalized = _resolve_vague_workload_target(_normalized_request(req))
+    normalized = _normalized_request(req)
+    normalized = _resolve_backend_convenience_target(normalized)
+    normalized = _resolve_frontend_convenience_target(normalized)
+    normalized = _resolve_cluster_convenience_target(normalized)
+    normalized = _resolve_vague_workload_target(normalized)
     context = _collect_context_for_normalized_request(normalized)
     normalized = _align_normalized_request_with_context(normalized, context)
     context_cluster = getattr(context, "cluster", None)
