@@ -140,6 +140,8 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
             )
         )
 
+    findings.extend(_derive_service_findings(metrics))
+
     return findings
 
 
