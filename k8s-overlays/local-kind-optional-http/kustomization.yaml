@@ -2,8 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../../k8s
-  - prometheus-gateway.yaml
+  - ../../k8s/optional-http
 
 images:
   - name: ghcr.io/erauner/investigation-poc
@@ -11,5 +10,4 @@ images:
     newTag: local
 
 patches:
-  - path: patch-configmap.yaml
-  - path: patch-mcp-deployment.yaml
+  - path: patch-http-deployment.yaml

@@ -110,3 +110,44 @@ clusters:
     assert resolved.alias == "erauner-home"
     assert resolved.kubeconfig_path is None
     assert resolved.kube_context is None
+
+
+def test_resolve_cluster_accepts_explicit_current_context_in_legacy_mode(monkeypatch) -> None:
+    monkeypatch.delenv("CLUSTER_REGISTRY_PATH", raising=False)
+    monkeypatch.delenv("DEFAULT_CLUSTER_ALIAS", raising=False)
+    monkeypatch.delenv("CLUSTER_NAME", raising=False)
+
+    resolved = resolve_cluster("current-context")
+
+    assert resolved.alias == "current-context"
+    assert resolved.source == "legacy_current_context"
+
+
+def test_resolve_cluster_accepts_explicit_cluster_name_in_legacy_mode(monkeypatch) -> None:
+    monkeypatch.delenv("CLUSTER_REGISTRY_PATH", raising=False)
+    monkeypatch.delenv("DEFAULT_CLUSTER_ALIAS", raising=False)
+    monkeypatch.setenv("CLUSTER_NAME", "kind-investigation")
+
+    resolved = resolve_cluster("kind-investigation")
+
+    assert resolved.alias == "kind-investigation"
+    assert resolved.source == "legacy_current_context"
+
+
+def test_resolve_cluster_rejects_current_context_when_registry_is_configured(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "clusters.yaml"
+    path.write_text(
+        """
+clusters:
+  kind-a:
+    kube_context: kind-investigation-a
+"""
+    )
+    monkeypatch.setenv("CLUSTER_REGISTRY_PATH", str(path))
+
+    try:
+        resolve_cluster("current-context")
+    except ValueError as exc:
+        assert "unknown cluster alias" in str(exc)
+    else:
+        raise AssertionError("expected explicit current-context to fail when registry aliases are configured")

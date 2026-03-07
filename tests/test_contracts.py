@@ -914,7 +914,18 @@ def test_collect_correlated_changes_reports_empty_when_no_meaningful_workload_ch
 
 def test_get_k8s_object_includes_pod_container_details(monkeypatch) -> None:
     payload = {
-        "metadata": {"name": "crashy-abc123", "creationTimestamp": "2026-03-06T00:00:00Z"},
+        "metadata": {
+            "name": "crashy-abc123",
+            "creationTimestamp": "2026-03-06T00:00:00Z",
+            "labels": {
+                "app.kubernetes.io/managed-by": "homelab-operator",
+                "homelab.erauner.dev/owner-kind": "Backend",
+                "homelab.erauner.dev/owner-name": "crashy",
+            },
+            "ownerReferences": [
+                {"apiVersion": "homelab.erauner.dev/v1alpha1", "kind": "Backend", "name": "crashy"}
+            ],
+        },
         "spec": {
             "containers": [
                 {
@@ -949,3 +960,5 @@ def test_get_k8s_object_includes_pod_container_details(monkeypatch) -> None:
     assert result["containers"][0]["lastTerminationExitCode"] == 1
     assert result["containers"][0]["waitingReason"] == "CrashLoopBackOff"
     assert result["containers"][0]["command"] == ["sh", "-c"]
+    assert result["labels"]["homelab.erauner.dev/owner-kind"] == "Backend"
+    assert result["ownerReferences"][0]["kind"] == "Backend"

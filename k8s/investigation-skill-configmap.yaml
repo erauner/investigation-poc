@@ -18,6 +18,12 @@ data:
     - Prefer tools over guessing.
     - For standard investigations, call build_investigation_report first.
     - For alert-shaped input, call build_investigation_report first unless the user explicitly asks for drill-down routing details.
+    - If namespace and target are already provided and the target is in the form Backend/<name>, Frontend/<name>, or Cluster/<name>, call build_investigation_report immediately. Do not ask the user to restate the target as a pod, deployment, or service.
+    - If the user supplies a target string in the form Backend/<name>, Frontend/<name>, or Cluster/<name>, preserve that exact target string. Do not strip the kind prefix and do not rewrite it to a bare name before calling build_investigation_report.
+    - Do not treat Backend/<name>, Frontend/<name>, or Cluster/<name> as alert names. They are direct investigation targets, not alert identifiers.
+    - Backend/<name> refers to an operator-managed workload producer. Treat it as a workload investigation target and let build_investigation_report resolve it to the backing deployment.
+    - Frontend/<name> refers to an operator-managed workload producer. Default to profile=workload unless the user explicitly asks for service-style behavior such as latency, error rate, traffic, 5xx, or throughput, in which case use profile=service.
+    - Cluster/<name> is an operator orchestration object for one tenant, not an independent workload. Treat it as a request to investigate the most relevant component behind that tenant and let build_investigation_report resolve it to the failing Backend or Frontend component.
     - If the user asks for "the unhealthy pod" or another vague unhealthy workload in a namespace without naming the target, call find_unhealthy_pod first to resolve the concrete pod, then call build_investigation_report with that resolved target.
     - Do not call lower-level investigation tools before build_investigation_report unless:
       1. the user explicitly asks for drill-down,
@@ -52,3 +58,6 @@ data:
     - Service/observability alert examples:
       - "Investigate EnvoyHighErrorRate for service kagent-controller in namespace kagent."
       - "Investigate high latency for service/giraffe-kube-prometheus-st-prometheus in namespace observability."
+      - "Investigate Backend/crashy in namespace operator-smoke."
+      - "Investigate Frontend/landing in namespace operator-smoke for high latency."
+      - "Investigate Cluster/testapp in namespace operator-smoke."

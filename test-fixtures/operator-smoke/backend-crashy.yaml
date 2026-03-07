@@ -1,0 +1,13 @@
+apiVersion: homelab.erauner.dev/v1alpha1
+kind: Backend
+metadata:
+  name: crashy
+  namespace: operator-smoke
+spec:
+  image: busybox:1.36
+  replicas: 1
+  command:
+    - sh
+    - -c
+  args:
+    - echo operator-smoke && sleep 2 && exit 17

@@ -38,6 +38,14 @@ make kind-validate-multi
 
 This exercises the local kind stack, deploys the smoke workload, runs the standard investigation prompt, runs the explicit `build_investigation_report` prompt, and fails if the five-section report contract regresses.
 
+For the first operator-backed validation path in the same kind cluster, use:
+
+```bash
+OPENAI_API_KEY=sk-... make kind-validate-operator
+```
+
+This reuses the existing investigation stack, builds and installs `homelab-operator` from `../homelab-operator`, applies a minimal `operator-smoke` fixture, and validates the same five-section report contract against an unhealthy operator-managed pod.
+
 ## Example investigate request
 
 ```bash
@@ -62,6 +70,7 @@ kubectl apply -k k8s-overlays/local-kind
 
 This applies the MCP server path used by the agent (`RemoteMCPServer -> investigation-mcp-server`).
 The legacy HTTP debug API manifests are isolated in `k8s/optional-http/`.
+For `make kind-install-kagent`, `make kind-validate`, and `make kind-validate-operator`, the local kind flow now builds `investigation-poc:local` from the current checkout, loads it into kind, and rewrites the local overlay to use that image instead of `ghcr.io/erauner/investigation-poc:latest`.
 
 ## MCP topology
 
@@ -102,6 +111,12 @@ Full local contract validation:
 
 ```bash
 OPENAI_API_KEY=sk-... make kind-validate
+```
+
+Operator-backed local contract validation:
+
+```bash
+OPENAI_API_KEY=sk-... make kind-validate-operator
 ```
 
 Host-routed multi-cluster validation:

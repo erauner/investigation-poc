@@ -94,6 +94,37 @@ def _build_enrichment_hints(
     return sorted(set(hints))
 
 
+def _build_operator_ownership_hints(target_kind: str, object_state: dict) -> list[str]:
+    if target_kind not in {"pod", "deployment"} or object_state.get("error"):
+        return []
+
+    labels = object_state.get("labels") or {}
+    managed_by = labels.get("app.kubernetes.io/managed-by")
+    if not managed_by:
+        return []
+
+    owner_kind = labels.get("homelab.erauner.dev/owner-kind")
+    owner_name = labels.get("homelab.erauner.dev/owner-name")
+    if not owner_kind or not owner_name:
+        ignored_kinds = {"ReplicaSet", "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}
+        for owner in object_state.get("ownerReferences") or []:
+            candidate_kind = owner.get("kind")
+            candidate_name = owner.get("name")
+            if candidate_kind and candidate_name and candidate_kind not in ignored_kinds:
+                owner_kind = candidate_kind
+                owner_name = candidate_name
+                break
+
+    if owner_kind and owner_name:
+        return [
+            f"operator-managed workload ({managed_by}); owner appears to be {owner_kind}/{owner_name}. Prefer checking operator reconciliation and updating the owning resource rather than editing pods directly."
+        ]
+
+    return [
+        f"operator-managed workload ({managed_by}); check operator reconciliation history before making direct workload changes."
+    ]
+
+
 def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
     cluster = resolve_cluster(req.cluster)
     requested_target = _call_with_optional_cluster(resolve_target, req.namespace, req.target, cluster=cluster)
@@ -126,6 +157,7 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
     if target.kind in {"pod", "deployment"} and (logs.startswith("log query failed:") or logs.startswith("no pod found")):
         limitations.append("pod logs unavailable for target")
     enrichment_hints = _build_enrichment_hints(target.kind, effective_profile, metrics, limitations, findings)
+    enrichment_hints.extend(_build_operator_ownership_hints(target.kind, object_state))
 
     return CollectedContextResponse(
         cluster=cluster.alias,
@@ -136,7 +168,7 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
         metrics=metrics,
         findings=findings,
         limitations=sorted(set(limitations)),
-        enrichment_hints=enrichment_hints,
+        enrichment_hints=sorted(set(enrichment_hints)),
     )
 
 
