@@ -143,7 +143,7 @@ def _resolve_backend_convenience_target(normalized: NormalizedInvestigationReque
             "cluster": _resolved_cluster_value(cluster),
             "scope": "workload",
             "profile": "workload",
-            "service_name": None,
+            "service_name": name,
             "target": resolved_target,
             "normalization_notes": notes,
         }
@@ -174,7 +174,7 @@ def _resolve_frontend_convenience_target(normalized: NormalizedInvestigationRequ
         resolved_target = f"deployment/{name}"
         scope = "workload"
         profile = "workload"
-        service_name = None
+        service_name = name
     notes = list(normalized.normalization_notes)
     notes.append(f"resolved Frontend/{name} to {resolved_target}")
     if frontend.get("error"):
@@ -212,7 +212,9 @@ def _component_target(kind: str, name: str, profile: str) -> tuple[str, str, str
     lowered = kind.lower()
     if lowered == "frontend" and profile == "service":
         return (f"service/{name}", "service", "service", name)
-    if lowered in {"backend", "frontend", "deployment"}:
+    if lowered in {"backend", "frontend"}:
+        return (f"deployment/{name}", "workload", "workload", name)
+    if lowered == "deployment":
         return (f"deployment/{name}", "workload", "workload", None)
     if lowered == "service":
         return (f"service/{name}", "service", "service", name)

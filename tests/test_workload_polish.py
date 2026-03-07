@@ -1,6 +1,6 @@
 from investigation_service.analysis import derive_findings
 from investigation_service.models import CollectedContextResponse, Finding, NormalizedInvestigationRequest, TargetRef
-from investigation_service.synthesis import build_root_cause_report
+from investigation_service.synthesis import build_primary_evidence, build_root_cause_report
 
 
 def test_workload_findings_do_not_include_otel_pipeline_noise() -> None:
@@ -112,3 +112,80 @@ def test_workload_findings_include_service_enrichment_when_present() -> None:
     titles = {item.title for item in findings}
     assert "Service Returning 5xx Responses" in titles
     assert "High Service Latency" in titles
+
+
+def test_workload_service_degradation_outranks_generic_log_patterns() -> None:
+    request = NormalizedInvestigationRequest(
+        source="manual",
+        scope="workload",
+        namespace="operator-metrics-smoke",
+        target="deployment/api",
+        service_name="api",
+        profile="workload",
+        lookback_minutes=15,
+        normalization_notes=[],
+    )
+    findings = derive_findings(
+        "workload",
+        {"kind": "deployment", "name": "api"},
+        ["Normal ScalingReplicaSet scaled up replica set api from 0 to 1"],
+        "handled request error: upstream returned 500",
+        {
+            "service_request_rate": 0.75,
+            "service_error_rate": 0.06,
+            "service_latency_p95_seconds": 1.63,
+        },
+    )
+    report = build_root_cause_report(
+        CollectedContextResponse(
+            target=TargetRef(namespace="operator-metrics-smoke", kind="deployment", name="api"),
+            object_state={"kind": "deployment", "name": "api"},
+            events=["Normal ScalingReplicaSet scaled up replica set api from 0 to 1"],
+            log_excerpt="handled request error: upstream returned 500",
+            metrics={
+                "service_request_rate": 0.75,
+                "service_error_rate": 0.06,
+                "service_latency_p95_seconds": 1.63,
+            },
+            findings=findings,
+            limitations=[],
+            enrichment_hints=[],
+        ),
+        request,
+    )
+
+    assert report.diagnosis == "Service Returning 5xx Responses"
+    assert any("request rate over lookback window" in item for item in report.evidence)
+
+
+def test_build_primary_evidence_adds_service_request_rate_metric_item() -> None:
+    findings = derive_findings(
+        "workload",
+        {"kind": "deployment", "name": "api"},
+        [],
+        "",
+        {
+            "service_request_rate": 0.75,
+            "service_error_rate": 0.06,
+            "service_latency_p95_seconds": 1.63,
+        },
+    )
+    evidence_items = build_primary_evidence(
+        CollectedContextResponse(
+            target=TargetRef(namespace="operator-metrics-smoke", kind="deployment", name="api"),
+            object_state={"kind": "deployment", "name": "api"},
+            events=[],
+            log_excerpt="",
+            metrics={
+                "service_request_rate": 0.75,
+                "service_error_rate": 0.06,
+                "service_latency_p95_seconds": 1.63,
+            },
+            findings=findings,
+            limitations=[],
+            enrichment_hints=[],
+        ),
+        "workload",
+    )
+
+    assert any(item.summary == "prometheus: Service Request Rate" for item in evidence_items)

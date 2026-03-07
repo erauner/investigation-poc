@@ -109,6 +109,7 @@ def test_build_investigation_report_resolves_backend_target_to_deployment(monkey
     assert normalized.scope == "workload"
     assert normalized.profile == "workload"
     assert normalized.target == "deployment/crashy"
+    assert normalized.service_name == "crashy"
     assert "resolved Backend/crashy to deployment/crashy" in normalized.normalization_notes
     assert report.target == "deployment/crashy"
 
@@ -165,6 +166,7 @@ def test_build_investigation_report_resolves_frontend_target_to_deployment(monke
     assert normalized.scope == "workload"
     assert normalized.profile == "workload"
     assert normalized.target == "deployment/landing"
+    assert normalized.service_name == "landing"
     assert "resolved Frontend/landing to deployment/landing" in normalized.normalization_notes
     assert report.target == "deployment/landing"
 
@@ -298,6 +300,7 @@ def test_build_investigation_report_resolves_cluster_target_to_failing_component
     assert normalized.scope == "workload"
     assert normalized.profile == "workload"
     assert normalized.target == "deployment/api"
+    assert normalized.service_name == "api"
     assert "resolved Cluster/testapp to failing component Backend/api" in normalized.normalization_notes
     assert "resolved Backend/api to deployment/api" in normalized.normalization_notes
     assert report.target == "deployment/api"

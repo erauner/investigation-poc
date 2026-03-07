@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-traffic
+  namespace: operator-metrics-smoke
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api-traffic
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api-traffic
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.12.1
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              while true; do
+                i=0
+                while [ "$i" -lt 8 ]; do
+                  curl -fsS http://api.operator-metrics-smoke.svc.cluster.local:8080/ok >/dev/null || true
+                  i=$((i + 1))
+                done
+                curl -fsS http://api.operator-metrics-smoke.svc.cluster.local:8080/slow >/dev/null || true
+                curl -fsS http://api.operator-metrics-smoke.svc.cluster.local:8080/fail >/dev/null || true
+                sleep 2
+              done

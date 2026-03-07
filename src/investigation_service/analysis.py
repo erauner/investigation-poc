@@ -57,6 +57,12 @@ def _derive_node_findings(object_state: dict, metrics: dict) -> list[Finding]:
 
 def _derive_workload_findings(object_state: dict, events: list[str], logs: str, metrics: dict) -> list[Finding]:
     findings: list[Finding] = []
+    service_error_rate = metrics.get("service_error_rate")
+    service_latency_p95 = metrics.get("service_latency_p95_seconds")
+    service_degradation_present = bool(
+        (service_error_rate is not None and service_error_rate > 0)
+        or (service_latency_p95 is not None and service_latency_p95 > 1.0)
+    )
 
     if object_state.get("error"):
         findings.append(
@@ -122,7 +128,7 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
     if "error" in logs.lower() or "exception" in logs.lower():
         findings.append(
             Finding(
-                severity="warning",
+                severity="info" if service_degradation_present else "warning",
                 source="logs",
                 title="Error-like Log Patterns",
                 evidence="Recent logs contain 'error' or 'exception'",
