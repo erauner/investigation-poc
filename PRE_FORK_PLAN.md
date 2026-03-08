@@ -60,7 +60,7 @@ Primary targets:
 - [README.md](/Users/erauner/git/side/investigation-poc/README.md)
 
 Examples to review:
-- `homelab-k8s-custom-agent`
+- `incident-triage`
 - `homelab-investigation-remote`
 
 Acceptance check:

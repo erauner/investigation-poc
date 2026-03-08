@@ -6,7 +6,7 @@ allowed-tools: mcp__kagent__invoke_agent
 
 Use the `mcp__kagent__invoke_agent` tool.
 
-- Set `agent` to `kagent/homelab-k8s-custom-agent`.
+- Set `agent` to `kagent/incident-triage`.
 - Treat this command as the generic investigation path.
 - Build `task` as this deterministic wrapper, then append the user's arguments verbatim under `Original user request:`.
 - Wrapper header:

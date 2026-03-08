@@ -48,7 +48,7 @@ Any future mutation surface should use a separate action family with explicitly 
 
 Across clients, `Investigate` should preserve these semantics:
 
-- default path is `kagent-controller -> homelab-k8s-custom-agent -> investigation-mcp-server`
+- default path is `kagent-controller -> incident-triage -> investigation-mcp-server`
 - output is investigation-oriented, not mutation-oriented
 - cluster-awareness rules are backend-owned
 - report composition remains backend-owned

@@ -44,7 +44,7 @@ If you want the alert-specific path, use the alert command:
 
 This plugin follows the same controller-backed path as the Desktop extension:
 
-`Claude Code plugin -> kagent-controller -> homelab-k8s-custom-agent -> investigation-mcp-server`
+`Claude Code plugin -> kagent-controller -> incident-triage -> investigation-mcp-server`
 
 ## Local plain-slash development path
 

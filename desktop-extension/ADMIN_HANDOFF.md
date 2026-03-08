@@ -33,7 +33,7 @@ This package should be configured against the published controller MCP route, no
 
 Expected call path:
 
-`Claude Desktop -> local extension -> kagent-controller -> homelab-k8s-custom-agent -> investigation-mcp-server`
+`Claude Desktop -> local extension -> kagent-controller -> incident-triage -> investigation-mcp-server`
 
 ## Required user configuration
 
@@ -41,7 +41,7 @@ Expected call path:
   Example: `https://kagent-mcp.erauner.dev/mcp`
 
 - `default_agent_ref`
-  Example: `kagent/homelab-k8s-custom-agent`
+  Example: `kagent/incident-triage`
 
 ## Optional user configuration
 

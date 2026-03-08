@@ -82,7 +82,7 @@ There are two different MCP surfaces in this setup, and they serve different rol
 
 That distinction matters for clients:
 
-- `Claude Code` can talk directly to the controller MCP endpoint and then invoke `kagent/homelab-k8s-custom-agent`.
+- `Claude Code` can talk directly to the controller MCP endpoint and then invoke `kagent/incident-triage`.
 - The `Claude Desktop` extension in this repo is intentionally controller-backed. It does not call raw investigation tools directly; it talks to the controller MCP endpoint and lets the controller invoke the custom agent.
 - The raw `investigation-mcp-server` is still the correct backend surface for the agent itself and for lower-level debugging inside the cluster.
 
@@ -202,7 +202,7 @@ The included plugin is intentionally thin:
 - shared plugin command: `/investigation-tools:investigate`
 - shared plugin alert command: `/investigation-tools:investigate-alert`
 - MCP path: `kagent-controller`
-- agent path: `kagent/homelab-k8s-custom-agent`
+- agent path: `kagent/incident-triage`
 - explicit alert command routes through the alert-specific top-level backend path
 
 Local test flow:

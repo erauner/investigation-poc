@@ -76,7 +76,7 @@
       "type": "string",
       "title": "Default agent ref",
       "description": "Default kagent agent reference in namespace/name format.",
-      "default": "kagent/homelab-k8s-custom-agent"
+      "default": "kagent/incident-triage"
     }
   },
   "license": "MIT",

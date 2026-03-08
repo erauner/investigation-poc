@@ -194,7 +194,7 @@ function controllerConfig() {
       process.env.INVESTIGATION_DEFAULT_AGENT_REF ||
       process.env.DEFAULT_AGENT_REF ||
       ""
-    ).trim() || "kagent/homelab-k8s-custom-agent";
+    ).trim() || "kagent/incident-triage";
   const allowInsecureTls =
     (process.env.ALLOW_INSECURE_TLS || "").trim().toLowerCase() === "true";
 

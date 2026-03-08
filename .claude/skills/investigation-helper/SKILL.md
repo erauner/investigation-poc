@@ -11,7 +11,7 @@ allowed-tools: mcp__kagent__invoke_agent
 
 Use the `mcp__kagent__invoke_agent` tool.
 
-- Set `agent` to `kagent/homelab-k8s-custom-agent`.
+- Set `agent` to `kagent/incident-triage`.
 - Build `task` as a deterministic entrypoint wrapper, then append the user's arguments verbatim under `Original user request:`.
 - If the user supplied an explicit alert phrase such as `Investigate alert PodCrashLooping ...`, set the wrapper header to:
   `[INVESTIGATION_ENTRYPOINT]=alert`

@@ -13,7 +13,7 @@ This extension is intentionally pointed at the controller MCP endpoint, not the 
 
 The extension follows the product path:
 
-`Claude Desktop -> local .mcpb proxy -> kagent-controller -> homelab-k8s-custom-agent -> investigation-mcp-server`
+`Claude Desktop -> local .mcpb proxy -> kagent-controller -> incident-triage -> investigation-mcp-server`
 
 That is why `remote_mcp_url` should point at the controller route, for example `https://kagent-mcp.erauner.dev/mcp`.
 
@@ -83,7 +83,7 @@ If your endpoint requires auth, set `remote_mcp_bearer_token`.
 You can also set `default_agent_ref`. For this repo the expected value is:
 
 ```text
-kagent/homelab-k8s-custom-agent
+kagent/incident-triage
 ```
 
 ## Release
