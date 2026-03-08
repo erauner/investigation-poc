@@ -289,6 +289,76 @@ These should be more directly available to the agent because they support iterat
 
 The intent is not to expose every possible raw tool. The intent is to expose evidence planes clearly enough that the agent can iterate based on what it has learned.
 
+These evidence-plane tools do not all need to be implemented by `investigation-poc`.
+
+Where possible, we should intentionally reuse:
+
+- kagent built-in tool servers
+- other MCP servers already available in the environment
+- external or shared read-only MCP integrations that expose bounded evidence access
+
+This means the agent may gather evidence from tools we do not own, as long as:
+
+- the tool is read-only or otherwise safely bounded for this phase
+- the evidence plane is relevant and non-overlapping enough to justify the added tool
+- the tool is understandable enough that the agent can call it intentionally
+- the resulting evidence can still be interpreted within our investigation semantics
+
+Examples of evidence planes that may come from non-owned MCP tools:
+
+- alert rule and alert metadata lookup
+- Prometheus metric breakdowns
+- runbook or documentation retrieval
+- change history / deployment history
+- ArgoCD or GitOps read-only inspection
+- bounded connectivity checks
+- raw Kubernetes inspection beyond what our product layer should abstract
+
+The key distinction is:
+
+- evidence retrieval can come from multiple MCP sources
+- investigation semantics should still be owned by our product layer
+
+## Responsibility Split
+
+### What `investigation-poc` Should Own
+
+`investigation-poc` should own the semantics that define the product:
+
+- issue normalization
+- convenience-target and operator-target resolution
+- investigation planning semantics
+- artifact definitions and transitions
+- bounded hypothesis ranking
+- confidence softening and ambiguity handling
+- final rendered investigation output
+
+This is the reusable investigation logic that should remain consistent regardless of which evidence sources are available.
+
+### What Other MCP Tools Can Own
+
+Other MCP tools can own evidence retrieval where they already provide useful, bounded capabilities:
+
+- raw Kubernetes inspection
+- log retrieval
+- Prometheus and observability lookups
+- change history
+- runbook retrieval
+- GitOps / ArgoCD read-only inspection
+- narrow environment-specific evidence sources
+
+We do not need to reimplement every evidence plane ourselves just because the investigation product will use it.
+
+### What This Means for the Agent
+
+The user-facing agent should be able to combine:
+
+- our product-owned control-plane tools
+- our bounded evidence helpers where helpful
+- other MCP-provided evidence tools that we do not own
+
+That combination is intentional. The goal is not to hide all evidence gathering behind our custom service. The goal is to let the agent gather evidence flexibly while keeping the investigation semantics coherent.
+
 ### 3. Compatibility / Legacy Facade Tools
 
 These exist to preserve compatibility during the transition:
