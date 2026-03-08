@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
+import pytest
 
 from investigation_service.analysis import derive_findings
 from investigation_service.correlation import collect_correlated_changes
@@ -164,6 +165,26 @@ def test_normalize_alert_input_accepts_explicit_service_name() -> None:
     assert normalized.scope == "service"
     assert normalized.profile == "service"
     assert normalized.service_name == "kagent-controller"
+
+
+def test_normalize_alert_input_does_not_treat_app_label_as_concrete_target() -> None:
+    with pytest.raises(ValueError, match="target could not be inferred from alert input"):
+        normalize_alert_input(
+            CollectAlertContextRequest(
+                alertname="PlexPodNotReady",
+                labels={"namespace": "media", "app": "plex"},
+            )
+        )
+
+
+def test_normalize_alert_input_does_not_treat_job_label_as_service_target() -> None:
+    with pytest.raises(ValueError, match="target could not be inferred from alert input"):
+        normalize_alert_input(
+            CollectAlertContextRequest(
+                alertname="JobAlert",
+                labels={"namespace": "batch", "job": "backup-runner"},
+            )
+        )
 
 
 def test_normalize_alert_input_infers_node_target_from_summary() -> None:

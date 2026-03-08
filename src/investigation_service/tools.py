@@ -234,7 +234,6 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
         daemonset_name = _label_value(labels, "daemonset", "daemonset_name", "kubernetes_daemonset_name")
         service_name = _label_value(labels, "service", "service_name")
         node_name = req.node_name or _label_value(labels, "node", "node_name", "kubernetes_node", "instance")
-        app_name = _label_value(labels, "app", "app_kubernetes_io_name", "job")
         if pod_name:
             target = f"pod/{pod_name}"
             notes.append("target inferred from pod labels")
@@ -253,15 +252,12 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
         elif node_name:
             target = f"node/{node_name}"
             notes.append("target inferred from node labels")
-        elif app_name:
-            target = app_name
-            notes.append("target inferred from app labels")
     if not target:
         raise ValueError("target could not be inferred from alert input")
 
     service_name = _first_non_empty(
         req.service_name,
-        _label_value(labels, "service", "service_name", "app", "app_kubernetes_io_name", "job"),
+        _label_value(labels, "service", "service_name"),
     )
     node_name = req.node_name or _label_value(labels, "node", "node_name", "kubernetes_node", "instance")
     profile = req.profile
