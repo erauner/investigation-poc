@@ -16,6 +16,9 @@ Use the `mcp__kagent__invoke_agent` tool.
 - If the user supplied an explicit alert phrase such as `Investigate alert PodCrashLooping ...`, set the wrapper header to:
   `[INVESTIGATION_ENTRYPOINT]=alert`
   `Use build_alert_investigation_report as the top-level report entrypoint.`
+  `Treat only identity fields such as namespace, pod, service, deployment, node, and container as workload identity.`
+  `Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.`
+  `Never derive a workload namespace from source or monitoring metadata.`
 - As a secondary debug-only fallback, also accept `alertname=PodCrashLooping` or `alertname: PodCrashLooping`.
 - Only treat the request as alert-shaped when one of those explicit alert forms is present.
 - Do not treat `Backend/<name>`, `Frontend/<name>`, or `Cluster/<name>` as alert names.

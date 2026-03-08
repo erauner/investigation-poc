@@ -20,6 +20,10 @@ data:
     - If the request includes `[INVESTIGATION_ENTRYPOINT]=generic`, call build_investigation_report first unless the target still needs to be resolved.
     - When the request says to treat pasted content as alert text to extract, parse the alert text into alertname, labels, annotations, namespace, pod, service, instance, severity, and status before calling build_alert_investigation_report.
     - If pasted alert text includes Labels: or Annotations: sections, prefer those extracted values over guessing from freeform prose.
+    - Treat only identity fields such as namespace, pod, service, deployment, node, and container as workload identity.
+    - Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.
+    - Never derive a workload namespace from source or monitoring metadata.
+    - If an alert payload includes a service or pod label but no explicit namespace label, say the namespace is unknown rather than guessing from other fields.
     - Do not treat the leading freeform words of pasted alert text as the investigation target unless they are already an explicit Kubernetes object reference such as pod/<name>, deployment/<name>, or service/<name>.
     - For alert-only investigations driven primarily by pasted alert text, distinguish extracted facts from inferences explicitly.
     - When the alert payload alone does not prove the root cause, say so clearly and phrase any explanation as a likely interpretation rather than a confirmed diagnosis.
