@@ -278,6 +278,27 @@ class RootCauseReport(BaseModel):
     suggested_follow_ups: list[str] = Field(default_factory=list)
 
 
+class Hypothesis(BaseModel):
+    key: str
+    diagnosis: str
+    likely_cause: str | None = None
+    confidence: ConfidenceType
+    score: int
+    supporting_findings: list[Finding] = Field(default_factory=list)
+    evidence_items: list[EvidenceItem] = Field(default_factory=list)
+
+
+class InvestigationAnalysis(BaseModel):
+    cluster: str = "current-context"
+    scope: ScopeType
+    target: str
+    profile: ProfileType
+    hypotheses: list[Hypothesis] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    recommended_next_step: str
+    suggested_follow_ups: list[str] = Field(default_factory=list)
+
+
 class CorrelatedChange(BaseModel):
     fingerprint: str
     timestamp: str
