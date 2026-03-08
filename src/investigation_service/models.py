@@ -210,6 +210,19 @@ class ResolvedGuideline(BaseModel):
     agent: str | None = None
 
 
+class GuidelineContext(BaseModel):
+    cluster: str | None = "current-context"
+    scope: ScopeType
+    target: str
+    target_kind: str | None = None
+    target_name: str | None = None
+    diagnosis: str
+    confidence: ConfidenceType
+    alertname: str | None = None
+    namespace: str | None = None
+    service_name: str | None = None
+
+
 class Finding(BaseModel):
     severity: Literal["info", "warning", "critical"]
     source: Literal["k8s", "events", "logs", "prometheus", "heuristic"]

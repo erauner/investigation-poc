@@ -1,7 +1,16 @@
-from investigation_service.guidelines import load_guideline_rules, resolve_guidelines
+from investigation_service.guidelines import (
+    guideline_context_from_analysis,
+    load_guideline_rules,
+    resolve_guidelines,
+    resolve_guidelines_for_context,
+)
 from investigation_service.models import (
     EvidenceItem,
+    GuidelineContext,
     GuidelineRule,
+    Hypothesis,
+    InvestigationAnalysis,
+    InvestigationTarget,
     InvestigationReport,
     InvestigationReportRequest,
     RootCauseReport,
@@ -86,6 +95,91 @@ def test_resolve_guidelines_prefers_more_specific_rule() -> None:
     )
 
     assert [item.id for item in resolved] == ["specific", "global"]
+
+
+def test_resolve_guidelines_for_context_matches_legacy_resolution() -> None:
+    report = InvestigationReport(
+        scope="service",
+        target="service/kagent-controller",
+        diagnosis="Service Returning 5xx Responses",
+        likely_cause=None,
+        confidence="medium",
+        evidence=["prometheus: 5xx spike"],
+        evidence_items=[],
+        related_data=[],
+        related_data_note=None,
+        limitations=[],
+        recommended_next_step="base",
+        suggested_follow_ups=[],
+        guidelines=[],
+        normalization_notes=[],
+    )
+    analysis = InvestigationAnalysis(
+        cluster="erauner-home",
+        scope="service",
+        target="service/kagent-controller",
+        profile="service",
+        hypotheses=[
+            Hypothesis(
+                key="service-5xx",
+                diagnosis="Service Returning 5xx Responses",
+                likely_cause=None,
+                confidence="medium",
+                score=1,
+                supporting_findings=[],
+                evidence_items=[],
+            )
+        ],
+        limitations=[],
+        recommended_next_step="base",
+        suggested_follow_ups=[],
+    )
+    target = InvestigationTarget(
+        source="manual",
+        scope="service",
+        cluster="erauner-home",
+        namespace="kagent",
+        requested_target="service/kagent-controller",
+        target="service/kagent-controller",
+        node_name=None,
+        service_name="kagent-controller",
+        profile="service",
+        lookback_minutes=15,
+        normalization_notes=[],
+    )
+    specific = GuidelineRule.model_validate(
+        {
+            "id": "specific",
+            "priority": 100,
+            "match": {
+                "scope": "service",
+                "namespace": "kagent",
+                "service_name": "kagent-controller",
+                "alertname": "EnvoyHighErrorRate",
+            },
+            "actions": [{"category": "next_step", "text": "Use the specific path first."}],
+        }
+    )
+    global_rule = GuidelineRule.model_validate(
+        {
+            "id": "global",
+            "priority": 100,
+            "match": {"scope": "service"},
+            "actions": [{"category": "next_step", "text": "Use the global path."}],
+        }
+    )
+
+    legacy = resolve_guidelines(
+        [global_rule, specific],
+        report,
+        alertname="EnvoyHighErrorRate",
+        namespace="kagent",
+        service_name="kagent-controller",
+    )
+    context = guideline_context_from_analysis(analysis, target, alertname="EnvoyHighErrorRate")
+    artifact = resolve_guidelines_for_context([global_rule, specific], context)
+
+    assert artifact == legacy
 
 
 def test_build_investigation_report_applies_guidelines_without_mutating_diagnosis(monkeypatch) -> None:

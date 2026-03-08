@@ -9,7 +9,7 @@ from .k8s_adapter import (
     resolve_runtime_target,
     resolve_target,
 )
-from .models import CollectCorrelatedChangesRequest, CorrelatedChange, CorrelatedChangesResponse
+from .models import CollectCorrelatedChangesRequest, CorrelatedChange, CorrelatedChangesResponse, InvestigationTarget
 from .routing import canonical_target, scope_from_target
 
 
@@ -246,37 +246,64 @@ def _node_changes(target, lookback_minutes: int, anchor_timestamp: str | None, *
     return changes
 
 
-def collect_correlated_changes(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
-    cluster = resolve_cluster(req.cluster)
-    target_text = canonical_target(req.target, req.profile, req.service_name)
-    scope = scope_from_target(target_text, req.profile)
-    resolved = resolve_runtime_target(resolve_target(req.namespace, target_text, cluster=cluster), cluster=cluster)
+def collect_correlated_changes_for_target(
+    target: InvestigationTarget,
+    *,
+    lookback_minutes: int,
+    anchor_timestamp: str | None = None,
+    limit: int = 10,
+) -> CorrelatedChangesResponse:
+    cluster = resolve_cluster(target.cluster)
+    resolved = resolve_runtime_target(resolve_target(target.namespace, target.target, cluster=cluster), cluster=cluster)
     changes: list[CorrelatedChange] = []
     limitations: list[str] = []
 
-    if scope == "service":
-        service_name = req.service_name or resolved.name
+    if target.scope == "service":
+        service_name = target.service_name or resolved.name
         changes, service_limitations = _service_changes(
             resolved,
             service_name,
-            req.lookback_minutes,
-            req.anchor_timestamp,
+            lookback_minutes,
+            anchor_timestamp,
             cluster=cluster,
         )
         limitations.extend(service_limitations)
-    elif scope == "node":
-        changes = _node_changes(resolved, req.lookback_minutes, req.anchor_timestamp, cluster=cluster)
+    elif target.scope == "node":
+        changes = _node_changes(resolved, lookback_minutes, anchor_timestamp, cluster=cluster)
     else:
-        changes = _workload_changes(resolved, req.lookback_minutes, req.anchor_timestamp, cluster=cluster)
+        changes = _workload_changes(resolved, lookback_minutes, anchor_timestamp, cluster=cluster)
 
     if not changes:
         limitations.append("no correlated changes found in the requested time window")
 
-    ranked = sorted(changes, key=_score, reverse=True)[: req.limit]
+    ranked = sorted(changes, key=_score, reverse=True)[:limit]
     return CorrelatedChangesResponse(
         cluster=cluster.alias,
-        scope=scope,
+        scope=target.scope,
         target=f"{resolved.kind}/{resolved.name}",
         changes=ranked,
         limitations=sorted(set(limitations)),
+    )
+
+
+def collect_correlated_changes(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
+    target_text = canonical_target(req.target, req.profile, req.service_name)
+    scope = scope_from_target(target_text, req.profile)
+    return collect_correlated_changes_for_target(
+        InvestigationTarget(
+            source="manual",
+            scope=scope,
+            cluster=req.cluster,
+            namespace=req.namespace,
+            requested_target=req.target,
+            target=target_text,
+            node_name=target_text.split("/", 1)[1] if scope == "node" and "/" in target_text else None,
+            service_name=req.service_name or (target_text.split("/", 1)[1] if scope == "service" and "/" in target_text else None),
+            profile=req.profile,
+            lookback_minutes=req.lookback_minutes,
+            normalization_notes=[],
+        ),
+        lookback_minutes=req.lookback_minutes,
+        anchor_timestamp=req.anchor_timestamp,
+        limit=req.limit,
     )

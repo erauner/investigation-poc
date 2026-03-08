@@ -7,12 +7,14 @@ from .models import (
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
+    EvidenceBundle,
     FindUnhealthyPodRequest,
     InvestigationTarget,
     InvestigationMode,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
     PlannedInvestigation,
+    TargetRef,
 )
 from .tools import evidence_bundle_from_context
 
@@ -446,11 +448,30 @@ def plan_investigation(
         notes.append(f"cluster resolved from collected context: {context_cluster}")
         normalized = normalized.model_copy(update={"cluster": context_cluster, "normalization_notes": notes})
     target = investigation_target_from_normalized(normalized, requested_target=target.requested_target)
+    try:
+        evidence = evidence_bundle_from_context(context)
+    except AttributeError:
+        evidence = EvidenceBundle(
+            cluster=getattr(context, "cluster", normalized.cluster or "current-context"),
+            target=getattr(context, "target", None)
+            or TargetRef(
+                namespace=normalized.namespace,
+                kind="service" if normalized.scope == "service" else ("node" if normalized.scope == "node" else "pod"),
+                name=(normalized.target.split("/", 1)[1] if "/" in normalized.target else normalized.target),
+            ),
+            object_state=getattr(context, "object_state", {}),
+            events=getattr(context, "events", []),
+            log_excerpt=getattr(context, "log_excerpt", ""),
+            metrics=getattr(context, "metrics", {}),
+            findings=getattr(context, "findings", []),
+            limitations=getattr(context, "limitations", []),
+            enrichment_hints=getattr(context, "enrichment_hints", []),
+        )
 
     return PlannedInvestigation(
         mode=classify_investigation_mode(req),
         target=target,
-        evidence=evidence_bundle_from_context(context),
+        evidence=evidence,
         normalized=normalized,
         context=context,
     )

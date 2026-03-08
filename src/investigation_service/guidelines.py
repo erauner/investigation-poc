@@ -2,7 +2,8 @@ from pathlib import Path
 
 import yaml
 
-from .models import GuidelineRule, InvestigationReport, ResolvedGuideline
+from .analysis import primary_hypothesis
+from .models import GuidelineContext, GuidelineRule, InvestigationAnalysis, InvestigationReport, InvestigationTarget, ResolvedGuideline
 from .settings import get_cluster_name, get_guidelines_enabled, get_guidelines_path
 
 _CATEGORY_WEIGHT = {
@@ -57,25 +58,42 @@ def load_guideline_rules() -> tuple[list[GuidelineRule], list[str]]:
         return [], [f"guideline registry unavailable: {exc}"]
 
 
-def resolve_guidelines(
-    rules: list[GuidelineRule],
-    report: InvestigationReport,
+def guideline_context_from_analysis(
+    analysis: InvestigationAnalysis,
+    target: InvestigationTarget,
     *,
     alertname: str | None = None,
-    namespace: str | None = None,
-    service_name: str | None = None,
+) -> GuidelineContext:
+    lead = primary_hypothesis(analysis)
+    target_kind, _, target_name = analysis.target.partition("/")
+    return GuidelineContext(
+        cluster=analysis.cluster or get_cluster_name(),
+        scope=analysis.scope,
+        target=analysis.target,
+        target_kind=target_kind or None,
+        target_name=target_name or None,
+        diagnosis=lead.diagnosis,
+        confidence=lead.confidence,
+        alertname=alertname,
+        namespace=target.namespace,
+        service_name=target.service_name,
+    )
+
+
+def resolve_guidelines_for_context(
+    rules: list[GuidelineRule],
+    context: GuidelineContext,
 ) -> list[ResolvedGuideline]:
-    target_kind, _, target_name = report.target.partition("/")
     actual_values = {
-        "scope": report.scope,
-        "alertname": alertname,
-        "namespace": namespace,
-        "service_name": service_name,
-        "target_kind": target_kind or None,
-        "target_name": target_name or None,
-        "diagnosis": report.diagnosis,
-        "cluster": get_cluster_name(),
-        "confidence": report.confidence,
+        "scope": context.scope,
+        "alertname": context.alertname,
+        "namespace": context.namespace,
+        "service_name": context.service_name,
+        "target_kind": context.target_kind,
+        "target_name": context.target_name,
+        "diagnosis": context.diagnosis,
+        "cluster": context.cluster or get_cluster_name(),
+        "confidence": context.confidence,
     }
 
     resolved: list[ResolvedGuideline] = []
@@ -110,3 +128,29 @@ def resolve_guidelines(
 
     resolved.sort(key=lambda item: (-item.priority, item.id, item.category, item.text))
     return resolved
+
+
+def resolve_guidelines(
+    rules: list[GuidelineRule],
+    report: InvestigationReport,
+    *,
+    alertname: str | None = None,
+    namespace: str | None = None,
+    service_name: str | None = None,
+) -> list[ResolvedGuideline]:
+    target_kind, _, target_name = report.target.partition("/")
+    return resolve_guidelines_for_context(
+        rules,
+        GuidelineContext(
+            cluster=get_cluster_name(),
+            scope=report.scope,
+            target=report.target,
+            target_kind=target_kind or None,
+            target_name=target_name or None,
+            diagnosis=report.diagnosis,
+            confidence=report.confidence,
+            alertname=alertname,
+            namespace=namespace,
+            service_name=service_name,
+        ),
+    )

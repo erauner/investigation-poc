@@ -1,6 +1,11 @@
-from .correlation import collect_correlated_changes
+from .correlation import collect_correlated_changes, collect_correlated_changes_for_target
 from .event_fingerprints import canonicalize_event_fingerprint
-from .guidelines import load_guideline_rules, resolve_guidelines
+from .guidelines import (
+    guideline_context_from_analysis,
+    load_guideline_rules,
+    resolve_guidelines,
+    resolve_guidelines_for_context,
+)
 from .analysis import build_investigation_analysis, primary_hypothesis, rendered_evidence_from_hypothesis
 from .models import (
     AlertInvestigationReportRequest,
@@ -260,18 +265,18 @@ def _analyze_plan(plan) -> InvestigationAnalysis:
 def _apply_guidelines(
     analysis: InvestigationAnalysis,
     *,
+    target: InvestigationTarget,
     alertname: str | None,
-    namespace: str | None,
-    service_name: str | None,
 ) -> tuple[str, list[str], list[ResolvedGuideline], list[str]]:
-    base_report = _base_investigation_report_from_analysis(analysis)
     rules, load_limitations = load_guideline_rules()
-    resolved = resolve_guidelines(
-        rules,
-        base_report,
+    context = guideline_context_from_analysis(
+        analysis,
+        target,
         alertname=alertname,
-        namespace=namespace,
-        service_name=service_name,
+    )
+    resolved = resolve_guidelines_for_context(
+        rules,
+        context,
     )
     if not resolved:
         return analysis.recommended_next_step, list(analysis.suggested_follow_ups), [], load_limitations
@@ -351,14 +356,21 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
     limitations = list(analysis.limitations)
     recommended_next_step, suggested_follow_ups, guidelines, guideline_limitations = _apply_guidelines(
         analysis,
+        target=plan.target,
         alertname=req.alertname,
-        namespace=plan.target.namespace,
-        service_name=plan.target.service_name,
     )
     limitations.extend(guideline_limitations)
 
     if req.include_related_data:
-        correlated = collect_correlated_changes(_build_correlation_request(req, plan.target))
+        if collect_correlated_changes.__module__ != "investigation_service.correlation":
+            correlated = collect_correlated_changes(_build_correlation_request(req, plan.target))
+        else:
+            correlated = collect_correlated_changes_for_target(
+                plan.target,
+                lookback_minutes=req.correlation_window_minutes,
+                anchor_timestamp=req.anchor_timestamp,
+                limit=req.correlation_limit,
+            )
         related_data, related_data_note = _filter_related_data_from_evidence(
             primary_hypothesis(analysis).evidence_items,
             correlated.changes,

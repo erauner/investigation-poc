@@ -856,6 +856,63 @@ def test_collect_correlated_changes_infers_service_rollouts(monkeypatch) -> None
     assert response.changes[0].relation == "same_service"
 
 
+def test_collect_correlated_changes_for_target_matches_request_wrapper(monkeypatch) -> None:
+    from investigation_service.correlation import collect_correlated_changes_for_target
+    from investigation_service.models import InvestigationTarget
+
+    monkeypatch.setattr(
+        "investigation_service.correlation.resolve_cluster",
+        lambda cluster: type("ResolvedCluster", (), {"alias": cluster or "erauner-home"})(),
+    )
+    monkeypatch.setattr(
+        "investigation_service.correlation.resolve_target",
+        lambda namespace, target, cluster=None: TargetRef(namespace=namespace, kind="service", name="api"),
+    )
+    monkeypatch.setattr(
+        "investigation_service.correlation.resolve_runtime_target",
+        lambda target, cluster=None: target,
+    )
+    monkeypatch.setattr(
+        "investigation_service.correlation.get_events",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "investigation_service.correlation.get_service_related_deployments",
+        lambda _namespace, _service_name, cluster=None: [],
+    )
+
+    via_request = collect_correlated_changes(
+        CollectCorrelatedChangesRequest(
+            cluster="erauner-home",
+            namespace="default",
+            target="service/api",
+            profile="service",
+            service_name="api",
+            lookback_minutes=60,
+            limit=10,
+        )
+    )
+    via_target = collect_correlated_changes_for_target(
+        InvestigationTarget(
+            source="manual",
+            scope="service",
+            cluster="erauner-home",
+            namespace="default",
+            requested_target="service/api",
+            target="service/api",
+            node_name=None,
+            service_name="api",
+            profile="service",
+            lookback_minutes=60,
+            normalization_notes=[],
+        ),
+        lookback_minutes=60,
+        limit=10,
+    )
+
+    assert via_target == via_request
+
+
 def test_build_investigation_report_dedupes_related_changes(monkeypatch) -> None:
     monkeypatch.setattr(
         "investigation_service.reporting.collect_workload_context",
