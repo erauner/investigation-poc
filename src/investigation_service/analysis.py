@@ -469,6 +469,15 @@ def _recommended_next_step(scope: str, profile: str) -> str:
 
 def _group_findings_into_hypotheses(bundle: EvidenceBundle, scope: str, target: InvestigationTarget) -> list[Hypothesis]:
     ranked = _ranked_findings(bundle, scope)
+    if not ranked:
+        ranked = [
+            Finding(
+                severity="info",
+                source="heuristic",
+                title="No Critical Signals Found",
+                evidence="No obvious failure signature detected from current inputs",
+            )
+        ]
     requested_target_kind = _target_requested_kind(target)
     hypotheses: list[Hypothesis] = []
     for finding in ranked[:3]:
@@ -506,3 +515,14 @@ def build_investigation_analysis(bundle: EvidenceBundle, target: InvestigationTa
         recommended_next_step=_recommended_next_step(target.scope, target.profile),
         suggested_follow_ups=_follow_ups_for_analysis(bundle, target.scope, target),
     )
+
+
+def primary_hypothesis(analysis: InvestigationAnalysis) -> Hypothesis:
+    return analysis.hypotheses[0]
+
+
+def rendered_evidence_from_hypothesis(hypothesis: Hypothesis) -> list[str]:
+    return [
+        item.summary if not item.detail else f"{item.summary} - {item.detail}"
+        for item in hypothesis.evidence_items
+    ]

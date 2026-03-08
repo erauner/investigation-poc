@@ -1,4 +1,9 @@
-from .analysis import build_investigation_analysis, build_primary_evidence_from_bundle
+from .analysis import (
+    build_investigation_analysis,
+    build_primary_evidence_from_bundle,
+    primary_hypothesis,
+    rendered_evidence_from_hypothesis,
+)
 from .models import (
     CollectContextRequest,
     CollectedContextResponse,
@@ -75,11 +80,7 @@ def build_primary_evidence(context: CollectedContextResponse, scope: str) -> lis
 
 
 def render_root_cause_from_analysis(analysis: InvestigationAnalysis) -> RootCauseReport:
-    lead = analysis.hypotheses[0]
-    evidence = [
-        item.summary if not item.detail else f"{item.summary} - {item.detail}"
-        for item in lead.evidence_items
-    ]
+    lead = primary_hypothesis(analysis)
     return RootCauseReport(
         cluster=analysis.cluster,
         scope=analysis.scope,
@@ -87,7 +88,7 @@ def render_root_cause_from_analysis(analysis: InvestigationAnalysis) -> RootCaus
         diagnosis=lead.diagnosis,
         likely_cause=lead.likely_cause,
         confidence=lead.confidence,
-        evidence=evidence,
+        evidence=rendered_evidence_from_hypothesis(lead),
         evidence_items=lead.evidence_items,
         limitations=analysis.limitations,
         recommended_next_step=analysis.recommended_next_step,
