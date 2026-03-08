@@ -32,6 +32,22 @@ The extension intentionally exposes a higher-level, human-facing surface:
 
 `investigate` is the primary product-facing action. `list_investigation_agents` is retained as a secondary/debug surface.
 
+The `investigate` tool now adds a deterministic entrypoint directive before forwarding the task to the controller-backed agent:
+
+- generic requests steer the agent toward `build_investigation_report`
+- explicit alert-shaped requests steer the agent toward `build_alert_investigation_report`
+
+Alert routing is intentionally strict. The preferred user-facing form is:
+
+- `Investigate alert PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.`
+
+The raw `alertname=...` forms still work, but they are primarily for debug or structured callers:
+
+- `alertname=PodCrashLooping`
+- `alertname: PodCrashLooping`
+
+For Desktop callers that want full control, the tool also accepts optional `mode`, `alertname`, `labels`, and `annotations` arguments.
+
 If you want more tools later, add them in [server/index.js](/Users/erauner/git/side/investigation-poc/desktop-extension/server/index.js) and [manifest.json](/Users/erauner/git/side/investigation-poc/desktop-extension/manifest.json).
 
 ## Build

@@ -12,7 +12,17 @@ allowed-tools: mcp__kagent__invoke_agent
 Use the `mcp__kagent__invoke_agent` tool.
 
 - Set `agent` to `kagent/homelab-k8s-custom-agent`.
-- Set `task` to the user's arguments exactly.
+- Build `task` as a deterministic entrypoint wrapper, then append the user's arguments verbatim under `Original user request:`.
+- If the user supplied an explicit alert phrase such as `Investigate alert PodCrashLooping ...`, set the wrapper header to:
+  `[INVESTIGATION_ENTRYPOINT]=alert`
+  `Use build_alert_investigation_report as the top-level report entrypoint.`
+- As a secondary debug-only fallback, also accept `alertname=PodCrashLooping` or `alertname: PodCrashLooping`.
+- Only treat the request as alert-shaped when one of those explicit alert forms is present.
+- Do not treat `Backend/<name>`, `Frontend/<name>`, or `Cluster/<name>` as alert names.
+- Otherwise set the wrapper header to:
+  `[INVESTIGATION_ENTRYPOINT]=generic`
+  `Use build_investigation_report as the top-level report entrypoint.`
+  `If the target is vague, resolve it first with find_unhealthy_pod before calling build_investigation_report.`
 - Return the agent's result directly.
 - Treat this skill as read-only investigation help for follow-up clarification. Do not take write actions, cleanup actions, or mutation requests through this skill.
 - If no arguments were supplied, ask the user what they want investigated.

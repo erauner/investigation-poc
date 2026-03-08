@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export INVESTIGATION_REMOTE_MCP_URL="${INVESTIGATION_REMOTE_MCP_URL:-https://kagent-mcp.erauner.dev/mcp}"
 export INVESTIGATION_DEFAULT_AGENT_REF="${INVESTIGATION_DEFAULT_AGENT_REF:-kagent/homelab-k8s-custom-agent}"
 export TASK="${TASK:-Investigate the unhealthy pod in namespace kagent-smoke.}"
+export MODE="${MODE:-auto}"
+export ALERTNAME="${ALERTNAME:-}"
+export LABELS_JSON="${LABELS_JSON:-}"
+export ANNOTATIONS_JSON="${ANNOTATIONS_JSON:-}"
 export INVESTIGATION_REMOTE_MCP_TOKEN="${INVESTIGATION_REMOTE_MCP_TOKEN:-}"
 export ALLOW_INSECURE_TLS="${ALLOW_INSECURE_TLS:-false}"
 export ROOT_DIR
@@ -32,6 +36,10 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const remoteUrl = process.env.INVESTIGATION_REMOTE_MCP_URL;
 const defaultAgentRef = process.env.INVESTIGATION_DEFAULT_AGENT_REF;
 const task = process.env.TASK;
+const mode = process.env.MODE || 'auto';
+const alertname = process.env.ALERTNAME || '';
+const labelsJson = process.env.LABELS_JSON || '';
+const annotationsJson = process.env.ANNOTATIONS_JSON || '';
 const bearerToken = process.env.INVESTIGATION_REMOTE_MCP_TOKEN || '';
 const allowInsecureTls = process.env.ALLOW_INSECURE_TLS || 'false';
 
@@ -66,7 +74,13 @@ try {
 
   const result = await client.callTool({
     name: 'investigate',
-    arguments: { task }
+    arguments: {
+      task,
+      mode,
+      ...(alertname ? { alertname } : {}),
+      ...(labelsJson ? { labels: JSON.parse(labelsJson) } : {}),
+      ...(annotationsJson ? { annotations: JSON.parse(annotationsJson) } : {})
+    }
   });
   console.log('==> investigate');
   console.log(JSON.stringify(result.structuredContent ?? result, null, 2));

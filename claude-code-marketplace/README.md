@@ -9,6 +9,7 @@ This directory is a repo-local Claude Code plugin marketplace for testing the in
 That plugin is intentionally thin:
 
 - it defines a slash command for investigation
+- it defines a slash command for alert investigation
 - it provides plugin-scoped MCP wiring to the `kagent-controller` endpoint
 - it keeps the actual investigation logic in the controller + agent + backend path
 
@@ -33,6 +34,12 @@ After install, restart Claude Code and run:
 /investigation-tools:investigate Investigate the unhealthy pod in namespace kagent-smoke.
 ```
 
+If you want the alert-specific path, use the alert command:
+
+```text
+/investigation-tools:investigate-alert Investigate PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
+```
+
 ## Architecture
 
 This plugin follows the same controller-backed path as the Desktop extension:
@@ -47,6 +54,12 @@ That gives you an un-namespaced local command:
 
 ```text
 /investigate Investigate the unhealthy pod in namespace kagent-smoke.
+```
+
+The local alert command is:
+
+```text
+/investigate-alert Investigate PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
 ```
 
 Use the standalone command for quick iteration, then use the plugin marketplace path for packaging and sharing.

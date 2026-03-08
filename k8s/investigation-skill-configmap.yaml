@@ -16,6 +16,8 @@ data:
 
     Rules:
     - Prefer tools over guessing.
+    - If the request includes `[INVESTIGATION_ENTRYPOINT]=alert`, call build_alert_investigation_report first.
+    - If the request includes `[INVESTIGATION_ENTRYPOINT]=generic`, call build_investigation_report first unless the target still needs to be resolved.
     - For standard investigations, call build_investigation_report first.
     - For alert-shaped input, call build_alert_investigation_report first unless the user explicitly asks for drill-down routing details.
     - If namespace and target are already provided and the target is in the form Backend/<name>, Frontend/<name>, or Cluster/<name>, call build_investigation_report immediately. Do not ask the user to restate the target as a pod, deployment, or service.

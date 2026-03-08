@@ -5,13 +5,41 @@ import process from "node:process";
 const TOOLS = [
   {
     name: "investigate",
-    description: "Investigate a Kubernetes issue through the controller-backed investigation path.",
+    description:
+      "Investigate a Kubernetes issue through the controller-backed investigation path, with deterministic generic-vs-alert entrypoint routing.",
     inputSchema: {
       type: "object",
       properties: {
         task: {
           type: "string",
           description: "Natural-language investigation task for the agent."
+        },
+        mode: {
+          type: "string",
+          enum: ["auto", "generic", "alert"],
+          description:
+            "Optional routing mode. Defaults to auto, which only selects alert mode when explicit alert markers are present."
+        },
+        alertname: {
+          type: "string",
+          description:
+            "Optional explicit alert name. When present, investigate routes to the alert-specific entrypoint."
+        },
+        labels: {
+          type: "object",
+          description:
+            "Optional alert labels forwarded to the agent when alert mode is selected.",
+          additionalProperties: {
+            type: "string"
+          }
+        },
+        annotations: {
+          type: "object",
+          description:
+            "Optional alert annotations forwarded to the agent when alert mode is selected.",
+          additionalProperties: {
+            type: "string"
+          }
         },
         agent: {
           type: "string",
@@ -41,6 +69,110 @@ let readBuffer = "";
 let sessionId = null;
 let requestId = 0;
 let remoteInitialized = false;
+const ENTRYPOINT_PREFIX = "[INVESTIGATION_ENTRYPOINT]=";
+const OPERATOR_TARGET_PREFIXES = ["Backend/", "Frontend/", "Cluster/"];
+
+function normalizeMode(rawMode) {
+  const mode = typeof rawMode === "string" ? rawMode.trim().toLowerCase() : "auto";
+  if (!mode) {
+    return "auto";
+  }
+  if (mode === "auto" || mode === "generic" || mode === "alert") {
+    return mode;
+  }
+  throw new Error(`Unsupported investigate mode: ${rawMode}`);
+}
+
+function extractAlertname(task) {
+  const markers = [
+    /\balertname\s*[:=]\s*([^\s,.;]+)/i,
+    /^\s*Investigate\s+alert\s+([^\s,.;:]+)/i
+  ];
+
+  for (const pattern of markers) {
+    const match = task.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const candidate = match[1]?.trim() ?? "";
+    if (!candidate) {
+      continue;
+    }
+    if (candidate.includes("/")) {
+      return null;
+    }
+    if (OPERATOR_TARGET_PREFIXES.some((prefix) => candidate.startsWith(prefix))) {
+      return null;
+    }
+    return candidate;
+  }
+
+  return null;
+}
+
+function serializeKeyValueMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const entries = Object.entries(value)
+    .filter(([, item]) => typeof item === "string" && item.trim())
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  if (!entries.length) {
+    return null;
+  }
+
+  return JSON.stringify(Object.fromEntries(entries));
+}
+
+function buildInvestigationTask(args) {
+  const originalTask = typeof args.task === "string" ? args.task.trim() : "";
+  if (!originalTask) {
+    throw new Error("investigate task is required");
+  }
+
+  const explicitAlertname =
+    typeof args.alertname === "string" && args.alertname.trim()
+      ? args.alertname.trim()
+      : null;
+  const mode = normalizeMode(args.mode);
+  const inferredAlertname = explicitAlertname ?? extractAlertname(originalTask);
+  const selectedMode =
+    mode === "auto" ? (inferredAlertname ? "alert" : "generic") : mode;
+
+  if (selectedMode === "alert" && !inferredAlertname) {
+    throw new Error(
+      "Alert mode requires an explicit alertname or an alert-shaped task marker such as 'alertname=PodCrashLooping'."
+    );
+  }
+
+  const lines = [
+    `${ENTRYPOINT_PREFIX}${selectedMode}`,
+    selectedMode === "alert"
+      ? "Use build_alert_investigation_report as the top-level report entrypoint."
+      : "Use build_investigation_report as the top-level report entrypoint.",
+  ];
+
+  if (selectedMode === "generic") {
+    lines.push(
+      "If the target is vague, resolve it first with find_unhealthy_pod before calling build_investigation_report."
+    );
+  } else {
+    lines.push(`alertname: ${inferredAlertname}`);
+    const labels = serializeKeyValueMap(args.labels);
+    if (labels) {
+      lines.push(`labels: ${labels}`);
+    }
+    const annotations = serializeKeyValueMap(args.annotations);
+    if (annotations) {
+      lines.push(`annotations: ${annotations}`);
+    }
+  }
+
+  lines.push("", "Original user request:", originalTask);
+  return lines.join("\n");
+}
 
 function controllerConfig() {
   const remoteUrl = (
@@ -207,7 +339,7 @@ async function ensureRemoteInitialized() {
     capabilities: {},
     clientInfo: {
       name: "homelab-investigation-remote",
-      version: "0.1.5"
+      version: "0.1.6"
     }
   });
 
@@ -241,7 +373,7 @@ async function investigateResult(args) {
     name: "invoke_agent",
     arguments: {
       agent: args.agent || defaultAgentRef,
-      task: args.task,
+      task: buildInvestigationTask(args),
       ...(args.context_id ? { context_id: args.context_id } : {})
     }
   });
@@ -272,7 +404,7 @@ async function handleMessage(message) {
       },
       serverInfo: {
         name: "homelab-investigation-remote",
-        version: "0.1.5"
+        version: "0.1.6"
       }
     });
     return;

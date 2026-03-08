@@ -58,6 +58,13 @@ Expected call path:
 
 `investigate` is the primary user-facing action. `list_investigation_agents` is a secondary/debug surface.
 
+`investigate` now applies deterministic entrypoint routing before it calls the controller-backed agent:
+
+- generic requests steer toward `build_investigation_report`
+- explicit alert-shaped requests steer toward `build_alert_investigation_report`
+
+Alert routing is only selected when the request includes an explicit alert form such as `Investigate alert PodCrashLooping ...`, or when the caller passes structured `mode=alert` plus `alertname`. The raw `alertname=...` text forms remain available as a secondary debug fallback.
+
 ## Recommended rollout notes
 
 - Desktop only: this is for Claude Desktop, not Claude Code.

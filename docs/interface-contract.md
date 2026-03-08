@@ -59,12 +59,43 @@ For backend tool surfaces, prefer explicit entry modes when available:
 - generic targeted investigations should use `build_investigation_report`
 - alert-shaped investigations should use `build_alert_investigation_report`
 
+## Client-side routing
+
+Clients should preserve one small, deterministic routing rule before handing work to the controller-backed agent path.
+
+- route to the alert entrypoint only when the request includes an explicit alert form
+- otherwise keep the generic entrypoint
+
+Preferred alert form:
+
+- `Investigate alert PodCrashLooping ...`
+
+Debug or structured fallback forms:
+
+- `alertname=PodCrashLooping`
+- `alertname: PodCrashLooping`
+
+Guardrails:
+
+- do not treat `Backend/<name>`, `Frontend/<name>`, or `Cluster/<name>` as alert names
+- do not infer alert mode from vague prose alone
+- preserve the original user request verbatim when wrapping it for the agent
+
+When a client needs to steer the controller-backed agent explicitly, prepend one of these directives:
+
+- `[INVESTIGATION_ENTRYPOINT]=generic`
+- `[INVESTIGATION_ENTRYPOINT]=alert`
+
+The wrapper should still include the original user request and should remain read-only.
+
 ## User-facing names
 
 Use these names as the primary surface:
 
 - Claude Code local: `/investigate`
+- Claude Code local alert path: `/investigate-alert`
 - Claude Code plugin: `/investigation-tools:investigate`
+- Claude Code plugin alert path: `/investigation-tools:investigate-alert`
 - Claude Desktop tool: `investigate`
 
 Do not lead with internal names like:

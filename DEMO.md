@@ -140,8 +140,10 @@ Use build_investigation_report for the investigation. Investigate the unhealthy 
 ### Alert-shaped workload prompt
 
 ```text
-Investigate alert PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
+/investigate-alert Investigate PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
 ```
+
+For Claude Code, the alert command is now the preferred user-facing way to steer toward the alert-specific top-level backend entrypoint instead of the generic one.
 
 ### Service-style prompt
 
