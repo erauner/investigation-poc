@@ -1,5 +1,10 @@
 from investigation_service.models import InvestigationReportRequest, TargetRef
-from investigation_service.planner import PlannerDeps, classify_investigation_mode, plan_investigation
+from investigation_service.planner import (
+    PlannerDeps,
+    classify_investigation_mode,
+    plan_investigation,
+    resolve_primary_target,
+)
 
 
 def test_classify_investigation_mode_detects_alert_requests() -> None:
@@ -52,7 +57,10 @@ def test_plan_investigation_runs_policy_pipeline_and_aligns_cluster_note() -> No
     plan = plan_investigation(req, deps)
 
     assert plan.mode == "generic"
+    assert plan.target.requested_target == "pod/api"
     assert plan.normalized.target == "pod/api-7f9d6"
+    assert plan.target.target == "pod/api-7f9d6"
+    assert plan.evidence.target.name == "api-7f9d6"
     assert "cluster resolved from collected context: erauner-home" in plan.normalized.normalization_notes
     assert steps == ["collect"]
 
@@ -86,3 +94,25 @@ def test_plan_investigation_uses_injected_dependency_container() -> None:
         "get_backend_cr",
         "collect_workload_context",
     ]
+
+
+def test_resolve_primary_target_preserves_requested_target() -> None:
+    deps = PlannerDeps(
+        normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected alert normalization: {req}")),
+        canonical_target=lambda target, profile, service_name: "Backend/api",
+        scope_from_target=lambda target, profile: "workload",
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
+        get_backend_cr=lambda namespace, name, cluster=None: {"metadata": {"name": name}},
+        get_frontend_cr=lambda namespace, name, cluster=None: {},
+        get_cluster_cr=lambda namespace, name, cluster=None: {},
+        find_unhealthy_pod=lambda req: None,
+        collect_node_context=lambda req: None,
+        collect_service_context=lambda req: None,
+        collect_workload_context=lambda req: None,
+    )
+
+    target = resolve_primary_target(InvestigationReportRequest(namespace="default", target="Backend/api"), deps)
+
+    assert target.requested_target == "Backend/api"
+    assert target.target == "deployment/api"
+    assert target.service_name == "api"

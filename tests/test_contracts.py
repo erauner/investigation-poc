@@ -33,6 +33,7 @@ from investigation_service.reporting import (
 )
 from investigation_service.synthesis import build_root_cause_report
 from investigation_service.tools import collect_service_context, normalize_alert_input
+from investigation_service.tools import evidence_bundle_from_context, render_collected_context
 
 
 def _sample_response(target: TargetRef) -> CollectedContextResponse:
@@ -53,6 +54,15 @@ def _sample_response(target: TargetRef) -> CollectedContextResponse:
         limitations=["metric unavailable: service_latency_p95_seconds"],
         enrichment_hints=["service metrics unavailable; use observability MCP for logs, traces, or dashboards"],
     )
+
+
+def test_evidence_bundle_round_trip_preserves_context_shape() -> None:
+    context = _sample_response(TargetRef(namespace="default", kind="pod", name="api-123"))
+
+    bundle = evidence_bundle_from_context(context)
+    rendered = render_collected_context(bundle)
+
+    assert rendered == context
 
 
 def _now_iso() -> str:

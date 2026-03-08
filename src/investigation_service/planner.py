@@ -8,11 +8,13 @@ from .models import (
     CollectNodeContextRequest,
     CollectServiceContextRequest,
     FindUnhealthyPodRequest,
+    InvestigationTarget,
     InvestigationMode,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
     PlannedInvestigation,
 )
+from .tools import evidence_bundle_from_context
 
 _VAGUE_WORKLOAD_TARGETS = {
     "pod",
@@ -44,6 +46,60 @@ def classify_investigation_mode(req: InvestigationReportRequest) -> Investigatio
     if req.alertname:
         return "alert"
     return "generic"
+
+
+def investigation_target_from_normalized(
+    normalized: NormalizedInvestigationRequest,
+    *,
+    requested_target: str | None = None,
+) -> InvestigationTarget:
+    return InvestigationTarget(
+        source=normalized.source,
+        scope=normalized.scope,
+        cluster=normalized.cluster,
+        namespace=normalized.namespace,
+        requested_target=requested_target or normalized.target,
+        target=normalized.target,
+        node_name=normalized.node_name,
+        service_name=normalized.service_name,
+        profile=normalized.profile,
+        lookback_minutes=normalized.lookback_minutes,
+        normalization_notes=list(normalized.normalization_notes),
+    )
+
+
+def normalized_request_from_target(target: InvestigationTarget) -> NormalizedInvestigationRequest:
+    return NormalizedInvestigationRequest(
+        source=target.source,
+        scope=target.scope,
+        cluster=target.cluster,
+        namespace=target.namespace,
+        target=target.target,
+        node_name=target.node_name,
+        service_name=target.service_name,
+        profile=target.profile,
+        lookback_minutes=target.lookback_minutes,
+        normalization_notes=list(target.normalization_notes),
+    )
+
+
+def investigation_target_from_context_request(req: CollectContextRequest) -> InvestigationTarget:
+    scope = req.target.split("/", 1)[0] if "/" in req.target else req.profile
+    node_name = req.target.split("/", 1)[1] if scope == "node" and "/" in req.target else None
+    service_name = req.service_name or (req.target.split("/", 1)[1] if scope == "service" and "/" in req.target else None)
+    return InvestigationTarget(
+        source="manual",
+        scope=scope,
+        cluster=req.cluster,
+        namespace=req.namespace,
+        requested_target=req.target,
+        target=req.target,
+        node_name=node_name,
+        service_name=service_name,
+        profile=req.profile,
+        lookback_minutes=req.lookback_minutes,
+        normalization_notes=[],
+    )
 
 
 def normalized_request(
@@ -91,6 +147,19 @@ def normalized_request(
         lookback_minutes=req.lookback_minutes,
         normalization_notes=notes,
     )
+
+
+def resolve_primary_target(
+    req: InvestigationReportRequest,
+    deps: PlannerDeps,
+) -> InvestigationTarget:
+    normalized = normalized_request(req, deps)
+    requested_target = normalized.target
+    normalized = resolve_backend_convenience_target(normalized, deps)
+    normalized = resolve_frontend_convenience_target(normalized, deps)
+    normalized = resolve_cluster_convenience_target(normalized, deps)
+    normalized = resolve_vague_workload_target(normalized, deps)
+    return investigation_target_from_normalized(normalized, requested_target=requested_target)
 
 
 def resolve_vague_workload_target(
@@ -367,11 +436,8 @@ def plan_investigation(
     )
     align_impl = align_normalized_request_with_context_impl or align_normalized_request_with_context
 
-    normalized = normalized_request(req, deps)
-    normalized = resolve_backend_convenience_target(normalized, deps)
-    normalized = resolve_frontend_convenience_target(normalized, deps)
-    normalized = resolve_cluster_convenience_target(normalized, deps)
-    normalized = resolve_vague_workload_target(normalized, deps)
+    target = resolve_primary_target(req, deps)
+    normalized = normalized_request_from_target(target)
     context = collect_context_impl(normalized)
     normalized = align_impl(normalized, context)
     context_cluster = getattr(context, "cluster", None)
@@ -379,9 +445,12 @@ def plan_investigation(
         notes = list(normalized.normalization_notes)
         notes.append(f"cluster resolved from collected context: {context_cluster}")
         normalized = normalized.model_copy(update={"cluster": context_cluster, "normalization_notes": notes})
+    target = investigation_target_from_normalized(normalized, requested_target=target.requested_target)
 
     return PlannedInvestigation(
         mode=classify_investigation_mode(req),
+        target=target,
+        evidence=evidence_bundle_from_context(context),
         normalized=normalized,
         context=context,
     )

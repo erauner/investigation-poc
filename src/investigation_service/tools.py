@@ -18,6 +18,7 @@ from .models import (
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     CollectedContextResponse,
+    EvidenceBundle,
     NormalizedInvestigationRequest,
     ScopeType,
     UnhealthyPodResponse,
@@ -125,7 +126,35 @@ def _build_operator_ownership_hints(target_kind: str, object_state: dict) -> lis
     ]
 
 
-def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
+def render_collected_context(bundle: EvidenceBundle) -> CollectedContextResponse:
+    return CollectedContextResponse(
+        cluster=bundle.cluster,
+        target=bundle.target,
+        object_state=bundle.object_state,
+        events=bundle.events,
+        log_excerpt=bundle.log_excerpt,
+        metrics=bundle.metrics,
+        findings=bundle.findings,
+        limitations=bundle.limitations,
+        enrichment_hints=bundle.enrichment_hints,
+    )
+
+
+def evidence_bundle_from_context(context: CollectedContextResponse) -> EvidenceBundle:
+    return EvidenceBundle(
+        cluster=getattr(context, "cluster", "current-context"),
+        target=context.target,
+        object_state=getattr(context, "object_state", {}),
+        events=getattr(context, "events", []),
+        log_excerpt=getattr(context, "log_excerpt", ""),
+        metrics=getattr(context, "metrics", {}),
+        findings=getattr(context, "findings", []),
+        limitations=getattr(context, "limitations", []),
+        enrichment_hints=getattr(context, "enrichment_hints", []),
+    )
+
+
+def collect_evidence_bundle(req: CollectContextRequest) -> EvidenceBundle:
     cluster = resolve_cluster(req.cluster)
     requested_target = _call_with_optional_cluster(resolve_target, req.namespace, req.target, cluster=cluster)
     target = _call_with_optional_cluster(resolve_runtime_target, requested_target, cluster=cluster)
@@ -172,7 +201,7 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
     enrichment_hints = _build_enrichment_hints(target.kind, effective_profile, metrics, limitations, findings)
     enrichment_hints.extend(_build_operator_ownership_hints(target.kind, object_state))
 
-    return CollectedContextResponse(
+    return EvidenceBundle(
         cluster=cluster.alias,
         target=target,
         object_state=object_state,
@@ -183,6 +212,10 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
         limitations=sorted(set(limitations)),
         enrichment_hints=sorted(set(enrichment_hints)),
     )
+
+
+def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
+    return render_collected_context(collect_evidence_bundle(req))
 
 
 def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextRequest:

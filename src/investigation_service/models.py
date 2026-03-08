@@ -51,9 +51,37 @@ class NormalizedInvestigationRequest(BaseModel):
     normalization_notes: list[str] = Field(default_factory=list)
 
 
+class InvestigationTarget(BaseModel):
+    source: Literal["manual", "alert"]
+    scope: ScopeType
+    cluster: str | None = Field(default=None, description="Resolved logical cluster alias")
+    namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
+    requested_target: str = Field(..., description="Original requested or inferred logical target")
+    target: str = Field(..., description="Current canonical target in kind/name form")
+    node_name: str | None = Field(default=None, description="Explicit node target when scope=node")
+    service_name: str | None = Field(default=None, description="Explicit service target when scope=service")
+    profile: ProfileType = Field(default="workload", description="Investigation profile")
+    lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
+    normalization_notes: list[str] = Field(default_factory=list)
+
+
+class EvidenceBundle(BaseModel):
+    cluster: str = "current-context"
+    target: TargetRef
+    object_state: dict
+    events: list[str]
+    log_excerpt: str
+    metrics: dict
+    findings: list["Finding"]
+    limitations: list[str] = Field(default_factory=list)
+    enrichment_hints: list[str] = Field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class PlannedInvestigation:
     mode: InvestigationMode
+    target: InvestigationTarget
+    evidence: "EvidenceBundle"
     normalized: NormalizedInvestigationRequest
     context: Any
 

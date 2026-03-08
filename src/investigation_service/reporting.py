@@ -6,6 +6,7 @@ from .models import (
     BuildRootCauseReportRequest,
     CollectCorrelatedChangesRequest,
     CorrelatedChange,
+    InvestigationTarget,
     InvestigationReport,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
@@ -18,6 +19,7 @@ from .planner import PlannerDeps
 from . import planner
 from .routing import canonical_target, scope_from_target
 from .synthesis import build_root_cause_report as build_root_cause_report_impl
+from .synthesis import synthesize_root_cause as synthesize_root_cause_impl
 from .tools import (
     collect_node_context,
     collect_service_context,
@@ -28,6 +30,7 @@ from .tools import (
 
 _EMPTY_CORRELATION_LIMITATION = "no correlated changes found in the requested time window"
 _EMPTY_RELATED_DATA_NOTE = "no meaningful correlated changes found in the requested time window"
+_LEGACY_BUILD_ROOT_CAUSE_IMPL = build_root_cause_report_impl
 
 
 def _is_empty_correlation_limitation(value: str) -> bool:
@@ -144,6 +147,58 @@ def _base_investigation_report(root_cause: RootCauseReport) -> InvestigationRepo
     )
 
 
+def _build_correlation_request(
+    req: InvestigationReportRequest,
+    target: InvestigationTarget,
+) -> CollectCorrelatedChangesRequest:
+    return CollectCorrelatedChangesRequest(
+        cluster=target.cluster,
+        namespace=target.namespace,
+        target=target.target,
+        profile=target.profile,
+        service_name=target.service_name,
+        lookback_minutes=req.correlation_window_minutes,
+        anchor_timestamp=req.anchor_timestamp,
+        limit=req.correlation_limit,
+    )
+
+
+def _render_investigation_report(
+    root_cause: RootCauseReport,
+    *,
+    normalization_notes: list[str],
+    related_data: list[CorrelatedChange],
+    related_data_note: str | None,
+    limitations: list[str],
+    recommended_next_step: str,
+    suggested_follow_ups: list[str],
+    guidelines: list[ResolvedGuideline],
+) -> InvestigationReport:
+    return InvestigationReport(
+        cluster=root_cause.cluster,
+        scope=root_cause.scope,
+        target=root_cause.target,
+        diagnosis=root_cause.diagnosis,
+        likely_cause=root_cause.likely_cause,
+        confidence=root_cause.confidence,
+        evidence=root_cause.evidence,
+        evidence_items=root_cause.evidence_items,
+        related_data=related_data,
+        related_data_note=related_data_note,
+        limitations=sorted(set(limitations)),
+        recommended_next_step=recommended_next_step,
+        suggested_follow_ups=_dedupe_preserving_order(suggested_follow_ups),
+        guidelines=guidelines,
+        normalization_notes=normalization_notes,
+    )
+
+
+def _synthesize_root_cause(plan) -> RootCauseReport:
+    if build_root_cause_report_impl is not _LEGACY_BUILD_ROOT_CAUSE_IMPL:
+        return build_root_cause_report_impl(plan.context, plan.normalized)
+    return synthesize_root_cause_impl(plan.evidence, plan.target)
+
+
 def _apply_guidelines(
     root_cause: RootCauseReport,
     *,
@@ -232,7 +287,7 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
         align_normalized_request_with_context_impl=_align_normalized_request_with_context,
     )
     normalized = plan.normalized
-    root_cause = build_root_cause_report_impl(plan.context, normalized)
+    root_cause = _synthesize_root_cause(plan)
 
     related_data: list[CorrelatedChange] = []
     related_data_note: str | None = None
@@ -240,24 +295,13 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
     recommended_next_step, suggested_follow_ups, guidelines, guideline_limitations = _apply_guidelines(
         root_cause,
         alertname=req.alertname,
-        namespace=normalized.namespace,
-        service_name=normalized.service_name,
+        namespace=plan.target.namespace,
+        service_name=plan.target.service_name,
     )
     limitations.extend(guideline_limitations)
 
     if req.include_related_data:
-        correlated = collect_correlated_changes(
-            CollectCorrelatedChangesRequest(
-                cluster=normalized.cluster,
-                namespace=normalized.namespace,
-                target=normalized.target,
-                profile=normalized.profile,
-                service_name=normalized.service_name,
-                lookback_minutes=req.correlation_window_minutes,
-                anchor_timestamp=req.anchor_timestamp,
-                limit=req.correlation_limit,
-            )
-        )
+        correlated = collect_correlated_changes(_build_correlation_request(req, plan.target))
         related_data, related_data_note = _filter_related_data(root_cause, correlated.changes)
         correlation_limitations = list(correlated.limitations)
         if not related_data and related_data_note:
@@ -268,20 +312,13 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
         if related_data:
             suggested_follow_ups.append("Inspect the related changes timeline before taking write actions.")
 
-    return InvestigationReport(
-        cluster=root_cause.cluster,
-        scope=root_cause.scope,
-        target=root_cause.target,
-        diagnosis=root_cause.diagnosis,
-        likely_cause=root_cause.likely_cause,
-        confidence=root_cause.confidence,
-        evidence=root_cause.evidence,
-        evidence_items=root_cause.evidence_items,
+    return _render_investigation_report(
+        root_cause,
+        normalization_notes=plan.target.normalization_notes,
         related_data=related_data,
         related_data_note=related_data_note,
-        limitations=sorted(set(limitations)),
+        limitations=limitations,
         recommended_next_step=recommended_next_step,
-        suggested_follow_ups=_dedupe_preserving_order(suggested_follow_ups),
+        suggested_follow_ups=suggested_follow_ups,
         guidelines=guidelines,
-        normalization_notes=normalized.normalization_notes,
     )
