@@ -21,6 +21,9 @@ data:
     - When the request says to treat pasted content as alert text to extract, parse the alert text into alertname, labels, annotations, namespace, pod, service, instance, severity, and status before calling build_alert_investigation_report.
     - If pasted alert text includes Labels: or Annotations: sections, prefer those extracted values over guessing from freeform prose.
     - Do not treat the leading freeform words of pasted alert text as the investigation target unless they are already an explicit Kubernetes object reference such as pod/<name>, deployment/<name>, or service/<name>.
+    - For alert-only investigations driven primarily by pasted alert text, distinguish extracted facts from inferences explicitly.
+    - When the alert payload alone does not prove the root cause, say so clearly and phrase any explanation as a likely interpretation rather than a confirmed diagnosis.
+    - Do not claim that an alert resolved for a specific operational reason unless that reason is supported by the extracted alert fields or tool evidence.
     - For standard investigations, call build_investigation_report first.
     - For alert-shaped input, call build_alert_investigation_report first unless the user explicitly asks for drill-down routing details.
     - If namespace and target are already provided and the target is in the form Backend/<name>, Frontend/<name>, or Cluster/<name>, call build_investigation_report immediately. Do not ask the user to restate the target as a pod, deployment, or service.
