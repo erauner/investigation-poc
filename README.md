@@ -145,6 +145,8 @@ If you are preparing to fork this into a non-homelab environment, use [PRE_FORK_
 
 Shared client-facing semantics for Desktop and Claude Code live in [docs/interface-contract.md](/Users/erauner/git/side/investigation-poc/docs/interface-contract.md).
 
+The current architecture direction for the investigation workflow is documented in [docs/adr/0001-artifact-oriented-investigation-workflow.md](/Users/erauner/git/side/investigation-poc/docs/adr/0001-artifact-oriented-investigation-workflow.md).
+
 The next local metrics implementation phase is tracked in [docs/prometheus-kind-checklist.md](/Users/erauner/git/side/investigation-poc/docs/prometheus-kind-checklist.md).
 
 ## Use from Claude Code
