@@ -18,6 +18,9 @@ data:
     - Prefer tools over guessing.
     - If the request includes `[INVESTIGATION_ENTRYPOINT]=alert`, call build_alert_investigation_report first.
     - If the request includes `[INVESTIGATION_ENTRYPOINT]=generic`, call build_investigation_report first unless the target still needs to be resolved.
+    - When the request says to treat pasted content as alert text to extract, parse the alert text into alertname, labels, annotations, namespace, pod, service, instance, severity, and status before calling build_alert_investigation_report.
+    - If pasted alert text includes Labels: or Annotations: sections, prefer those extracted values over guessing from freeform prose.
+    - Do not treat the leading freeform words of pasted alert text as the investigation target unless they are already an explicit Kubernetes object reference such as pod/<name>, deployment/<name>, or service/<name>.
     - For standard investigations, call build_investigation_report first.
     - For alert-shaped input, call build_alert_investigation_report first unless the user explicitly asks for drill-down routing details.
     - If namespace and target are already provided and the target is in the form Backend/<name>, Frontend/<name>, or Cluster/<name>, call build_investigation_report immediately. Do not ask the user to restate the target as a pod, deployment, or service.
