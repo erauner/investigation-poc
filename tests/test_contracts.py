@@ -9,6 +9,7 @@ from investigation_service.k8s_adapter import find_unhealthy_workloads as find_u
 from investigation_service.k8s_adapter import get_k8s_object
 from investigation_service.main import app
 from investigation_service.models import (
+    AlertInvestigationReportRequest,
     BuildRootCauseReportRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
@@ -24,7 +25,11 @@ from investigation_service.models import (
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
-from investigation_service.reporting import build_investigation_report, build_root_cause_report as build_root_cause_report_from_request
+from investigation_service.reporting import (
+    build_alert_investigation_report,
+    build_investigation_report,
+    build_root_cause_report as build_root_cause_report_from_request,
+)
 from investigation_service.synthesis import build_root_cause_report
 from investigation_service.tools import collect_service_context, normalize_alert_input
 
@@ -530,6 +535,79 @@ def test_build_investigation_report_route_returns_typed_report(monkeypatch) -> N
     body = response.json()
     assert body["target"] == "pod/crashy-abc123"
     assert body["evidence_items"][0]["fingerprint"].startswith("finding|workload|")
+
+
+def test_build_alert_investigation_report_wrapper_maps_into_shared_report_flow(monkeypatch) -> None:
+    captured = {}
+
+    def fake_build_investigation_report(req):
+        captured["request"] = req
+        return InvestigationReport(
+            scope="workload",
+            target="pod/crashy-abc123",
+            diagnosis="Crash Loop Detected",
+            likely_cause="The pod is repeatedly failing shortly after start, so Kubernetes is backing off restarts.",
+            confidence="high",
+            evidence=["events: Crash Loop Detected - Events indicate BackOff/CrashLoopBackOff behavior"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="no meaningful correlated changes found in the requested time window",
+            limitations=[],
+            recommended_next_step="Confirm the failure with describe output, recent logs, and rollout history before taking write actions.",
+            suggested_follow_ups=[],
+            normalization_notes=["alertname=PodCrashLooping"],
+        )
+
+    monkeypatch.setattr("investigation_service.reporting.build_investigation_report", fake_build_investigation_report)
+
+    report = build_alert_investigation_report(
+        AlertInvestigationReportRequest(
+            alertname="PodCrashLooping",
+            labels={"namespace": "kagent-smoke", "pod": "crashy-abc123"},
+            include_related_data=False,
+        )
+    )
+
+    req = captured["request"]
+    assert req.alertname == "PodCrashLooping"
+    assert req.labels["pod"] == "crashy-abc123"
+    assert req.include_related_data is False
+    assert report.normalization_notes == ["alertname=PodCrashLooping"]
+
+
+def test_build_alert_investigation_report_route_returns_typed_report(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.build_alert_investigation_report",
+        lambda _req: InvestigationReport(
+            scope="workload",
+            target="pod/crashy-abc123",
+            diagnosis="Crash Loop Detected",
+            likely_cause="The pod is repeatedly failing shortly after start, so Kubernetes is backing off restarts.",
+            confidence="high",
+            evidence=["events: Crash Loop Detected - Events indicate BackOff/CrashLoopBackOff behavior"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="no meaningful correlated changes found in the requested time window",
+            limitations=[],
+            recommended_next_step="Confirm the failure with describe output, recent logs, and rollout history before taking write actions.",
+            suggested_follow_ups=[],
+            normalization_notes=["alertname=PodCrashLooping"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/build_alert_investigation_report",
+        json={
+            "alertname": "PodCrashLooping",
+            "labels": {"namespace": "kagent-smoke", "pod": "crashy-abc123"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"] == "pod/crashy-abc123"
+    assert body["normalization_notes"] == ["alertname=PodCrashLooping"]
 
 
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:

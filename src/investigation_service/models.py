@@ -129,6 +129,23 @@ class InvestigationReportRequest(BaseModel):
     node_name: str | None = Field(default=None, description="Optional node override for alert-shaped node investigations")
 
 
+class AlertInvestigationReportRequest(BaseModel):
+    alertname: str = Field(..., description="Alert name")
+    labels: dict[str, str] = Field(default_factory=dict, description="Alert labels")
+    annotations: dict[str, str] = Field(default_factory=dict, description="Alert annotations")
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
+    namespace: str | None = Field(default=None, description="Optional namespace override")
+    node_name: str | None = Field(default=None, description="Optional node override for node-scoped alerts")
+    target: str | None = Field(default=None, description="Optional target override")
+    profile: ProfileType = Field(default="workload", description="Investigation profile")
+    service_name: str | None = Field(default=None, description="Optional service name hint for service profile")
+    lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
+    include_related_data: bool = Field(default=True, description="Whether to collect correlated changes")
+    correlation_window_minutes: int = Field(default=60, ge=1, le=1440, description="Correlation window in minutes")
+    correlation_limit: int = Field(default=10, ge=1, le=25, description="Maximum correlated changes to return")
+    anchor_timestamp: str | None = Field(default=None, description="Optional timestamp to anchor the correlation window")
+
+
 class GuidelineMatch(BaseModel):
     scope: ScopeType | None = None
     alertname: str | None = None

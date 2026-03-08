@@ -3,6 +3,7 @@ import os
 from mcp.server.fastmcp import FastMCP
 
 from .models import (
+    AlertInvestigationReportRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
     CollectContextRequest,
@@ -14,6 +15,7 @@ from .models import (
     InvestigationReportRequest,
 )
 from .correlation import collect_correlated_changes as collect_correlated_changes_impl
+from .reporting import build_alert_investigation_report as build_alert_investigation_report_impl
 from .reporting import build_investigation_report as build_investigation_report_impl
 from .reporting import build_root_cause_report as build_root_cause_report_impl
 from .tools import collect_alert_context as collect_alert_context_impl
@@ -220,6 +222,45 @@ def build_investigation_report(
             labels=labels or {},
             annotations=annotations or {},
             node_name=node_name,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def build_alert_investigation_report(
+    alertname: str,
+    labels: dict[str, str] | None = None,
+    annotations: dict[str, str] | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    node_name: str | None = None,
+    target: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+    include_related_data: bool = True,
+    correlation_window_minutes: int = 60,
+    correlation_limit: int = 10,
+    anchor_timestamp: str | None = None,
+) -> dict:
+    """Build the final typed investigation report for alert-shaped input. Prefer this explicit alert triage entrypoint over the generic report tool when alertname, labels, or annotations are the primary input."""
+    response = build_alert_investigation_report_impl(
+        AlertInvestigationReportRequest(
+            alertname=alertname,
+            labels=labels or {},
+            annotations=annotations or {},
+            cluster=cluster,
+            namespace=namespace,
+            node_name=node_name,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+            include_related_data=include_related_data,
+            correlation_window_minutes=correlation_window_minutes,
+            correlation_limit=correlation_limit,
+            anchor_timestamp=anchor_timestamp,
         )
     )
     return response.model_dump(mode="json")

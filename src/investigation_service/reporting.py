@@ -2,6 +2,7 @@ from .correlation import collect_correlated_changes
 from .event_fingerprints import canonicalize_event_fingerprint
 from .guidelines import load_guideline_rules, resolve_guidelines
 from .models import (
+    AlertInvestigationReportRequest,
     BuildRootCauseReportRequest,
     CollectCorrelatedChangesRequest,
     CorrelatedChange,
@@ -199,6 +200,27 @@ def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport
         limitations=report.limitations,
         recommended_next_step=report.recommended_next_step,
         suggested_follow_ups=report.suggested_follow_ups,
+    )
+
+
+def build_alert_investigation_report(req: AlertInvestigationReportRequest) -> InvestigationReport:
+    return build_investigation_report(
+        InvestigationReportRequest(
+            cluster=req.cluster,
+            namespace=req.namespace,
+            target=req.target,
+            profile=req.profile,
+            service_name=req.service_name,
+            lookback_minutes=req.lookback_minutes,
+            include_related_data=req.include_related_data,
+            correlation_window_minutes=req.correlation_window_minutes,
+            correlation_limit=req.correlation_limit,
+            anchor_timestamp=req.anchor_timestamp,
+            alertname=req.alertname,
+            labels=req.labels,
+            annotations=req.annotations,
+            node_name=req.node_name,
+        )
     )
 
 
