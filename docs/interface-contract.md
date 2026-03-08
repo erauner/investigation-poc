@@ -54,6 +54,11 @@ Across clients, `Investigate` should preserve these semantics:
 - report composition remains backend-owned
 - controller and agent implementation details stay hidden from the primary UX
 
+For backend tool surfaces, prefer explicit entry modes when available:
+
+- generic targeted investigations should use `build_investigation_report`
+- alert-shaped investigations should use `build_alert_investigation_report`
+
 ## User-facing names
 
 Use these names as the primary surface:

@@ -243,6 +243,26 @@ def _follow_ups(context: CollectedContextResponse, scope: str) -> list[str]:
     return sorted(set(follow_ups))
 
 
+def _operator_target_follow_up(request: NormalizedInvestigationRequest | CollectContextRequest) -> str | None:
+    if not isinstance(request, NormalizedInvestigationRequest):
+        return None
+
+    for note in request.normalization_notes:
+        match = re.match(
+            r"resolved\s+((?:Backend|Frontend|Cluster)/[A-Za-z0-9][A-Za-z0-9\-\.]*)\s+to\s+(.+)",
+            note,
+        )
+        if not match:
+            continue
+        source_target = match.group(1)
+        resolved_target = match.group(2)
+        return (
+            f"This investigation was requested via {source_target}, which resolved to {resolved_target}. "
+            "Prefer checking operator reconciliation and updating the owning resource rather than editing pods directly."
+        )
+    return None
+
+
 def build_root_cause_report(
     context: CollectedContextResponse, request: NormalizedInvestigationRequest | CollectContextRequest
 ) -> RootCauseReport:
@@ -256,6 +276,11 @@ def build_root_cause_report(
     if requested_target_kind == "pod" and lead.title == "Crash Loop Detected":
         likely_cause = "The pod is repeatedly failing shortly after start, so Kubernetes is backing off restarts."
 
+    follow_ups = _follow_ups(context, scope)
+    operator_target_follow_up = _operator_target_follow_up(request)
+    if operator_target_follow_up:
+        follow_ups = sorted(set(follow_ups + [operator_target_follow_up]))
+
     return RootCauseReport(
         cluster=context.cluster,
         scope=scope,
@@ -267,5 +292,5 @@ def build_root_cause_report(
         evidence_items=evidence_items,
         limitations=context.limitations,
         recommended_next_step=_recommended_next_step(scope, profile),
-        suggested_follow_ups=_follow_ups(context, scope),
+        suggested_follow_ups=follow_ups,
     )

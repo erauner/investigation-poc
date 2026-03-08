@@ -1,9 +1,11 @@
-from typing import Literal
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 ProfileType = Literal["workload", "service", "otel-pipeline"]
 ScopeType = Literal["workload", "service", "node", "otel-pipeline"]
+InvestigationMode = Literal["generic", "alert"]
 ConfidenceType = Literal["low", "medium", "high"]
 GuidelineCategory = Literal["interpretation", "data_source", "next_step", "delegation", "safety"]
 
@@ -47,6 +49,13 @@ class NormalizedInvestigationRequest(BaseModel):
     profile: ProfileType = Field(default="workload", description="Investigation profile")
     lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
     normalization_notes: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PlannedInvestigation:
+    mode: InvestigationMode
+    normalized: NormalizedInvestigationRequest
+    context: Any
 
 
 class CollectNodeContextRequest(BaseModel):
@@ -118,6 +127,23 @@ class InvestigationReportRequest(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict, description="Optional alert labels")
     annotations: dict[str, str] = Field(default_factory=dict, description="Optional alert annotations")
     node_name: str | None = Field(default=None, description="Optional node override for alert-shaped node investigations")
+
+
+class AlertInvestigationReportRequest(BaseModel):
+    alertname: str = Field(..., description="Alert name")
+    labels: dict[str, str] = Field(default_factory=dict, description="Alert labels")
+    annotations: dict[str, str] = Field(default_factory=dict, description="Alert annotations")
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
+    namespace: str | None = Field(default=None, description="Optional namespace override")
+    node_name: str | None = Field(default=None, description="Optional node override for node-scoped alerts")
+    target: str | None = Field(default=None, description="Optional target override")
+    profile: ProfileType = Field(default="workload", description="Investigation profile")
+    service_name: str | None = Field(default=None, description="Optional service name hint for service profile")
+    lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
+    include_related_data: bool = Field(default=True, description="Whether to collect correlated changes")
+    correlation_window_minutes: int = Field(default=60, ge=1, le=1440, description="Correlation window in minutes")
+    correlation_limit: int = Field(default=10, ge=1, le=25, description="Maximum correlated changes to return")
+    anchor_timestamp: str | None = Field(default=None, description="Optional timestamp to anchor the correlation window")
 
 
 class GuidelineMatch(BaseModel):

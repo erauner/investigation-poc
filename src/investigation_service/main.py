@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from .models import (
+    AlertInvestigationReportRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
     CollectContextRequest,
@@ -20,7 +21,11 @@ from .models import (
     UnhealthyWorkloadsResponse,
 )
 from .correlation import collect_correlated_changes
-from .reporting import build_investigation_report, build_root_cause_report as build_root_cause_report_from_request
+from .reporting import (
+    build_alert_investigation_report,
+    build_investigation_report,
+    build_root_cause_report as build_root_cause_report_from_request,
+)
 from .tools import collect_alert_context, collect_node_context, collect_service_context, collect_workload_context, find_unhealthy_pod, find_unhealthy_workloads, normalize_alert_input
 
 app = FastAPI(title="Investigation Service", version="0.2.0")
@@ -74,6 +79,11 @@ def build_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
 @app.post("/tools/build_investigation_report", response_model=InvestigationReport)
 def build_investigation(req: InvestigationReportRequest) -> InvestigationReport:
     return build_investigation_report(req)
+
+
+@app.post("/tools/build_alert_investigation_report", response_model=InvestigationReport)
+def build_alert_investigation(req: AlertInvestigationReportRequest) -> InvestigationReport:
+    return build_alert_investigation_report(req)
 
 
 @app.post("/tools/collect_correlated_changes", response_model=CorrelatedChangesResponse)
