@@ -1,25 +1,41 @@
+from investigation_service import planner
 from investigation_service.models import InvestigationReportRequest
-from investigation_service import reporting
+from investigation_service.planner import PlannerDeps
 
 
-def test_backend_resolution_notes_fallback_when_backend_lookup_fails(monkeypatch) -> None:
-    resolved_cluster = type("ResolvedCluster", (), {"alias": "erauner-home"})()
-    monkeypatch.setattr(reporting, "resolve_cluster", lambda cluster: resolved_cluster)
-    monkeypatch.setattr(
-        reporting,
-        "get_backend_cr",
-        lambda namespace, name, cluster=None: {"error": "not found", "namespace": namespace, "name": name},
+def _deps(**overrides) -> PlannerDeps:
+    base = PlannerDeps(
+        normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected alert normalization: {req}")),
+        canonical_target=lambda target, profile, service_name: target,
+        scope_from_target=lambda target, profile: "workload",
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": cluster})(),
+        get_backend_cr=lambda namespace, name, cluster=None: {},
+        get_frontend_cr=lambda namespace, name, cluster=None: {},
+        get_cluster_cr=lambda namespace, name, cluster=None: {},
+        find_unhealthy_pod=lambda req: None,
+        collect_node_context=lambda req: None,
+        collect_service_context=lambda req: None,
+        collect_workload_context=lambda req: None,
+    )
+    return PlannerDeps(**{**base.__dict__, **overrides})
+
+
+def _normalized(req: InvestigationReportRequest, deps: PlannerDeps):
+    return planner.normalized_request(req, deps)
+
+
+def test_backend_resolution_notes_fallback_when_backend_lookup_fails() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
+        get_backend_cr=lambda namespace, name, cluster=None: {"error": "not found", "namespace": namespace, "name": name},
     )
 
-    normalized = reporting._resolve_backend_convenience_target(
-        reporting._normalized_request(
-            InvestigationReportRequest(
-                cluster="erauner-home",
-                namespace="operator-smoke",
-                target="Backend/crashy",
-                include_related_data=False,
-            )
-        )
+    normalized = planner.resolve_backend_convenience_target(
+        _normalized(
+            InvestigationReportRequest(cluster="erauner-home", namespace="operator-smoke", target="Backend/crashy"),
+            deps,
+        ),
+        deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -29,24 +45,18 @@ def test_backend_resolution_notes_fallback_when_backend_lookup_fails(monkeypatch
     assert "backend lookup failed; using deployment fallback" in normalized.normalization_notes
 
 
-def test_frontend_resolution_notes_fallback_when_frontend_lookup_fails(monkeypatch) -> None:
-    resolved_cluster = type("ResolvedCluster", (), {"alias": "erauner-home"})()
-    monkeypatch.setattr(reporting, "resolve_cluster", lambda cluster: resolved_cluster)
-    monkeypatch.setattr(
-        reporting,
-        "get_frontend_cr",
-        lambda namespace, name, cluster=None: {"error": "not found", "namespace": namespace, "name": name},
+def test_frontend_resolution_notes_fallback_when_frontend_lookup_fails() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
+        get_frontend_cr=lambda namespace, name, cluster=None: {"error": "not found", "namespace": namespace, "name": name},
     )
 
-    normalized = reporting._resolve_frontend_convenience_target(
-        reporting._normalized_request(
-            InvestigationReportRequest(
-                cluster="erauner-home",
-                namespace="operator-smoke",
-                target="Frontend/landing",
-                include_related_data=False,
-            )
-        )
+    normalized = planner.resolve_frontend_convenience_target(
+        _normalized(
+            InvestigationReportRequest(cluster="erauner-home", namespace="operator-smoke", target="Frontend/landing"),
+            deps,
+        ),
+        deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -56,25 +66,23 @@ def test_frontend_resolution_notes_fallback_when_frontend_lookup_fails(monkeypat
     assert "frontend lookup failed; using deployment/landing fallback" in normalized.normalization_notes
 
 
-def test_frontend_service_profile_resolves_to_service_when_lookup_fails(monkeypatch) -> None:
-    resolved_cluster = type("ResolvedCluster", (), {"alias": "erauner-home"})()
-    monkeypatch.setattr(reporting, "resolve_cluster", lambda cluster: resolved_cluster)
-    monkeypatch.setattr(
-        reporting,
-        "get_frontend_cr",
-        lambda namespace, name, cluster=None: {"error": "not found", "namespace": namespace, "name": name},
+def test_frontend_service_profile_resolves_to_service_when_lookup_fails() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
+        get_frontend_cr=lambda namespace, name, cluster=None: {"error": "not found", "namespace": namespace, "name": name},
     )
 
-    normalized = reporting._resolve_frontend_convenience_target(
-        reporting._normalized_request(
+    normalized = planner.resolve_frontend_convenience_target(
+        _normalized(
             InvestigationReportRequest(
                 cluster="erauner-home",
                 namespace="operator-smoke",
                 target="Frontend/landing",
                 profile="service",
-                include_related_data=False,
-            )
-        )
+            ),
+            deps,
+        ),
+        deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -86,37 +94,28 @@ def test_frontend_service_profile_resolves_to_service_when_lookup_fails(monkeypa
     assert "frontend lookup failed; using service/landing fallback" in normalized.normalization_notes
 
 
-def test_frontend_legacy_current_context_does_not_set_cluster_alias(monkeypatch) -> None:
-    resolved_cluster = type("ResolvedCluster", (), {"alias": "current-context", "source": "legacy_current_context"})()
-    monkeypatch.setattr(reporting, "resolve_cluster", lambda cluster: resolved_cluster)
-    monkeypatch.setattr(
-        reporting,
-        "get_frontend_cr",
-        lambda namespace, name, cluster=None: {"kind": "Frontend", "metadata": {"name": name, "namespace": namespace}},
+def test_frontend_legacy_current_context_does_not_set_cluster_alias() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "current-context", "source": "legacy_current_context"})(),
+        get_frontend_cr=lambda namespace, name, cluster=None: {"kind": "Frontend", "metadata": {"name": name, "namespace": namespace}},
     )
 
-    normalized = reporting._resolve_frontend_convenience_target(
-        reporting._normalized_request(
-            InvestigationReportRequest(
-                namespace="operator-smoke",
-                target="Frontend/landing",
-                profile="service",
-                include_related_data=False,
-            )
-        )
+    normalized = planner.resolve_frontend_convenience_target(
+        _normalized(
+            InvestigationReportRequest(namespace="operator-smoke", target="Frontend/landing", profile="service"),
+            deps,
+        ),
+        deps,
     )
 
     assert normalized.cluster is None
     assert normalized.target == "service/landing"
 
 
-def test_cluster_resolution_picks_first_failing_component(monkeypatch) -> None:
-    resolved_cluster = type("ResolvedCluster", (), {"alias": "erauner-home"})()
-    monkeypatch.setattr(reporting, "resolve_cluster", lambda cluster: resolved_cluster)
-    monkeypatch.setattr(
-        reporting,
-        "get_cluster_cr",
-        lambda namespace, name, cluster=None: {
+def test_cluster_resolution_picks_first_failing_component() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
+        get_cluster_cr=lambda namespace, name, cluster=None: {
             "status": {
                 "componentStatuses": [
                     {"name": "landing", "kind": "Frontend", "wave": 2, "phase": "Healthy", "ready": True},
@@ -126,15 +125,12 @@ def test_cluster_resolution_picks_first_failing_component(monkeypatch) -> None:
         },
     )
 
-    normalized = reporting._resolve_cluster_convenience_target(
-        reporting._normalized_request(
-            InvestigationReportRequest(
-                cluster="erauner-home",
-                namespace="operator-smoke",
-                target="Cluster/testapp",
-                include_related_data=False,
-            )
-        )
+    normalized = planner.resolve_cluster_convenience_target(
+        _normalized(
+            InvestigationReportRequest(cluster="erauner-home", namespace="operator-smoke", target="Cluster/testapp"),
+            deps,
+        ),
+        deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -144,13 +140,10 @@ def test_cluster_resolution_picks_first_failing_component(monkeypatch) -> None:
     assert "resolved Backend/api to deployment/api" in normalized.normalization_notes
 
 
-def test_cluster_service_profile_resolves_frontend_component_to_service(monkeypatch) -> None:
-    resolved_cluster = type("ResolvedCluster", (), {"alias": "erauner-home"})()
-    monkeypatch.setattr(reporting, "resolve_cluster", lambda cluster: resolved_cluster)
-    monkeypatch.setattr(
-        reporting,
-        "get_cluster_cr",
-        lambda namespace, name, cluster=None: {
+def test_cluster_service_profile_resolves_frontend_component_to_service() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
+        get_cluster_cr=lambda namespace, name, cluster=None: {
             "status": {
                 "componentStatuses": [
                     {"name": "landing", "kind": "Frontend", "wave": 2, "phase": "Failed", "ready": False},
@@ -160,16 +153,17 @@ def test_cluster_service_profile_resolves_frontend_component_to_service(monkeypa
         },
     )
 
-    normalized = reporting._resolve_cluster_convenience_target(
-        reporting._normalized_request(
+    normalized = planner.resolve_cluster_convenience_target(
+        _normalized(
             InvestigationReportRequest(
                 cluster="erauner-home",
                 namespace="operator-smoke",
                 target="Cluster/testapp",
                 profile="service",
-                include_related_data=False,
-            )
-        )
+            ),
+            deps,
+        ),
+        deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -181,13 +175,10 @@ def test_cluster_service_profile_resolves_frontend_component_to_service(monkeypa
     assert "resolved Frontend/landing to service/landing" in normalized.normalization_notes
 
 
-def test_cluster_legacy_current_context_does_not_set_cluster_alias(monkeypatch) -> None:
-    resolved_cluster = type("ResolvedCluster", (), {"alias": "current-context", "source": "legacy_current_context"})()
-    monkeypatch.setattr(reporting, "resolve_cluster", lambda cluster: resolved_cluster)
-    monkeypatch.setattr(
-        reporting,
-        "get_cluster_cr",
-        lambda namespace, name, cluster=None: {
+def test_cluster_legacy_current_context_does_not_set_cluster_alias() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "current-context", "source": "legacy_current_context"})(),
+        get_cluster_cr=lambda namespace, name, cluster=None: {
             "status": {
                 "componentStatuses": [
                     {"name": "landing", "kind": "Frontend", "wave": 1, "phase": "Healthy", "ready": True},
@@ -196,40 +187,30 @@ def test_cluster_legacy_current_context_does_not_set_cluster_alias(monkeypatch) 
         },
     )
 
-    normalized = reporting._resolve_cluster_convenience_target(
-        reporting._normalized_request(
-            InvestigationReportRequest(
-                namespace="operator-smoke",
-                target="Cluster/testapp",
-                profile="service",
-                include_related_data=False,
-            )
-        )
+    normalized = planner.resolve_cluster_convenience_target(
+        _normalized(
+            InvestigationReportRequest(namespace="operator-smoke", target="Cluster/testapp", profile="service"),
+            deps,
+        ),
+        deps,
     )
 
     assert normalized.cluster is None
     assert normalized.target == "service/landing"
 
 
-def test_backend_explicit_current_context_resolves_in_legacy_mode(monkeypatch) -> None:
-    monkeypatch.delenv("CLUSTER_REGISTRY_PATH", raising=False)
-    monkeypatch.delenv("DEFAULT_CLUSTER_ALIAS", raising=False)
-    monkeypatch.delenv("CLUSTER_NAME", raising=False)
-    monkeypatch.setattr(
-        reporting,
-        "get_backend_cr",
-        lambda namespace, name, cluster=None: {"kind": "Backend", "metadata": {"name": name, "namespace": namespace}},
+def test_backend_explicit_current_context_resolves_in_legacy_mode() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "current-context", "source": "legacy_current_context"})(),
+        get_backend_cr=lambda namespace, name, cluster=None: {"kind": "Backend", "metadata": {"name": name, "namespace": namespace}},
     )
 
-    normalized = reporting._resolve_backend_convenience_target(
-        reporting._normalized_request(
-            InvestigationReportRequest(
-                cluster="current-context",
-                namespace="operator-smoke",
-                target="Backend/crashy",
-                include_related_data=False,
-            )
-        )
+    normalized = planner.resolve_backend_convenience_target(
+        _normalized(
+            InvestigationReportRequest(cluster="current-context", namespace="operator-smoke", target="Backend/crashy"),
+            deps,
+        ),
+        deps,
     )
 
     assert normalized.cluster is None

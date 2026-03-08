@@ -1,6 +1,6 @@
 from investigation_service.models import CollectContextRequest, InvestigationReportRequest, TargetRef
+from investigation_service import planner, reporting
 from investigation_service.prom_adapter import collect_metrics_for_scope
-from investigation_service.reporting import _normalized_request
 from investigation_service.tools import _collect_context
 
 
@@ -97,12 +97,13 @@ def test_collect_context_adds_operator_ownership_hint_for_workload(monkeypatch) 
 
 
 def test_manual_service_request_promotes_profile_to_service() -> None:
-    normalized = _normalized_request(
+    normalized = planner.normalized_request(
         InvestigationReportRequest(
             namespace="observability",
             target="service/api",
             profile="workload",
-        )
+        ),
+        reporting._planner_deps(),
     )
 
     assert normalized.scope == "service"
@@ -111,12 +112,13 @@ def test_manual_service_request_promotes_profile_to_service() -> None:
 
 
 def test_manual_backend_target_stays_workload_scope_even_with_service_profile() -> None:
-    normalized = _normalized_request(
+    normalized = planner.normalized_request(
         InvestigationReportRequest(
             namespace="operator-smoke",
             target="Backend/crashy",
             profile="service",
-        )
+        ),
+        reporting._planner_deps(),
     )
 
     assert normalized.scope == "workload"
@@ -124,12 +126,13 @@ def test_manual_backend_target_stays_workload_scope_even_with_service_profile() 
 
 
 def test_manual_frontend_target_stays_workload_scope_even_with_service_profile() -> None:
-    normalized = _normalized_request(
+    normalized = planner.normalized_request(
         InvestigationReportRequest(
             namespace="operator-smoke",
             target="Frontend/landing",
             profile="service",
-        )
+        ),
+        reporting._planner_deps(),
     )
 
     assert normalized.scope == "workload"
@@ -137,12 +140,13 @@ def test_manual_frontend_target_stays_workload_scope_even_with_service_profile()
 
 
 def test_manual_cluster_target_stays_workload_scope_even_with_service_profile() -> None:
-    normalized = _normalized_request(
+    normalized = planner.normalized_request(
         InvestigationReportRequest(
             namespace="operator-smoke",
             target="Cluster/testapp",
             profile="service",
-        )
+        ),
+        reporting._planner_deps(),
     )
 
     assert normalized.scope == "workload"

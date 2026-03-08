@@ -11,6 +11,7 @@ from investigation_service.k8s_adapter import get_k8s_object
 from investigation_service.main import app
 from investigation_service.models import (
     AlertInvestigationReportRequest,
+    BuildInvestigationPlanRequest,
     BuildRootCauseReportRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
@@ -21,6 +22,7 @@ from investigation_service.models import (
     EvidenceItem,
     Finding,
     InvestigationAnalysis,
+    InvestigationPlan,
     InvestigationReport,
     InvestigationReportRequest,
     InvestigationTarget,
@@ -95,6 +97,42 @@ def test_collect_context_accepts_profile_fields(monkeypatch) -> None:
     assert body["target"]["name"] == "api-123"
     assert body["limitations"] == ["metric unavailable: service_latency_p95_seconds"]
     assert body["enrichment_hints"]
+
+
+def test_build_investigation_plan_route_returns_plan(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.build_investigation_plan_from_request",
+        lambda _req: InvestigationPlan(
+            mode="targeted_rca",
+            objective="Investigate service/api",
+            target=InvestigationTarget(
+                source="manual",
+                scope="service",
+                cluster="erauner-home",
+                namespace="default",
+                requested_target="service/api",
+                target="service/api",
+                service_name="api",
+                profile="service",
+                normalization_notes=["normalized"],
+            ),
+            steps=[],
+            evidence_batches=[],
+            planning_notes=["normalized"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/build_investigation_plan",
+        json={"namespace": "default", "target": "service/api", "profile": "service"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "targeted_rca"
+    assert body["target"]["target"] == "service/api"
+    assert body["planning_notes"] == ["normalized"]
 
 
 def test_investigate_includes_limitations(monkeypatch) -> None:
@@ -785,7 +823,7 @@ def test_render_investigation_report_route_returns_typed_report(monkeypatch) -> 
 def test_build_alert_investigation_report_wrapper_maps_into_shared_report_flow(monkeypatch) -> None:
     captured = {}
 
-    def fake_build_investigation_report(req):
+    def fake_render_investigation_report(req):
         captured["request"] = req
         return InvestigationReport(
             scope="workload",
@@ -803,7 +841,7 @@ def test_build_alert_investigation_report_wrapper_maps_into_shared_report_flow(m
             normalization_notes=["alertname=PodCrashLooping"],
         )
 
-    monkeypatch.setattr("investigation_service.reporting.build_investigation_report", fake_build_investigation_report)
+    monkeypatch.setattr("investigation_service.reporting.render_investigation_report", fake_render_investigation_report)
 
     report = build_alert_investigation_report(
         AlertInvestigationReportRequest(

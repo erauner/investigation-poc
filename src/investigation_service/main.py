@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from .models import (
     AlertInvestigationReportRequest,
+    BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
     CollectContextRequest,
@@ -14,6 +15,7 @@ from .models import (
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     InvestigationAnalysis,
+    InvestigationPlan,
     InvestigationReport,
     InvestigationReportRequest,
     InvestigationTarget,
@@ -26,6 +28,7 @@ from .models import (
 from .correlation import collect_change_candidates, collect_correlated_changes
 from .reporting import (
     build_alert_investigation_report,
+    build_investigation_plan as build_investigation_plan_from_request,
     build_investigation_report,
     build_root_cause_report as build_root_cause_report_from_request,
     normalize_incident_input as normalize_incident_input_from_request,
@@ -78,6 +81,11 @@ def normalize_incident(req: InvestigationReportRequest) -> InvestigationTarget:
 @app.post("/tools/resolve_primary_target", response_model=InvestigationTarget)
 def resolve_target(req: InvestigationReportRequest) -> InvestigationTarget:
     return resolve_primary_target_from_request(req)
+
+
+@app.post("/tools/build_investigation_plan", response_model=InvestigationPlan)
+def build_plan(req: BuildInvestigationPlanRequest) -> InvestigationPlan:
+    return build_investigation_plan_from_request(req)
 
 
 @app.post("/tools/collect_node_context", response_model=CollectedContextResponse)

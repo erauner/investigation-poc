@@ -3,20 +3,21 @@ from dataclasses import dataclass
 from typing import Any
 
 from .models import (
+    BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
-    EvidenceBundle,
+    EvidenceBatch,
     FindUnhealthyPodRequest,
+    InvestigationPlan,
     InvestigationTarget,
     InvestigationMode,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
-    PlannedInvestigation,
+    PlanStep,
     TargetRef,
 )
-from .tools import evidence_bundle_from_context
 
 _VAGUE_WORKLOAD_TARGETS = {
     "pod",
@@ -44,10 +45,16 @@ class PlannerDeps:
     collect_workload_context: Callable[[CollectContextRequest], Any]
 
 
-def classify_investigation_mode(req: InvestigationReportRequest) -> InvestigationMode:
+def classify_investigation_mode(
+    req: BuildInvestigationPlanRequest | InvestigationReportRequest,
+) -> InvestigationMode:
     if req.alertname:
-        return "alert"
-    return "generic"
+        return "alert_rca"
+    if getattr(req, "objective", "auto") == "factual":
+        return "factual_analysis"
+    if getattr(req, "question", None) and not req.target:
+        return "factual_analysis"
+    return "targeted_rca"
 
 
 def investigation_target_from_normalized(
@@ -425,53 +432,252 @@ def align_normalized_request_with_context(
     )
 
 
-def plan_investigation(
-    req: InvestigationReportRequest,
-    deps: PlannerDeps,
-    *,
-    collect_context_for_normalized_request_impl: Callable[[NormalizedInvestigationRequest], Any] | None = None,
-    align_normalized_request_with_context_impl: Callable[[NormalizedInvestigationRequest, Any], NormalizedInvestigationRequest]
-    | None = None,
-) -> PlannedInvestigation:
-    collect_context_impl = collect_context_for_normalized_request_impl or (
-        lambda normalized: collect_context_for_normalized_request(normalized, deps)
+def _report_request_from_plan_request(req: BuildInvestigationPlanRequest) -> InvestigationReportRequest:
+    return InvestigationReportRequest(
+        cluster=req.cluster,
+        namespace=req.namespace,
+        target=req.target,
+        profile=req.profile,
+        service_name=req.service_name,
+        lookback_minutes=req.lookback_minutes,
+        alertname=req.alertname,
+        labels=req.labels,
+        annotations=req.annotations,
+        node_name=req.node_name,
     )
-    align_impl = align_normalized_request_with_context_impl or align_normalized_request_with_context
 
-    target = resolve_primary_target(req, deps)
-    normalized = normalized_request_from_target(target)
-    context = collect_context_impl(normalized)
-    normalized = align_impl(normalized, context)
-    context_cluster = getattr(context, "cluster", None)
-    if context_cluster and not any(note.startswith("cluster resolved") for note in normalized.normalization_notes):
-        notes = list(normalized.normalization_notes)
-        notes.append(f"cluster resolved from collected context: {context_cluster}")
-        normalized = normalized.model_copy(update={"cluster": context_cluster, "normalization_notes": notes})
-    target = investigation_target_from_normalized(normalized, requested_target=target.requested_target)
-    try:
-        evidence = evidence_bundle_from_context(context)
-    except AttributeError:
-        evidence = EvidenceBundle(
-            cluster=getattr(context, "cluster", normalized.cluster or "current-context"),
-            target=getattr(context, "target", None)
-            or TargetRef(
-                namespace=normalized.namespace,
-                kind="service" if normalized.scope == "service" else ("node" if normalized.scope == "node" else "pod"),
-                name=(normalized.target.split("/", 1)[1] if "/" in normalized.target else normalized.target),
-            ),
-            object_state=getattr(context, "object_state", {}),
-            events=getattr(context, "events", []),
-            log_excerpt=getattr(context, "log_excerpt", ""),
-            metrics=getattr(context, "metrics", {}),
-            findings=getattr(context, "findings", []),
-            limitations=getattr(context, "limitations", []),
-            enrichment_hints=getattr(context, "enrichment_hints", []),
+
+def _primary_evidence_step(target: InvestigationTarget) -> PlanStep:
+    if target.scope == "node":
+        return PlanStep(
+            id="collect-target-evidence",
+            title="Collect node evidence",
+            category="evidence",
+            plane="node",
+            rationale="Gather current node state, events, logs, and metrics for the resolved node target.",
+            suggested_tool="collect_node_evidence",
         )
-
-    return PlannedInvestigation(
-        mode=classify_investigation_mode(req),
-        target=target,
-        evidence=evidence,
-        normalized=normalized,
-        context=context,
+    if target.scope == "service":
+        return PlanStep(
+            id="collect-target-evidence",
+            title="Collect service evidence",
+            category="evidence",
+            plane="service",
+            rationale="Gather service-scoped state, metrics, and recent signals for the resolved service target.",
+            suggested_tool="collect_service_evidence",
+        )
+    return PlanStep(
+        id="collect-target-evidence",
+        title="Collect workload evidence",
+        category="evidence",
+        plane="workload",
+        rationale="Gather workload state, events, logs, and metrics for the resolved primary target.",
+        suggested_tool="collect_workload_evidence",
     )
+
+
+def _alert_plan(
+    req: BuildInvestigationPlanRequest,
+    target: InvestigationTarget,
+) -> InvestigationPlan:
+    steps = [
+        PlanStep(
+            id="collect-alert-evidence",
+            title="Collect alert evidence",
+            category="evidence",
+            plane="alert",
+            rationale="Preserve alert-specific context before drilling into the runtime target.",
+            suggested_tool="collect_alert_evidence",
+        ),
+        _primary_evidence_step(target),
+        PlanStep(
+            id="collect-change-candidates",
+            title="Collect change candidates",
+            category="evidence",
+            plane="changes",
+            rationale="Review recent changes around the alert window before forming conclusions.",
+            suggested_tool="collect_change_candidates",
+        ),
+        PlanStep(
+            id="rank-hypotheses",
+            title="Rank hypotheses",
+            category="analysis",
+            plane="analysis",
+            status="deferred",
+            rationale="Analyze the collected evidence and rank the most plausible explanations.",
+            suggested_tool="rank_hypotheses",
+            depends_on=["collect-alert-evidence", "collect-target-evidence", "collect-change-candidates"],
+        ),
+        PlanStep(
+            id="render-report",
+            title="Render investigation report",
+            category="render",
+            plane="report",
+            status="deferred",
+            rationale="Render the final investigation report after evidence has been gathered and analyzed.",
+            suggested_tool="render_investigation_report",
+            depends_on=["rank-hypotheses"],
+        ),
+    ]
+    batches = [
+        EvidenceBatch(
+            id="batch-1",
+            title="Initial alert evidence",
+            intent="Collect the first bounded evidence batch for alert RCA.",
+            step_ids=["collect-alert-evidence", "collect-target-evidence", "collect-change-candidates"],
+        ),
+        EvidenceBatch(
+            id="batch-2",
+            title="Rank likely causes",
+            status="deferred",
+            intent="Analyze the gathered evidence before rendering the final report.",
+            step_ids=["rank-hypotheses"],
+        ),
+        EvidenceBatch(
+            id="batch-3",
+            title="Render final report",
+            status="deferred",
+            intent="Render a final report from the ranked hypotheses.",
+            step_ids=["render-report"],
+        ),
+    ]
+    return InvestigationPlan(
+        mode="alert_rca",
+        objective=req.question or f"Investigate alert {req.alertname or target.requested_target}",
+        target=target,
+        steps=steps,
+        evidence_batches=batches,
+        planning_notes=list(target.normalization_notes),
+    )
+
+
+def _targeted_plan(req: BuildInvestigationPlanRequest, target: InvestigationTarget) -> InvestigationPlan:
+    steps = [
+        _primary_evidence_step(target),
+        PlanStep(
+            id="collect-change-candidates",
+            title="Collect change candidates",
+            category="evidence",
+            plane="changes",
+            rationale="Review recent changes related to the target before forming conclusions.",
+            suggested_tool="collect_change_candidates",
+        ),
+        PlanStep(
+            id="rank-hypotheses",
+            title="Rank hypotheses",
+            category="analysis",
+            plane="analysis",
+            status="deferred",
+            rationale="Analyze the gathered evidence and rank the most plausible explanations.",
+            suggested_tool="rank_hypotheses",
+            depends_on=["collect-target-evidence", "collect-change-candidates"],
+        ),
+        PlanStep(
+            id="render-report",
+            title="Render investigation report",
+            category="render",
+            plane="report",
+            status="deferred",
+            rationale="Render the final investigation report after evidence has been gathered and analyzed.",
+            suggested_tool="render_investigation_report",
+            depends_on=["rank-hypotheses"],
+        ),
+    ]
+    batches = [
+        EvidenceBatch(
+            id="batch-1",
+            title="Initial target evidence",
+            intent="Collect the first bounded evidence batch for the resolved target.",
+            step_ids=["collect-target-evidence", "collect-change-candidates"],
+        ),
+        EvidenceBatch(
+            id="batch-2",
+            title="Rank likely causes",
+            status="deferred",
+            intent="Analyze the gathered evidence before rendering the final report.",
+            step_ids=["rank-hypotheses"],
+        ),
+        EvidenceBatch(
+            id="batch-3",
+            title="Render final report",
+            status="deferred",
+            intent="Render a final report from the ranked hypotheses.",
+            step_ids=["render-report"],
+        ),
+    ]
+    return InvestigationPlan(
+        mode="targeted_rca",
+        objective=req.question or f"Investigate {target.requested_target}",
+        target=target,
+        steps=steps,
+        evidence_batches=batches,
+        planning_notes=list(target.normalization_notes),
+    )
+
+
+def _factual_plan(
+    req: BuildInvestigationPlanRequest,
+    target: InvestigationTarget | None,
+) -> InvestigationPlan:
+    steps = [
+        PlanStep(
+            id="collect-factual-evidence",
+            title="Collect factual evidence",
+            category="evidence",
+            plane="factual",
+            rationale="Gather the primary factual evidence needed to answer the question without defaulting to RCA semantics.",
+            suggested_tool=None,
+        ),
+        PlanStep(
+            id="summarize-findings",
+            title="Summarize findings",
+            category="summary",
+            plane="summary",
+            status="deferred",
+            rationale="Summarize the gathered findings once enough factual evidence has been collected.",
+            suggested_tool=None,
+            depends_on=["collect-factual-evidence"],
+        ),
+    ]
+    batches = [
+        EvidenceBatch(
+            id="batch-1",
+            title="Initial factual evidence",
+            intent="Collect the first bounded evidence batch needed to answer the factual question.",
+            step_ids=["collect-factual-evidence"],
+        ),
+        EvidenceBatch(
+            id="batch-2",
+            title="Summarize findings",
+            status="deferred",
+            intent="Summarize the collected factual evidence.",
+            step_ids=["summarize-findings"],
+        ),
+    ]
+    notes = list(target.normalization_notes) if target else []
+    if target is None:
+        notes.append("factual analysis plan does not require a resolved primary target")
+    return InvestigationPlan(
+        mode="factual_analysis",
+        objective=req.question or req.target or "Answer the factual investigation request",
+        target=target,
+        steps=steps,
+        evidence_batches=batches,
+        planning_notes=notes,
+    )
+
+
+def build_investigation_plan(
+    req: BuildInvestigationPlanRequest,
+    deps: PlannerDeps,
+) -> InvestigationPlan:
+    mode = classify_investigation_mode(req)
+    report_req = _report_request_from_plan_request(req)
+
+    if mode == "alert_rca":
+        return _alert_plan(req, resolve_primary_target(report_req, deps))
+    if mode == "targeted_rca":
+        return _targeted_plan(req, resolve_primary_target(report_req, deps))
+
+    factual_target = resolve_primary_target(report_req, deps) if req.target else None
+    return _factual_plan(req, factual_target)

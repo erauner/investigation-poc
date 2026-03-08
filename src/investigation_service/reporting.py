@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from .correlation import collect_correlated_changes, collect_correlated_changes_for_target
 from .event_fingerprints import canonicalize_event_fingerprint
 from .guidelines import (
@@ -16,17 +18,21 @@ from .analysis import (
 )
 from .models import (
     AlertInvestigationReportRequest,
+    BuildInvestigationPlanRequest,
     BuildRootCauseReportRequest,
     CollectCorrelatedChangesRequest,
     CorrelatedChange,
+    EvidenceBundle,
     Hypothesis,
     InvestigationAnalysis,
+    InvestigationPlan,
     InvestigationTarget,
     InvestigationReport,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
     ResolvedGuideline,
     RootCauseReport,
+    TargetRef,
 )
 from .cluster_registry import resolve_cluster
 from .k8s_adapter import get_backend_cr, get_cluster_cr, get_frontend_cr
@@ -39,6 +45,7 @@ from .tools import (
     collect_node_context,
     collect_service_context,
     collect_workload_context,
+    evidence_bundle_from_context,
     find_unhealthy_pod,
     normalize_alert_input,
 )
@@ -46,6 +53,15 @@ from .tools import (
 _EMPTY_CORRELATION_LIMITATION = "no correlated changes found in the requested time window"
 _EMPTY_RELATED_DATA_NOTE = "no meaningful correlated changes found in the requested time window"
 _LEGACY_BUILD_ROOT_CAUSE_IMPL = build_root_cause_report_impl
+
+
+@dataclass(frozen=True)
+class CollectedInvestigationState:
+    plan: InvestigationPlan
+    target: InvestigationTarget
+    normalized: NormalizedInvestigationRequest
+    context: object
+    evidence: object
 
 
 def _is_empty_correlation_limitation(value: str) -> bool:
@@ -67,38 +83,6 @@ def _planner_deps() -> PlannerDeps:
         collect_service_context=collect_service_context,
         collect_workload_context=collect_workload_context,
     )
-
-
-def _normalized_request(req: InvestigationReportRequest) -> NormalizedInvestigationRequest:
-    return planner.normalized_request(req, _planner_deps())
-
-
-def _resolve_vague_workload_target(normalized: NormalizedInvestigationRequest) -> NormalizedInvestigationRequest:
-    return planner.resolve_vague_workload_target(normalized, _planner_deps())
-
-
-def _resolved_cluster_value(cluster) -> str | None:
-    return planner.resolved_cluster_value(cluster)
-
-
-def _resolve_backend_convenience_target(normalized: NormalizedInvestigationRequest) -> NormalizedInvestigationRequest:
-    return planner.resolve_backend_convenience_target(normalized, _planner_deps())
-
-
-def _resolve_frontend_convenience_target(normalized: NormalizedInvestigationRequest) -> NormalizedInvestigationRequest:
-    return planner.resolve_frontend_convenience_target(normalized, _planner_deps())
-
-
-def _cluster_component_priority(item: dict) -> tuple[int, int, str]:
-    return planner.cluster_component_priority(item)
-
-
-def _component_target(kind: str, name: str, profile: str) -> tuple[str, str, str, str | None]:
-    return planner.component_target(kind, name, profile)
-
-
-def _resolve_cluster_convenience_target(normalized: NormalizedInvestigationRequest) -> NormalizedInvestigationRequest:
-    return planner.resolve_cluster_convenience_target(normalized, _planner_deps())
 
 
 def _collect_context_for_normalized_request(normalized: NormalizedInvestigationRequest):
@@ -226,6 +210,74 @@ def _build_correlation_request(
     )
 
 
+def _report_request_to_plan_request(req: InvestigationReportRequest) -> BuildInvestigationPlanRequest:
+    return BuildInvestigationPlanRequest(
+        cluster=req.cluster,
+        namespace=req.namespace,
+        target=req.target,
+        profile=req.profile,
+        service_name=req.service_name,
+        lookback_minutes=req.lookback_minutes,
+        alertname=req.alertname,
+        labels=req.labels,
+        annotations=req.annotations,
+        node_name=req.node_name,
+        objective="auto",
+    )
+
+
+def build_investigation_plan(req: BuildInvestigationPlanRequest) -> InvestigationPlan:
+    return planner.build_investigation_plan(req, _planner_deps())
+
+
+def _collect_analysis_state(req: InvestigationReportRequest) -> CollectedInvestigationState:
+    plan = build_investigation_plan(_report_request_to_plan_request(req))
+    if plan.mode == "factual_analysis":
+        raise ValueError("rendering an investigation report is not supported for factual_analysis plans")
+    if plan.target is None:
+        raise ValueError("investigation plan did not produce a primary target")
+
+    normalized = planner.normalized_request_from_target(plan.target)
+    context = _collect_context_for_normalized_request(normalized)
+    normalized = _align_normalized_request_with_context(normalized, context)
+    context_cluster = getattr(context, "cluster", None)
+    if context_cluster and not any(note.startswith("cluster resolved") for note in normalized.normalization_notes):
+        notes = list(normalized.normalization_notes)
+        notes.append(f"cluster resolved from collected context: {context_cluster}")
+        normalized = normalized.model_copy(update={"cluster": context_cluster, "normalization_notes": notes})
+    target = planner.investigation_target_from_normalized(
+        normalized,
+        requested_target=plan.target.requested_target,
+    )
+    try:
+        evidence = evidence_bundle_from_context(context)
+    except AttributeError:
+        evidence = EvidenceBundle(
+            cluster=getattr(context, "cluster", normalized.cluster or "current-context"),
+            target=getattr(context, "target", None)
+            or TargetRef(
+                namespace=normalized.namespace,
+                kind="service" if normalized.scope == "service" else ("node" if normalized.scope == "node" else "pod"),
+                name=(normalized.target.split("/", 1)[1] if "/" in normalized.target else normalized.target),
+            ),
+            object_state=getattr(context, "object_state", {}),
+            events=getattr(context, "events", []),
+            log_excerpt=getattr(context, "log_excerpt", ""),
+            metrics=getattr(context, "metrics", {}),
+            findings=getattr(context, "findings", []),
+            limitations=getattr(context, "limitations", []),
+            enrichment_hints=getattr(context, "enrichment_hints", []),
+        )
+
+    return CollectedInvestigationState(
+        plan=plan,
+        target=target,
+        normalized=normalized,
+        context=context,
+        evidence=evidence,
+    )
+
+
 def _render_investigation_report_from_analysis(
     analysis: InvestigationAnalysis,
     *,
@@ -258,16 +310,16 @@ def _render_investigation_report_from_analysis(
     )
 
 
-def _synthesize_root_cause(plan) -> RootCauseReport:
+def _synthesize_root_cause(state: CollectedInvestigationState) -> RootCauseReport:
     if build_root_cause_report_impl is not _LEGACY_BUILD_ROOT_CAUSE_IMPL:
-        return build_root_cause_report_impl(plan.context, plan.normalized)
-    return synthesize_root_cause_impl(plan.evidence, plan.target)
+        return build_root_cause_report_impl(state.context, state.normalized)
+    return synthesize_root_cause_impl(state.evidence, state.target)
 
 
-def _analyze_plan(plan) -> InvestigationAnalysis:
+def _analyze_state(state: CollectedInvestigationState) -> InvestigationAnalysis:
     if build_root_cause_report_impl is not _LEGACY_BUILD_ROOT_CAUSE_IMPL:
-        return _analysis_from_root_cause(_synthesize_root_cause(plan))
-    return build_investigation_analysis(plan.evidence, plan.target)
+        return _analysis_from_root_cause(_synthesize_root_cause(state))
+    return build_investigation_analysis(state.evidence, state.target)
 
 
 def _apply_guidelines(
@@ -303,7 +355,7 @@ def _apply_guidelines(
 
 
 def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
-    report = build_investigation_report(
+    report = render_investigation_report(
         InvestigationReportRequest(
             cluster=req.cluster,
             namespace=req.namespace,
@@ -342,21 +394,62 @@ def resolve_primary_target(req: InvestigationReportRequest) -> InvestigationTarg
 
 
 def rank_hypotheses(req: InvestigationReportRequest) -> InvestigationAnalysis:
-    plan = planner.plan_investigation(
-        req,
-        _planner_deps(),
-        collect_context_for_normalized_request_impl=_collect_context_for_normalized_request,
-        align_normalized_request_with_context_impl=_align_normalized_request_with_context,
-    )
-    return _analyze_plan(plan)
+    return _analyze_state(_collect_analysis_state(req))
 
 
 def render_investigation_report(req: InvestigationReportRequest) -> InvestigationReport:
-    return build_investigation_report(req)
+    state = _collect_analysis_state(req)
+    analysis = _analyze_state(state)
+
+    related_data: list[CorrelatedChange] = []
+    related_data_note: str | None = None
+    limitations = list(analysis.limitations)
+    limitations.extend(ambiguity_limitations_from_hypotheses(analysis))
+    recommended_next_step, suggested_follow_ups, guidelines, guideline_limitations = _apply_guidelines(
+        analysis,
+        target=state.target,
+        alertname=req.alertname,
+    )
+    suggested_follow_ups.extend(follow_ups_from_hypotheses(analysis))
+    limitations.extend(guideline_limitations)
+
+    if req.include_related_data:
+        if collect_correlated_changes.__module__ != "investigation_service.correlation":
+            correlated = collect_correlated_changes(_build_correlation_request(req, state.target))
+        else:
+            correlated = collect_correlated_changes_for_target(
+                state.target,
+                lookback_minutes=req.correlation_window_minutes,
+                anchor_timestamp=req.anchor_timestamp,
+                limit=req.correlation_limit,
+            )
+        related_data, related_data_note = _filter_related_data_from_evidence(
+            primary_hypothesis(analysis).evidence_items,
+            correlated.changes,
+        )
+        correlation_limitations = list(correlated.limitations)
+        if not related_data and related_data_note:
+            correlation_limitations = [
+                item for item in correlation_limitations if not _is_empty_correlation_limitation(item)
+            ]
+        limitations.extend(correlation_limitations)
+        if related_data:
+            suggested_follow_ups.append("Inspect the related changes timeline before taking write actions.")
+
+    return _render_investigation_report_from_analysis(
+        analysis,
+        normalization_notes=state.target.normalization_notes,
+        related_data=related_data,
+        related_data_note=related_data_note,
+        limitations=limitations,
+        recommended_next_step=recommended_next_step,
+        suggested_follow_ups=suggested_follow_ups,
+        guidelines=guidelines,
+    )
 
 
 def build_alert_investigation_report(req: AlertInvestigationReportRequest) -> InvestigationReport:
-    return build_investigation_report(
+    return render_investigation_report(
         InvestigationReportRequest(
             cluster=req.cluster,
             namespace=req.namespace,
@@ -377,56 +470,4 @@ def build_alert_investigation_report(req: AlertInvestigationReportRequest) -> In
 
 
 def build_investigation_report(req: InvestigationReportRequest) -> InvestigationReport:
-    plan = planner.plan_investigation(
-        req,
-        _planner_deps(),
-        collect_context_for_normalized_request_impl=_collect_context_for_normalized_request,
-        align_normalized_request_with_context_impl=_align_normalized_request_with_context,
-    )
-    analysis = _analyze_plan(plan)
-
-    related_data: list[CorrelatedChange] = []
-    related_data_note: str | None = None
-    limitations = list(analysis.limitations)
-    limitations.extend(ambiguity_limitations_from_hypotheses(analysis))
-    recommended_next_step, suggested_follow_ups, guidelines, guideline_limitations = _apply_guidelines(
-        analysis,
-        target=plan.target,
-        alertname=req.alertname,
-    )
-    suggested_follow_ups.extend(follow_ups_from_hypotheses(analysis))
-    limitations.extend(guideline_limitations)
-
-    if req.include_related_data:
-        if collect_correlated_changes.__module__ != "investigation_service.correlation":
-            correlated = collect_correlated_changes(_build_correlation_request(req, plan.target))
-        else:
-            correlated = collect_correlated_changes_for_target(
-                plan.target,
-                lookback_minutes=req.correlation_window_minutes,
-                anchor_timestamp=req.anchor_timestamp,
-                limit=req.correlation_limit,
-            )
-        related_data, related_data_note = _filter_related_data_from_evidence(
-            primary_hypothesis(analysis).evidence_items,
-            correlated.changes,
-        )
-        correlation_limitations = list(correlated.limitations)
-        if not related_data and related_data_note:
-            correlation_limitations = [
-                item for item in correlation_limitations if not _is_empty_correlation_limitation(item)
-            ]
-        limitations.extend(correlation_limitations)
-        if related_data:
-            suggested_follow_ups.append("Inspect the related changes timeline before taking write actions.")
-
-    return _render_investigation_report_from_analysis(
-        analysis,
-        normalization_notes=plan.target.normalization_notes,
-        related_data=related_data,
-        related_data_note=related_data_note,
-        limitations=limitations,
-        recommended_next_step=recommended_next_step,
-        suggested_follow_ups=suggested_follow_ups,
-        guidelines=guidelines,
-    )
+    return render_investigation_report(req)

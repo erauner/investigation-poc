@@ -46,6 +46,36 @@ What is still missing is the behavior model:
 - no distinction between control-plane and evidence-plane usage in the live agent behavior
 - kagent prompt/config still mostly teaches report-first invocation
 
+### Completed So Far
+
+The codebase now has the Slice 1 planning foundation in place:
+
+- explicit planning artifacts:
+  - `InvestigationPlan`
+  - `PlanStep`
+  - `PlanStatus`
+  - `EvidenceBatch`
+- explicit planning modes:
+  - `alert_rca`
+  - `targeted_rca`
+  - `factual_analysis`
+- a real control-plane entrypoint:
+  - `build_investigation_plan`
+- planner refactored so planning no longer collects evidence
+- reporting/rendering refactored so report paths now explicitly:
+  - build a plan
+  - collect evidence afterward
+  - analyze
+  - render
+- `render_investigation_report` is now the canonical final-stage implementation
+
+What is still missing after Slice 1:
+
+- iterative execution of plan steps
+- plan updates after evidence batches
+- explicit next-step selection based on prior findings
+- agent/runtime transition from report-first behavior to planner-led behavior
+
 ## End-State Shape
 
 The target behavior model is:
@@ -102,6 +132,8 @@ These remain during transition:
 
 ### Slice 1: Add Explicit Planning Artifacts
 
+Status: Completed
+
 Introduce internal planning objects:
 
 - `InvestigationPlan`
@@ -127,8 +159,11 @@ Validation gate:
 
 - unit tests for mode-aware plan construction
 - plan shape tests for alert, targeted, and factual questions
+- reporting tests proving evidence is collected after planning, not during planning
 
 ### Slice 2: Add Iterative Plan Execution
+
+Status: Next
 
 Introduce explicit execution helpers:
 

@@ -1,117 +1,133 @@
-from investigation_service.models import InvestigationReportRequest, TargetRef
+from investigation_service.models import BuildInvestigationPlanRequest, InvestigationReportRequest
 from investigation_service.planner import (
     PlannerDeps,
+    build_investigation_plan,
     classify_investigation_mode,
-    plan_investigation,
     resolve_primary_target,
 )
 
 
+def _deps(calls: list[str] | None = None) -> PlannerDeps:
+    calls = calls if calls is not None else []
+    return PlannerDeps(
+        normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected alert normalization: {req}")),
+        canonical_target=lambda target, profile, service_name: calls.append("canonical_target") or target,
+        scope_from_target=lambda target, profile: calls.append("scope_from_target") or "workload",
+        resolve_cluster=lambda cluster: calls.append("resolve_cluster")
+        or type("ResolvedCluster", (), {"alias": "erauner-home"})(),
+        get_backend_cr=lambda *args, **kwargs: calls.append("get_backend_cr") or {"metadata": {"name": "api"}},
+        get_frontend_cr=lambda *args, **kwargs: calls.append("get_frontend_cr") or {},
+        get_cluster_cr=lambda *args, **kwargs: calls.append("get_cluster_cr") or {},
+        find_unhealthy_pod=lambda req: calls.append("find_unhealthy_pod") or None,
+        collect_node_context=lambda req: (_ for _ in ()).throw(AssertionError("planning must not collect node context")),
+        collect_service_context=lambda req: (_ for _ in ()).throw(AssertionError("planning must not collect service context")),
+        collect_workload_context=lambda req: (_ for _ in ()).throw(AssertionError("planning must not collect workload context")),
+    )
+
+
 def test_classify_investigation_mode_detects_alert_requests() -> None:
     mode = classify_investigation_mode(
-        InvestigationReportRequest(
+        BuildInvestigationPlanRequest(
             alertname="PodCrashLooping",
             labels={"namespace": "default", "pod": "api-123"},
         )
     )
 
-    assert mode == "alert"
+    assert mode == "alert_rca"
 
 
-def test_classify_investigation_mode_defaults_to_generic_requests() -> None:
-    mode = classify_investigation_mode(InvestigationReportRequest(target="pod/api"))
-
-    assert mode == "generic"
-
-
-def test_plan_investigation_runs_policy_pipeline_and_aligns_cluster_note() -> None:
-    req = InvestigationReportRequest(namespace="default", target="pod/api")
-    steps: list[str] = []
-
-    def fake_collect_context(req):
-        steps.append("collect")
-        assert req.target == "pod/api"
-        return type(
-            "Context",
-            (),
-            {
-                "cluster": "erauner-home",
-                "target": TargetRef(namespace="default", kind="pod", name="api-7f9d6"),
-            },
-        )()
-
-    deps = PlannerDeps(
-        normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected alert normalization: {req}")),
-        canonical_target=lambda target, profile, service_name: target,
-        scope_from_target=lambda target, profile: "workload",
-        resolve_cluster=lambda cluster: (_ for _ in ()).throw(AssertionError(f"unexpected cluster resolution: {cluster}")),
-        get_backend_cr=lambda *args, **kwargs: {},
-        get_frontend_cr=lambda *args, **kwargs: {},
-        get_cluster_cr=lambda *args, **kwargs: {},
-        find_unhealthy_pod=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected unhealthy pod lookup: {req}")),
-        collect_node_context=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected node context: {req}")),
-        collect_service_context=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected service context: {req}")),
-        collect_workload_context=fake_collect_context,
+def test_classify_investigation_mode_detects_factual_questions() -> None:
+    mode = classify_investigation_mode(
+        BuildInvestigationPlanRequest(
+            objective="factual",
+            question="What is consuming the most memory in the cluster?",
+        )
     )
 
-    plan = plan_investigation(req, deps)
-
-    assert plan.mode == "generic"
-    assert plan.target.requested_target == "pod/api"
-    assert plan.normalized.target == "pod/api-7f9d6"
-    assert plan.target.target == "pod/api-7f9d6"
-    assert plan.evidence.target.name == "api-7f9d6"
-    assert "cluster resolved from collected context: erauner-home" in plan.normalized.normalization_notes
-    assert steps == ["collect"]
+    assert mode == "factual_analysis"
 
 
-def test_plan_investigation_uses_injected_dependency_container() -> None:
+def test_classify_investigation_mode_defaults_to_targeted_rca() -> None:
+    mode = classify_investigation_mode(BuildInvestigationPlanRequest(target="pod/api"))
+
+    assert mode == "targeted_rca"
+
+
+def test_build_investigation_plan_creates_targeted_plan_without_collecting_evidence() -> None:
     calls: list[str] = []
 
-    deps = PlannerDeps(
-        normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected alert normalization: {req}")),
-        canonical_target=lambda target, profile, service_name: calls.append("canonical_target") or "Backend/api",
-        scope_from_target=lambda target, profile: calls.append("scope_from_target") or "workload",
-        resolve_cluster=lambda cluster: calls.append("resolve_cluster") or type("ResolvedCluster", (), {"alias": "erauner-home"})(),
-        get_backend_cr=lambda namespace, name, cluster=None: calls.append("get_backend_cr") or {"metadata": {"name": name}},
-        get_frontend_cr=lambda namespace, name, cluster=None: calls.append("get_frontend_cr") or {},
-        get_cluster_cr=lambda namespace, name, cluster=None: calls.append("get_cluster_cr") or {},
-        find_unhealthy_pod=lambda req: calls.append("find_unhealthy_pod") or None,
-        collect_node_context=lambda req: calls.append("collect_node_context") or None,
-        collect_service_context=lambda req: calls.append("collect_service_context") or None,
-        collect_workload_context=lambda req: calls.append("collect_workload_context")
-        or type("Context", (), {"cluster": "erauner-home", "target": TargetRef(namespace="default", kind="deployment", name="api")})(),
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="pod/api", question="Investigate api"),
+        _deps(calls),
     )
 
-    plan = plan_investigation(InvestigationReportRequest(namespace="default", target="Backend/api"), deps)
-
-    assert plan.normalized.target == "deployment/api"
-    assert plan.normalized.cluster == "erauner-home"
-    assert calls == [
-        "canonical_target",
-        "scope_from_target",
-        "resolve_cluster",
-        "get_backend_cr",
-        "collect_workload_context",
+    assert plan.mode == "targeted_rca"
+    assert plan.target is not None
+    assert plan.target.target == "pod/api"
+    assert [step.id for step in plan.steps] == [
+        "collect-target-evidence",
+        "collect-change-candidates",
+        "rank-hypotheses",
+        "render-report",
     ]
+    assert [batch.id for batch in plan.evidence_batches] == ["batch-1", "batch-2", "batch-3"]
+    assert calls == ["canonical_target", "scope_from_target"]
+
+
+def test_build_investigation_plan_resolves_convenience_targets_before_plan_construction() -> None:
+    calls: list[str] = []
+    deps = _deps(calls)
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "canonical_target": lambda target, profile, service_name: calls.append("canonical_target") or "Backend/api",
+            "scope_from_target": lambda target, profile: calls.append("scope_from_target") or "workload",
+        }
+    )
+
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="Backend/api"),
+        deps,
+    )
+
+    assert plan.target is not None
+    assert plan.target.requested_target == "Backend/api"
+    assert plan.target.target == "deployment/api"
+    assert "resolved Backend/api to deployment/api" in plan.planning_notes
+    assert calls == ["canonical_target", "scope_from_target", "resolve_cluster", "get_backend_cr"]
+
+
+def test_build_investigation_plan_supports_factual_mode_without_a_target() -> None:
+    calls: list[str] = []
+
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(
+            objective="factual",
+            question="What are the biggest resource consumers in the cluster?",
+        ),
+        _deps(calls),
+    )
+
+    assert plan.mode == "factual_analysis"
+    assert plan.target is None
+    assert [step.id for step in plan.steps] == ["collect-factual-evidence", "summarize-findings"]
+    assert calls == []
 
 
 def test_resolve_primary_target_preserves_requested_target() -> None:
+    deps = _deps([])
     deps = PlannerDeps(
-        normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected alert normalization: {req}")),
-        canonical_target=lambda target, profile, service_name: "Backend/api",
-        scope_from_target=lambda target, profile: "workload",
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
-        get_backend_cr=lambda namespace, name, cluster=None: {"metadata": {"name": name}},
-        get_frontend_cr=lambda namespace, name, cluster=None: {},
-        get_cluster_cr=lambda namespace, name, cluster=None: {},
-        find_unhealthy_pod=lambda req: None,
-        collect_node_context=lambda req: None,
-        collect_service_context=lambda req: None,
-        collect_workload_context=lambda req: None,
+        **{
+            **deps.__dict__,
+            "canonical_target": lambda target, profile, service_name: "Backend/api",
+            "scope_from_target": lambda target, profile: "workload",
+        }
     )
 
-    target = resolve_primary_target(InvestigationReportRequest(namespace="default", target="Backend/api"), deps)
+    target = resolve_primary_target(
+        InvestigationReportRequest(namespace="default", target="Backend/api"),
+        deps,
+    )
 
     assert target.requested_target == "Backend/api"
     assert target.target == "deployment/api"

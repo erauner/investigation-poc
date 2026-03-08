@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 
 ProfileType = Literal["workload", "service", "otel-pipeline"]
 ScopeType = Literal["workload", "service", "node", "otel-pipeline"]
-InvestigationMode = Literal["generic", "alert"]
+InvestigationMode = Literal["alert_rca", "targeted_rca", "factual_analysis"]
+PlanStatus = Literal["pending", "completed", "deferred"]
 ConfidenceType = Literal["low", "medium", "high"]
 GuidelineCategory = Literal["interpretation", "data_source", "next_step", "delegation", "safety"]
 
@@ -77,13 +78,50 @@ class EvidenceBundle(BaseModel):
     enrichment_hints: list[str] = Field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class PlannedInvestigation:
+class BuildInvestigationPlanRequest(BaseModel):
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
+    namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
+    target: str | None = Field(default=None, description="Target in form pod/name, deployment/name, service/name, or node/name")
+    profile: ProfileType = Field(default="workload", description="Investigation profile")
+    service_name: str | None = Field(default=None, description="Optional service name hint for service profile")
+    lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
+    alertname: str | None = Field(default=None, description="Optional alert name for alert-shaped input")
+    labels: dict[str, str] = Field(default_factory=dict, description="Optional alert labels")
+    annotations: dict[str, str] = Field(default_factory=dict, description="Optional alert annotations")
+    node_name: str | None = Field(default=None, description="Optional node override for alert-shaped node investigations")
+    objective: Literal["auto", "rca", "factual"] = Field(
+        default="auto",
+        description="Planning objective. Use factual for capacity/inventory style analysis without RCA semantics.",
+    )
+    question: str | None = Field(default=None, description="Optional free-form planning question or objective")
+
+
+class PlanStep(BaseModel):
+    id: str
+    title: str
+    category: Literal["evidence", "analysis", "render", "summary"]
+    plane: str
+    status: PlanStatus = "pending"
+    rationale: str
+    suggested_tool: str | None = None
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class EvidenceBatch(BaseModel):
+    id: str
+    title: str
+    status: PlanStatus = "pending"
+    intent: str
+    step_ids: list[str] = Field(default_factory=list)
+
+
+class InvestigationPlan(BaseModel):
     mode: InvestigationMode
-    target: InvestigationTarget
-    evidence: "EvidenceBundle"
-    normalized: NormalizedInvestigationRequest
-    context: Any
+    objective: str
+    target: InvestigationTarget | None = None
+    steps: list[PlanStep] = Field(default_factory=list)
+    evidence_batches: list[EvidenceBatch] = Field(default_factory=list)
+    planning_notes: list[str] = Field(default_factory=list)
 
 
 class CollectNodeContextRequest(BaseModel):

@@ -4,6 +4,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .models import (
     AlertInvestigationReportRequest,
+    BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
     CollectContextRequest,
@@ -17,6 +18,7 @@ from .models import (
 from .correlation import collect_change_candidates as collect_change_candidates_impl
 from .correlation import collect_correlated_changes as collect_correlated_changes_impl
 from .reporting import build_alert_investigation_report as build_alert_investigation_report_impl
+from .reporting import build_investigation_plan as build_investigation_plan_impl
 from .reporting import build_investigation_report as build_investigation_report_impl
 from .reporting import build_root_cause_report as build_root_cause_report_impl
 from .reporting import normalize_incident_input as normalize_incident_input_impl
@@ -185,6 +187,41 @@ def resolve_primary_target(
             labels=labels or {},
             annotations=annotations or {},
             node_name=node_name,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def build_investigation_plan(
+    target: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+    alertname: str | None = None,
+    labels: dict[str, str] | None = None,
+    annotations: dict[str, str] | None = None,
+    node_name: str | None = None,
+    objective: str = "auto",
+    question: str | None = None,
+) -> dict:
+    """Build an explicit investigation plan without collecting evidence. Use this to start planner-led investigations before gathering evidence by plane."""
+    response = build_investigation_plan_impl(
+        BuildInvestigationPlanRequest(
+            cluster=cluster,
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+            alertname=alertname,
+            labels=labels or {},
+            annotations=annotations or {},
+            node_name=node_name,
+            objective=objective,
+            question=question,
         )
     )
     return response.model_dump(mode="json")
