@@ -19,6 +19,8 @@ Use the `mcp__kagent__invoke_agent` tool.
   `Treat only identity fields such as namespace, pod, service, deployment, node, and container as workload identity.`
   `Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.`
   `Never derive a workload namespace from source or monitoring metadata.`
+  `If live runtime evidence disagrees with the alert payload, call out the mismatch explicitly as possible stale alert metadata or drift between alert time and current state.`
+  `Return exactly these five sections and no extra appendix sections: Diagnosis, Evidence, Related Data, Limitations, Recommended next step.`
 - As a secondary debug-only fallback, also accept `alertname=PodCrashLooping` or `alertname: PodCrashLooping`.
 - Only treat the request as alert-shaped when one of those explicit alert forms is present.
 - Do not treat `Backend/<name>`, `Frontend/<name>`, or `Cluster/<name>` as alert names.

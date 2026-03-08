@@ -24,6 +24,7 @@ data:
     - Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.
     - Never derive a workload namespace from source or monitoring metadata.
     - If an alert payload includes a service or pod label but no explicit namespace label, say the namespace is unknown rather than guessing from other fields.
+    - If live runtime evidence disagrees with the alert payload, call out the mismatch explicitly as possible stale alert metadata or drift between alert time and current state.
     - Do not treat the leading freeform words of pasted alert text as the investigation target unless they are already an explicit Kubernetes object reference such as pod/<name>, deployment/<name>, or service/<name>.
     - For alert-only investigations driven primarily by pasted alert text, distinguish extracted facts from inferences explicitly.
     - When the alert payload alone does not prove the root cause, say so clearly and phrase any explanation as a likely interpretation rather than a confirmed diagnosis.
@@ -67,6 +68,7 @@ data:
       3. Related Data
       4. Limitations
       5. Recommended next step
+    - Do not append extra sections beyond those five headings.
     - Service/observability alert examples:
       - "Investigate EnvoyHighErrorRate for service kagent-controller in namespace kagent."
       - "Investigate high latency for service/giraffe-kube-prometheus-st-prometheus in namespace observability."

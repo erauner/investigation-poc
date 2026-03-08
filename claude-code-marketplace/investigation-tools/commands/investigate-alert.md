@@ -21,6 +21,8 @@ Use the `mcp__kagent__invoke_agent` tool.
   `Never derive a workload namespace from source or monitoring metadata.`
   `If a service or pod label is present but namespace is missing, say the namespace is unknown instead of guessing.`
   `Do not investigate the first freeform words of the pasted message as the target unless they are explicitly a Kubernetes object reference such as pod/<name> or service/<name>.`
+  `If live runtime evidence disagrees with the alert payload, call out the mismatch explicitly as possible stale alert metadata or drift between alert time and current state.`
+  `Return exactly these five sections and no extra appendix sections: Diagnosis, Evidence, Related Data, Limitations, Recommended next step.`
 - Preserve any alert details the user included in the original request, such as the alert name, namespace, pod, service, labels, or annotations.
 - Do not rewrite `Backend/<name>`, `Frontend/<name>`, or `Cluster/<name>` into alert names.
 - Return the agent's result directly.
