@@ -14,14 +14,23 @@ from .models import (
     FindUnhealthyWorkloadsRequest,
     InvestigationReportRequest,
 )
+from .correlation import collect_change_candidates as collect_change_candidates_impl
 from .correlation import collect_correlated_changes as collect_correlated_changes_impl
 from .reporting import build_alert_investigation_report as build_alert_investigation_report_impl
 from .reporting import build_investigation_report as build_investigation_report_impl
 from .reporting import build_root_cause_report as build_root_cause_report_impl
+from .reporting import normalize_incident_input as normalize_incident_input_impl
+from .reporting import rank_hypotheses as rank_hypotheses_impl
+from .reporting import render_investigation_report as render_investigation_report_impl
+from .reporting import resolve_primary_target as resolve_primary_target_impl
 from .tools import collect_alert_context as collect_alert_context_impl
+from .tools import collect_alert_evidence as collect_alert_evidence_impl
 from .tools import collect_node_context as collect_node_context_impl
+from .tools import collect_node_evidence as collect_node_evidence_impl
 from .tools import collect_service_context as collect_service_context_impl
+from .tools import collect_service_evidence as collect_service_evidence_impl
 from .tools import collect_workload_context as collect_workload_context_impl
+from .tools import collect_workload_evidence as collect_workload_evidence_impl
 from .tools import find_unhealthy_pod as find_unhealthy_pod_impl
 from .tools import find_unhealthy_workloads as find_unhealthy_workloads_impl
 from .tools import normalize_alert_input as normalize_alert_input_impl
@@ -120,10 +129,126 @@ def normalize_alert_input(
 
 
 @mcp.tool()
+def normalize_incident_input(
+    target: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+    alertname: str | None = None,
+    labels: dict[str, str] | None = None,
+    annotations: dict[str, str] | None = None,
+    node_name: str | None = None,
+) -> dict:
+    """Normalize a manual or alert-shaped request into an investigation target artifact without resolving convenience targets or collecting evidence."""
+    response = normalize_incident_input_impl(
+        InvestigationReportRequest(
+            cluster=cluster,
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+            alertname=alertname,
+            labels=labels or {},
+            annotations=annotations or {},
+            node_name=node_name,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def resolve_primary_target(
+    target: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+    alertname: str | None = None,
+    labels: dict[str, str] | None = None,
+    annotations: dict[str, str] | None = None,
+    node_name: str | None = None,
+) -> dict:
+    """Resolve the primary investigation target, including convenience targets and vague workload expansion, without collecting evidence."""
+    response = resolve_primary_target_impl(
+        InvestigationReportRequest(
+            cluster=cluster,
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+            alertname=alertname,
+            labels=labels or {},
+            annotations=annotations or {},
+            node_name=node_name,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
 def collect_node_context(node_name: str, lookback_minutes: int = 15, cluster: str | None = None) -> dict:
     """Collect structured context for a cluster node target as a lower-level follow-up tool."""
     response = collect_node_context_impl(
         CollectNodeContextRequest(cluster=cluster, node_name=node_name, lookback_minutes=lookback_minutes)
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def collect_workload_evidence(
+    namespace: str,
+    target: str,
+    cluster: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+) -> dict:
+    """Collect workload evidence as an artifact bundle for planner-led investigations."""
+    response = collect_workload_evidence_impl(
+        CollectContextRequest(
+            cluster=cluster,
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def collect_alert_evidence(
+    alertname: str,
+    labels: dict[str, str] | None = None,
+    annotations: dict[str, str] | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    node_name: str | None = None,
+    target: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+) -> dict:
+    """Collect alert evidence as an artifact bundle after normalizing the alert input."""
+    response = collect_alert_evidence_impl(
+        CollectAlertContextRequest(
+            alertname=alertname,
+            labels=labels or {},
+            annotations=annotations or {},
+            cluster=cluster,
+            namespace=namespace,
+            node_name=node_name,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+        )
     )
     return response.model_dump(mode="json")
 
@@ -138,6 +263,36 @@ def collect_service_context(
 ) -> dict:
     """Collect structured context for a namespaced service target as a lower-level follow-up tool."""
     response = collect_service_context_impl(
+        CollectServiceContextRequest(
+            cluster=cluster,
+            namespace=namespace,
+            service_name=service_name,
+            target=target,
+            lookback_minutes=lookback_minutes,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def collect_node_evidence(node_name: str, lookback_minutes: int = 15, cluster: str | None = None) -> dict:
+    """Collect node evidence as an artifact bundle for planner-led investigations."""
+    response = collect_node_evidence_impl(
+        CollectNodeContextRequest(cluster=cluster, node_name=node_name, lookback_minutes=lookback_minutes)
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def collect_service_evidence(
+    namespace: str,
+    service_name: str,
+    cluster: str | None = None,
+    target: str | None = None,
+    lookback_minutes: int = 15,
+) -> dict:
+    """Collect service evidence as an artifact bundle for planner-led investigations."""
+    response = collect_service_evidence_impl(
         CollectServiceContextRequest(
             cluster=cluster,
             namespace=namespace,
@@ -189,6 +344,64 @@ def build_root_cause_report(
 
 
 @mcp.tool()
+def collect_change_candidates(
+    target: str,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 60,
+    anchor_timestamp: str | None = None,
+    limit: int = 10,
+) -> dict:
+    """Collect ranked change candidates related to the current investigation target."""
+    response = collect_change_candidates_impl(
+        CollectCorrelatedChangesRequest(
+            cluster=cluster,
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+            anchor_timestamp=anchor_timestamp,
+            limit=limit,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def rank_hypotheses(
+    target: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+    alertname: str | None = None,
+    labels: dict[str, str] | None = None,
+    annotations: dict[str, str] | None = None,
+    node_name: str | None = None,
+) -> dict:
+    """Analyze collected investigation evidence and return ranked hypotheses without rendering the final report."""
+    response = rank_hypotheses_impl(
+        InvestigationReportRequest(
+            cluster=cluster,
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+            alertname=alertname,
+            labels=labels or {},
+            annotations=annotations or {},
+            node_name=node_name,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
 def build_investigation_report(
     target: str | None = None,
     cluster: str | None = None,
@@ -207,6 +420,45 @@ def build_investigation_report(
 ) -> dict:
     """Build the final typed investigation report for normal investigations. Use this first when namespace and target are already known, including Backend/<name>, Frontend/<name>, and Cluster/<name> convenience targets, because backend routing resolves them to the correct deployment or service target automatically."""
     response = build_investigation_report_impl(
+        InvestigationReportRequest(
+            cluster=cluster,
+            namespace=namespace,
+            target=target,
+            profile=profile,
+            service_name=service_name,
+            lookback_minutes=lookback_minutes,
+            include_related_data=include_related_data,
+            correlation_window_minutes=correlation_window_minutes,
+            correlation_limit=correlation_limit,
+            anchor_timestamp=anchor_timestamp,
+            alertname=alertname,
+            labels=labels or {},
+            annotations=annotations or {},
+            node_name=node_name,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def render_investigation_report(
+    target: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+    include_related_data: bool = True,
+    correlation_window_minutes: int = 60,
+    correlation_limit: int = 10,
+    anchor_timestamp: str | None = None,
+    alertname: str | None = None,
+    labels: dict[str, str] | None = None,
+    annotations: dict[str, str] | None = None,
+    node_name: str | None = None,
+) -> dict:
+    """Render the final investigation report from the staged artifact-oriented pipeline."""
+    response = render_investigation_report_impl(
         InvestigationReportRequest(
             cluster=cluster,
             namespace=namespace,

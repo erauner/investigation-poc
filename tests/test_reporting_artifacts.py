@@ -181,3 +181,93 @@ def test_build_investigation_report_uses_analysis_path_by_default(monkeypatch) -
     assert report.diagnosis == "Artifact analysis"
     assert report.likely_cause == "Artifact likely cause"
     assert report.recommended_next_step == "artifact next step"
+
+
+def test_build_investigation_report_softens_confidence_when_hypotheses_are_close(monkeypatch) -> None:
+    plan = PlannedInvestigation(
+        mode="generic",
+        target=InvestigationTarget(
+            source="manual",
+            scope="service",
+            cluster="artifact-cluster",
+            namespace="artifact-ns",
+            requested_target="service/api",
+            target="service/api-resolved",
+            node_name=None,
+            service_name="api-resolved",
+            profile="service",
+            lookback_minutes=15,
+            normalization_notes=["artifact-note"],
+        ),
+        evidence=EvidenceBundle(
+            cluster="artifact-cluster",
+            target=TargetRef(namespace="artifact-ns", kind="service", name="api-resolved"),
+            object_state={"kind": "service", "name": "api-resolved"},
+            events=[],
+            log_excerpt="",
+            metrics={},
+            findings=[],
+            limitations=[],
+            enrichment_hints=[],
+        ),
+        normalized=NormalizedInvestigationRequest(
+            source="manual",
+            scope="service",
+            cluster="legacy-cluster",
+            namespace="legacy-ns",
+            target="service/api-legacy",
+            node_name=None,
+            service_name="api-legacy",
+            profile="service",
+            lookback_minutes=15,
+            normalization_notes=["legacy-note"],
+        ),
+        context=type("LegacyContext", (), {"cluster": "legacy-cluster"})(),
+    )
+
+    monkeypatch.setattr(reporting.planner, "plan_investigation", lambda *args, **kwargs: plan)
+    monkeypatch.setattr(
+        reporting,
+        "_analyze_plan",
+        lambda _plan: InvestigationAnalysis(
+            cluster="artifact-cluster",
+            scope="service",
+            target="service/api-resolved",
+            profile="service",
+            hypotheses=[
+                Hypothesis(
+                    key="service-5xx",
+                    diagnosis="Artifact analysis",
+                    likely_cause="Artifact likely cause",
+                    confidence="high",
+                    score=410,
+                    supporting_findings=[],
+                    evidence_items=[],
+                ),
+                Hypothesis(
+                    key="latency",
+                    diagnosis="Latency alternative",
+                    likely_cause="Artifact secondary cause",
+                    confidence="medium",
+                    score=390,
+                    supporting_findings=[],
+                    evidence_items=[],
+                ),
+            ],
+            limitations=[],
+            recommended_next_step="artifact next step",
+            suggested_follow_ups=["artifact follow-up"],
+        ),
+    )
+    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
+
+    report = reporting.build_investigation_report(
+        InvestigationReportRequest(target="service/api", profile="service", include_related_data=False)
+    )
+
+    assert report.confidence == "medium"
+    assert "multiple plausible causes remain" in report.limitations[0]
+    assert any(
+        "Validate the leading hypothesis against the next most plausible cause" in item
+        for item in report.suggested_follow_ups
+    )

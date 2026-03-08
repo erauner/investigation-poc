@@ -286,6 +286,10 @@ def collect_correlated_changes_for_target(
     )
 
 
+def collect_change_candidates(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
+    return collect_correlated_changes(req)
+
+
 def collect_correlated_changes(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
     target_text = canonical_target(req.target, req.profile, req.service_name)
     scope = scope_from_target(target_text, req.profile)

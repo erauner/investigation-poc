@@ -17,10 +17,13 @@ from investigation_service.models import (
     CollectServiceContextRequest,
     CollectedContextResponse,
     CorrelatedChangesResponse,
+    EvidenceBundle,
     EvidenceItem,
     Finding,
+    InvestigationAnalysis,
     InvestigationReport,
     InvestigationReportRequest,
+    InvestigationTarget,
     RootCauseReport,
     TargetRef,
     UnhealthyPodResponse,
@@ -261,6 +264,59 @@ def test_normalize_alert_route_returns_normalized_request(monkeypatch) -> None:
     assert body["target"] == "node/worker3"
 
 
+def test_normalize_incident_input_route_returns_target_artifact(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.normalize_incident_input_from_request",
+        lambda _req: InvestigationTarget(
+            source="manual",
+            scope="workload",
+            cluster="current-context",
+            namespace="kagent-smoke",
+            requested_target="Backend/crashy",
+            target="deployment/crashy",
+            service_name="crashy",
+            normalization_notes=["resolved Backend/crashy to deployment/crashy"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/normalize_incident_input",
+        json={"namespace": "kagent-smoke", "target": "Backend/crashy"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["requested_target"] == "Backend/crashy"
+    assert body["target"] == "deployment/crashy"
+
+
+def test_resolve_primary_target_route_returns_target_artifact(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.resolve_primary_target_from_request",
+        lambda _req: InvestigationTarget(
+            source="alert",
+            scope="workload",
+            cluster="current-context",
+            namespace="kagent-smoke",
+            requested_target="pod",
+            target="pod/crashy-abc123",
+            normalization_notes=["resolved vague workload target to pod/crashy-abc123"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/resolve_primary_target",
+        json={"namespace": "kagent-smoke", "target": "pod"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["requested_target"] == "pod"
+    assert body["target"] == "pod/crashy-abc123"
+
+
 def test_collect_node_context_route_returns_context(monkeypatch) -> None:
     monkeypatch.setattr(
         "investigation_service.main.collect_node_context",
@@ -294,6 +350,61 @@ def test_collect_service_context_route_returns_context(monkeypatch) -> None:
         "kind": "service",
         "name": "kagent-controller",
     }
+
+
+def test_collect_workload_evidence_route_returns_bundle(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.collect_workload_evidence",
+        lambda _req: EvidenceBundle(
+            cluster="current-context",
+            target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-abc123"),
+            object_state={"kind": "pod", "name": "crashy-abc123"},
+            events=["BackOff restarting failed container"],
+            log_excerpt="starting",
+            metrics={"prometheus_available": True},
+            findings=[],
+            limitations=[],
+            enrichment_hints=[],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/collect_workload_evidence",
+        json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"]["name"] == "crashy-abc123"
+
+
+def test_collect_alert_evidence_route_returns_bundle(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.collect_alert_evidence",
+        lambda _req: EvidenceBundle(
+            cluster="current-context",
+            target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-abc123"),
+            object_state={"kind": "pod", "name": "crashy-abc123"},
+            events=["BackOff restarting failed container"],
+            log_excerpt="starting",
+            metrics={"prometheus_available": True},
+            findings=[],
+            limitations=["alertname: PodCrashLooping"],
+            enrichment_hints=["normalization completed before collection"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/collect_alert_evidence",
+        json={"alertname": "PodCrashLooping", "labels": {"namespace": "kagent-smoke", "pod": "crashy-abc123"}},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"]["name"] == "crashy-abc123"
+    assert "alertname: PodCrashLooping" in body["limitations"]
 
 
 def test_collect_service_context_canonicalizes_bare_service_target(monkeypatch) -> None:
@@ -527,6 +638,41 @@ def test_collect_correlated_changes_route_returns_ranked_changes(monkeypatch) ->
     assert body["changes"][0]["relation"] == "direct"
 
 
+def test_collect_change_candidates_route_returns_ranked_changes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.collect_change_candidates",
+        lambda _req: CorrelatedChangesResponse(
+            scope="workload",
+            target="pod/crashy-abc123",
+            changes=[
+                {
+                    "fingerprint": "event|pod|kagent-smoke|crashy-abc123|backoff|back-off restarting failed container",
+                    "timestamp": _now_iso(),
+                    "source": "k8s_event",
+                    "resource_kind": "pod",
+                    "namespace": "kagent-smoke",
+                    "name": "crashy-abc123",
+                    "relation": "direct",
+                    "summary": "BackOff: restarting failed container",
+                    "confidence": "high",
+                }
+            ],
+            limitations=[],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/collect_change_candidates",
+        json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"] == "pod/crashy-abc123"
+    assert body["changes"][0]["confidence"] == "high"
+
+
 def test_build_investigation_report_route_returns_typed_report(monkeypatch) -> None:
     monkeypatch.setattr(
         "investigation_service.main.build_investigation_report",
@@ -566,6 +712,74 @@ def test_build_investigation_report_route_returns_typed_report(monkeypatch) -> N
     body = response.json()
     assert body["target"] == "pod/crashy-abc123"
     assert body["evidence_items"][0]["fingerprint"].startswith("finding|workload|")
+
+
+def test_rank_hypotheses_route_returns_analysis(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.rank_hypotheses_from_request",
+        lambda _req: InvestigationAnalysis(
+            scope="workload",
+            target="pod/crashy-abc123",
+            profile="workload",
+            hypotheses=[
+                {
+                    "key": "crash-loop",
+                    "diagnosis": "Crash Loop Detected",
+                    "likely_cause": "The pod is repeatedly failing shortly after start, so Kubernetes is backing off restarts.",
+                    "confidence": "high",
+                    "score": 42,
+                    "supporting_findings": [],
+                    "evidence_items": [],
+                }
+            ],
+            limitations=[],
+            recommended_next_step="Confirm the failure with describe output and recent logs.",
+            suggested_follow_ups=[],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/rank_hypotheses",
+        json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hypotheses"][0]["key"] == "crash-loop"
+    assert body["hypotheses"][0]["score"] == 42
+
+
+def test_render_investigation_report_route_returns_typed_report(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.render_investigation_report",
+        lambda _req: InvestigationReport(
+            scope="workload",
+            target="pod/crashy-abc123",
+            diagnosis="Crash Loop Detected",
+            likely_cause="The pod is repeatedly failing shortly after start, so Kubernetes is backing off restarts.",
+            confidence="high",
+            evidence=["events: Crash Loop Detected - Events indicate BackOff/CrashLoopBackOff behavior"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="no meaningful correlated changes found in the requested time window",
+            limitations=[],
+            recommended_next_step="Confirm the failure with describe output and recent logs.",
+            suggested_follow_ups=[],
+            normalization_notes=["alertname=PodCrashLooping"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/render_investigation_report",
+        json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target"] == "pod/crashy-abc123"
+    assert body["diagnosis"] == "Crash Loop Detected"
 
 
 def test_build_alert_investigation_report_wrapper_maps_into_shared_report_flow(monkeypatch) -> None:

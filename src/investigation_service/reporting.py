@@ -6,7 +6,14 @@ from .guidelines import (
     resolve_guidelines,
     resolve_guidelines_for_context,
 )
-from .analysis import build_investigation_analysis, primary_hypothesis, rendered_evidence_from_hypothesis
+from .analysis import (
+    adjusted_confidence_from_hypotheses,
+    ambiguity_limitations_from_hypotheses,
+    build_investigation_analysis,
+    follow_ups_from_hypotheses,
+    primary_hypothesis,
+    rendered_evidence_from_hypothesis,
+)
 from .models import (
     AlertInvestigationReportRequest,
     BuildRootCauseReportRequest,
@@ -231,13 +238,14 @@ def _render_investigation_report_from_analysis(
     guidelines: list[ResolvedGuideline],
 ) -> InvestigationReport:
     lead = primary_hypothesis(analysis)
+    effective_confidence = adjusted_confidence_from_hypotheses(analysis)
     return InvestigationReport(
         cluster=analysis.cluster,
         scope=analysis.scope,
         target=analysis.target,
         diagnosis=lead.diagnosis,
         likely_cause=lead.likely_cause,
-        confidence=lead.confidence,
+        confidence=effective_confidence,
         evidence=rendered_evidence_from_hypothesis(lead),
         evidence_items=lead.evidence_items,
         related_data=related_data,
@@ -321,6 +329,32 @@ def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport
     )
 
 
+def normalize_incident_input(req: InvestigationReportRequest) -> InvestigationTarget:
+    normalized = planner.normalized_request(req, _planner_deps())
+    return planner.investigation_target_from_normalized(
+        normalized,
+        requested_target=req.target or normalized.target,
+    )
+
+
+def resolve_primary_target(req: InvestigationReportRequest) -> InvestigationTarget:
+    return planner.resolve_primary_target(req, _planner_deps())
+
+
+def rank_hypotheses(req: InvestigationReportRequest) -> InvestigationAnalysis:
+    plan = planner.plan_investigation(
+        req,
+        _planner_deps(),
+        collect_context_for_normalized_request_impl=_collect_context_for_normalized_request,
+        align_normalized_request_with_context_impl=_align_normalized_request_with_context,
+    )
+    return _analyze_plan(plan)
+
+
+def render_investigation_report(req: InvestigationReportRequest) -> InvestigationReport:
+    return build_investigation_report(req)
+
+
 def build_alert_investigation_report(req: AlertInvestigationReportRequest) -> InvestigationReport:
     return build_investigation_report(
         InvestigationReportRequest(
@@ -354,11 +388,13 @@ def build_investigation_report(req: InvestigationReportRequest) -> Investigation
     related_data: list[CorrelatedChange] = []
     related_data_note: str | None = None
     limitations = list(analysis.limitations)
+    limitations.extend(ambiguity_limitations_from_hypotheses(analysis))
     recommended_next_step, suggested_follow_ups, guidelines, guideline_limitations = _apply_guidelines(
         analysis,
         target=plan.target,
         alertname=req.alertname,
     )
+    suggested_follow_ups.extend(follow_ups_from_hypotheses(analysis))
     limitations.extend(guideline_limitations)
 
     if req.include_related_data:

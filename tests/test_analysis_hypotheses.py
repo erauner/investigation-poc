@@ -1,5 +1,10 @@
-from investigation_service.analysis import build_investigation_analysis
-from investigation_service.models import EvidenceBundle, Finding, InvestigationTarget, TargetRef
+from investigation_service.analysis import (
+    adjusted_confidence_from_hypotheses,
+    ambiguity_limitations_from_hypotheses,
+    build_investigation_analysis,
+    follow_ups_from_hypotheses,
+)
+from investigation_service.models import EvidenceBundle, Finding, Hypothesis, InvestigationAnalysis, InvestigationTarget, TargetRef
 
 
 def test_build_investigation_analysis_ranks_crash_loop_hypothesis_first() -> None:
@@ -90,3 +95,43 @@ def test_build_investigation_analysis_keeps_service_signals_bounded() -> None:
 
     assert analysis.hypotheses[0].diagnosis == "Service Returning 5xx Responses"
     assert len(analysis.hypotheses) == 2
+
+
+def test_close_secondary_hypotheses_reduce_confidence_and_add_follow_up() -> None:
+    analysis = InvestigationAnalysis(
+        cluster="erauner-home",
+        scope="service",
+        target="service/api",
+        profile="service",
+        hypotheses=[
+            Hypothesis(
+                key="service-5xx",
+                diagnosis="Service Returning 5xx Responses",
+                likely_cause="backend failure",
+                confidence="high",
+                score=420,
+                supporting_findings=[],
+                evidence_items=[],
+            ),
+            Hypothesis(
+                key="latency",
+                diagnosis="High Service Latency",
+                likely_cause="dependency slowness",
+                confidence="medium",
+                score=395,
+                supporting_findings=[],
+                evidence_items=[],
+            ),
+        ],
+        limitations=[],
+        recommended_next_step="inspect metrics",
+        suggested_follow_ups=[],
+    )
+
+    assert adjusted_confidence_from_hypotheses(analysis) == "medium"
+    assert ambiguity_limitations_from_hypotheses(analysis) == [
+        "multiple plausible causes remain; alternative hypotheses include High Service Latency"
+    ]
+    assert follow_ups_from_hypotheses(analysis) == [
+        "Validate the leading hypothesis against the next most plausible cause before taking write actions."
+    ]

@@ -521,6 +521,49 @@ def primary_hypothesis(analysis: InvestigationAnalysis) -> Hypothesis:
     return analysis.hypotheses[0]
 
 
+def secondary_hypotheses(analysis: InvestigationAnalysis, limit: int = 2) -> list[Hypothesis]:
+    return analysis.hypotheses[1 : max(limit, 0) + 1]
+
+
+def close_secondary_hypotheses(analysis: InvestigationAnalysis, score_gap: int = 40) -> list[Hypothesis]:
+    lead = primary_hypothesis(analysis)
+    return [
+        item
+        for item in secondary_hypotheses(analysis)
+        if (lead.score - item.score) <= score_gap
+    ]
+
+
+def adjusted_confidence_from_hypotheses(analysis: InvestigationAnalysis, score_gap: int = 40) -> ConfidenceType:
+    lead = primary_hypothesis(analysis)
+    if not close_secondary_hypotheses(analysis, score_gap=score_gap):
+        return lead.confidence
+    if lead.confidence == "high":
+        return "medium"
+    if lead.confidence == "medium":
+        return "low"
+    return "low"
+
+
+def ambiguity_limitations_from_hypotheses(analysis: InvestigationAnalysis, score_gap: int = 40) -> list[str]:
+    alternatives = close_secondary_hypotheses(analysis, score_gap=score_gap)
+    if not alternatives:
+        return []
+    alternative_names = ", ".join(item.diagnosis for item in alternatives[:2])
+    return [
+        f"multiple plausible causes remain; alternative hypotheses include {alternative_names}"
+    ]
+
+
+def follow_ups_from_hypotheses(analysis: InvestigationAnalysis, score_gap: int = 40) -> list[str]:
+    alternatives = close_secondary_hypotheses(analysis, score_gap=score_gap)
+    if not alternatives:
+        return []
+    return [
+        "Validate the leading hypothesis against the next most plausible cause before taking write actions."
+    ]
+
+
 def rendered_evidence_from_hypothesis(hypothesis: Hypothesis) -> list[str]:
     return [
         item.summary if not item.detail else f"{item.summary} - {item.detail}"

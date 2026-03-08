@@ -322,6 +322,10 @@ def collect_workload_context(req: CollectContextRequest) -> CollectedContextResp
     return _collect_context(req)
 
 
+def collect_workload_evidence(req: CollectContextRequest) -> EvidenceBundle:
+    return collect_evidence_bundle(req)
+
+
 def find_unhealthy_workloads(req: FindUnhealthyWorkloadsRequest) -> UnhealthyWorkloadsResponse:
     cluster = resolve_cluster(req.cluster)
     return find_unhealthy_workloads_impl(namespace=req.namespace, limit=req.limit, cluster=cluster)
@@ -354,9 +358,35 @@ def collect_node_context(req: CollectNodeContextRequest) -> CollectedContextResp
     )
 
 
+def collect_node_evidence(req: CollectNodeContextRequest) -> EvidenceBundle:
+    return collect_evidence_bundle(
+        CollectContextRequest(
+            cluster=req.cluster,
+            namespace=None,
+            target=f"node/{req.node_name}",
+            profile="workload",
+            lookback_minutes=req.lookback_minutes,
+        )
+    )
+
+
 def collect_service_context(req: CollectServiceContextRequest) -> CollectedContextResponse:
     target = _canonical_target(req.target or req.service_name, profile="service", service_name=req.service_name)
     return _collect_context(
+        CollectContextRequest(
+            cluster=req.cluster,
+            namespace=req.namespace,
+            target=target,
+            profile="service",
+            service_name=req.service_name,
+            lookback_minutes=req.lookback_minutes,
+        )
+    )
+
+
+def collect_service_evidence(req: CollectServiceContextRequest) -> EvidenceBundle:
+    target = _canonical_target(req.target or req.service_name, profile="service", service_name=req.service_name)
+    return collect_evidence_bundle(
         CollectContextRequest(
             cluster=req.cluster,
             namespace=req.namespace,
@@ -411,3 +441,7 @@ def collect_alert_context(req: CollectAlertContextRequest) -> CollectedContextRe
             "enrichment_hints": enrichment_hints,
         }
     )
+
+
+def collect_alert_evidence(req: CollectAlertContextRequest) -> EvidenceBundle:
+    return collect_evidence_bundle(_infer_alert_inputs(req))
