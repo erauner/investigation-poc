@@ -116,6 +116,11 @@ def _context(
 def test_run_orchestrated_investigation_advances_and_renders(monkeypatch) -> None:
     incident = _incident()
     captured: dict[str, list[SubmittedStepArtifact]] = {"submitted": []}
+    monkeypatch.setattr(
+        entrypoint,
+        "find_unhealthy_pod",
+        lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})(),
+    )
 
     monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context())
     monkeypatch.setattr(
@@ -257,6 +262,11 @@ def test_run_orchestrated_investigation_advances_and_renders(monkeypatch) -> Non
 
 def test_run_orchestrated_investigation_bypasses_terminal_render_batch(monkeypatch) -> None:
     incident = _incident()
+    monkeypatch.setattr(
+        entrypoint,
+        "find_unhealthy_pod",
+        lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})(),
+    )
 
     monkeypatch.setattr(
         entrypoint,
@@ -396,7 +406,7 @@ def test_run_orchestrated_investigation_attaches_resolved_concrete_pod_for_alert
         )
     )
 
-    assert report.target == "pod/crashy-abc123"
+    assert report.target == "deployment/crashy"
     assert any("Resolved concrete crash-looping pod: pod/crashy-abc123" in item for item in report.evidence)
 
 

@@ -47,8 +47,6 @@ def _maybe_attach_resolved_pod_context(
 ) -> InvestigationReport:
     if not req.alertname or not req.namespace or not req.target or not req.target.startswith("pod/"):
         return report
-    if report.target.startswith("pod/") and "-" in report.target.split("/", 1)[1]:
-        return report
 
     candidate = find_unhealthy_pod(
         FindUnhealthyPodRequest(
@@ -65,11 +63,10 @@ def _maybe_attach_resolved_pod_context(
 
     evidence_line = f"Resolved concrete crash-looping pod: {candidate.target}"
     if evidence_line in report.evidence:
-        return report.model_copy(update={"target": candidate.target})
+        return report
 
     return report.model_copy(
         update={
-            "target": candidate.target,
             "evidence": [*report.evidence, evidence_line],
         }
     )
