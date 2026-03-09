@@ -4,6 +4,7 @@ from typing import Any
 
 from .execution_policy import policy_fields
 from .models import (
+    ActualRoute,
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
@@ -22,6 +23,7 @@ from .models import (
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
     PlanStep,
+    StepRouteProvenance,
     StepArtifact,
     UpdateInvestigationPlanRequest,
 )
@@ -450,6 +452,67 @@ def _change_candidates_request(target: InvestigationTarget) -> CollectCorrelated
     )
 
 
+def _actual_route(
+    step: PlanStep,
+    *,
+    target: InvestigationTarget,
+) -> ActualRoute:
+    tool_name = None
+    tool_path = ["planner._execute_step"]
+
+    if step.id == "collect-alert-evidence":
+        tool_name = "collect_alert_evidence"
+    elif step.id == "collect-target-evidence":
+        if target.scope == "node":
+            tool_name = "collect_node_evidence"
+        elif target.scope == "service":
+            tool_name = "collect_service_evidence"
+        else:
+            tool_name = "collect_workload_evidence"
+    elif step.id == "collect-service-follow-up-evidence":
+        tool_name = "collect_service_evidence"
+    elif step.id == "collect-change-candidates":
+        tool_name = "collect_change_candidates"
+
+    if tool_name is not None:
+        tool_path.append(f"deps.{tool_name}")
+
+    return ActualRoute(
+        source_kind="investigation_internal",
+        mcp_server="investigation-mcp-server",
+        tool_name=tool_name,
+        tool_path=tool_path,
+    )
+
+
+def _route_satisfaction(step: PlanStep, actual_route: ActualRoute) -> str:
+    if not step.suggested_capability:
+        return "not_applicable"
+
+    if (
+        actual_route.mcp_server == step.preferred_mcp_server
+        and actual_route.tool_name in step.preferred_tool_names
+    ):
+        return "preferred"
+
+    if (
+        actual_route.mcp_server == step.fallback_mcp_server
+        and actual_route.tool_name in step.fallback_tool_names
+    ):
+        return "fallback"
+
+    return "unmatched"
+
+
+def _route_provenance(step: PlanStep, *, target: InvestigationTarget) -> StepRouteProvenance:
+    actual_route = _actual_route(step, target=target)
+    return StepRouteProvenance(
+        requested_capability=step.suggested_capability,
+        route_satisfaction=_route_satisfaction(step, actual_route),
+        actual_route=actual_route,
+    )
+
+
 def _execute_step(
     step: PlanStep,
     *,
@@ -460,6 +523,7 @@ def _execute_step(
     target = plan.target
     if target is None:
         raise ValueError("investigation plan did not produce a primary target")
+    route_provenance = _route_provenance(step, target=target)
 
     if step.id == "collect-alert-evidence":
         if not incident.alertname:
@@ -485,6 +549,7 @@ def _execute_step(
             summary=_summary_for_alert_bundle(incident.alertname, target.requested_target, bundle),
             limitations=list(bundle.limitations),
             evidence_bundle=bundle,
+            route_provenance=route_provenance,
         )
 
     if step.id == "collect-target-evidence":
@@ -502,6 +567,7 @@ def _execute_step(
             summary=_summary_for_evidence_bundle(bundle),
             limitations=list(bundle.limitations),
             evidence_bundle=bundle,
+            route_provenance=route_provenance,
         )
 
     if step.id == "collect-service-follow-up-evidence":
@@ -523,6 +589,7 @@ def _execute_step(
             summary=_summary_for_evidence_bundle(bundle),
             limitations=list(bundle.limitations),
             evidence_bundle=bundle,
+            route_provenance=route_provenance,
         )
 
     if step.id == "collect-change-candidates":
@@ -534,6 +601,7 @@ def _execute_step(
             summary=_summary_for_change_candidates(changes),
             limitations=list(changes.limitations),
             change_candidates=changes,
+            route_provenance=route_provenance,
         )
 
     raise ValueError(f"unsupported executable plan step: {step.id}")

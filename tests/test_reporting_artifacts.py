@@ -1,4 +1,5 @@
 from investigation_service.models import (
+    ActualRoute,
     BuildInvestigationPlanRequest,
     CorrelatedChange,
     CorrelatedChangesResponse,
@@ -11,6 +12,7 @@ from investigation_service.models import (
     InvestigationReportRequest,
     InvestigationTarget,
     PlanStep,
+    StepRouteProvenance,
     StepArtifact,
     TargetRef,
 )
@@ -92,6 +94,16 @@ def _execution(include_changes: bool = False) -> EvidenceBatchExecution:
             summary=["Service instability"],
             limitations=[],
             evidence_bundle=_bundle(),
+            route_provenance=StepRouteProvenance(
+                requested_capability="service_evidence_plane",
+                route_satisfaction="unmatched",
+                actual_route=ActualRoute(
+                    source_kind="investigation_internal",
+                    mcp_server="investigation-mcp-server",
+                    tool_name="collect_service_evidence",
+                    tool_path=["planner._execute_step", "deps.collect_service_evidence"],
+                ),
+            ),
         )
     ]
     if include_changes:
@@ -120,6 +132,16 @@ def _execution(include_changes: bool = False) -> EvidenceBatchExecution:
                         )
                     ],
                     limitations=[],
+                ),
+                route_provenance=StepRouteProvenance(
+                    requested_capability="collect_change_candidates",
+                    route_satisfaction="preferred",
+                    actual_route=ActualRoute(
+                        source_kind="investigation_internal",
+                        mcp_server="investigation-mcp-server",
+                        tool_name="collect_change_candidates",
+                        tool_path=["planner._execute_step", "deps.collect_change_candidates"],
+                    ),
                 ),
             )
         )
@@ -164,6 +186,16 @@ def _alert_execution() -> EvidenceBatchExecution:
                     limitations=[],
                     enrichment_hints=[],
                 ),
+                route_provenance=StepRouteProvenance(
+                    requested_capability="alert_evidence_plane",
+                    route_satisfaction="unmatched",
+                    actual_route=ActualRoute(
+                        source_kind="investigation_internal",
+                        mcp_server="investigation-mcp-server",
+                        tool_name="collect_alert_evidence",
+                        tool_path=["planner._execute_step", "deps.collect_alert_evidence"],
+                    ),
+                ),
             ),
             StepArtifact(
                 step_id="collect-target-evidence",
@@ -188,6 +220,16 @@ def _alert_execution() -> EvidenceBatchExecution:
                     ],
                     limitations=[],
                     enrichment_hints=[],
+                ),
+                route_provenance=StepRouteProvenance(
+                    requested_capability="workload_evidence_plane",
+                    route_satisfaction="unmatched",
+                    actual_route=ActualRoute(
+                        source_kind="investigation_internal",
+                        mcp_server="investigation-mcp-server",
+                        tool_name="collect_workload_evidence",
+                        tool_path=["planner._execute_step", "deps.collect_workload_evidence"],
+                    ),
                 ),
             ),
         ],
@@ -279,6 +321,11 @@ def test_render_investigation_report_uses_execution_artifacts_by_default(monkeyp
     assert report.tool_path_trace.planner_path_used is True
     assert report.tool_path_trace.executed_batch_ids == ["batch-1"]
     assert report.tool_path_trace.executed_step_ids == ["collect-target-evidence"]
+    assert len(report.tool_path_trace.step_provenance) == 1
+    assert report.tool_path_trace.step_provenance[0].step_id == "collect-target-evidence"
+    assert report.tool_path_trace.step_provenance[0].provenance.requested_capability == "service_evidence_plane"
+    assert report.tool_path_trace.step_provenance[0].provenance.route_satisfaction == "unmatched"
+    assert report.tool_path_trace.step_provenance[0].provenance.actual_route.tool_name == "collect_service_evidence"
 
 
 def test_render_investigation_report_reuses_executed_change_artifacts(monkeypatch) -> None:
@@ -301,6 +348,11 @@ def test_render_investigation_report_reuses_executed_change_artifacts(monkeypatc
     )
 
     assert report.related_data[0].summary == "Deployment rollout"
+    assert [trace.step_id for trace in report.tool_path_trace.step_provenance] == [
+        "collect-target-evidence",
+        "collect-change-candidates",
+    ]
+    assert report.tool_path_trace.step_provenance[1].provenance.route_satisfaction == "preferred"
 
 
 def test_render_investigation_report_softens_confidence_when_hypotheses_are_close(monkeypatch) -> None:

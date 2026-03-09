@@ -10,6 +10,7 @@ from investigation_service.k8s_adapter import find_unhealthy_workloads as find_u
 from investigation_service.k8s_adapter import get_k8s_object
 from investigation_service.main import app
 from investigation_service.models import (
+    ActualRoute,
     BuildInvestigationPlanRequest,
     BuildRootCauseReportRequest,
     CollectAlertContextRequest,
@@ -24,6 +25,8 @@ from investigation_service.models import (
     InvestigationReport,
     InvestigationReportRequest,
     InvestigationTarget,
+    StepArtifact,
+    StepRouteProvenance,
     TargetRef,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
@@ -176,7 +179,25 @@ def test_execute_investigation_step_route_returns_execution(monkeypatch) -> None
         lambda _req: EvidenceBatchExecution(
             batch_id="batch-1",
             executed_step_ids=["collect-target-evidence"],
-            artifacts=[],
+            artifacts=[
+                StepArtifact(
+                    step_id="collect-target-evidence",
+                    plane="workload",
+                    artifact_type="evidence_bundle",
+                    summary=["Collected workload evidence"],
+                    limitations=[],
+                    route_provenance=StepRouteProvenance(
+                        requested_capability="workload_evidence_plane",
+                        route_satisfaction="unmatched",
+                        actual_route=ActualRoute(
+                            source_kind="investigation_internal",
+                            mcp_server="investigation-mcp-server",
+                            tool_name="collect_workload_evidence",
+                            tool_path=["planner._execute_step", "deps.collect_workload_evidence"],
+                        ),
+                    ),
+                )
+            ],
             execution_notes=["executed batch-1"],
         ),
     )
@@ -213,6 +234,9 @@ def test_execute_investigation_step_route_returns_execution(monkeypatch) -> None
     body = response.json()
     assert body["batch_id"] == "batch-1"
     assert body["executed_step_ids"] == ["collect-target-evidence"]
+    assert body["artifacts"][0]["route_provenance"]["requested_capability"] == "workload_evidence_plane"
+    assert body["artifacts"][0]["route_provenance"]["route_satisfaction"] == "unmatched"
+    assert body["artifacts"][0]["route_provenance"]["actual_route"]["tool_name"] == "collect_workload_evidence"
 
 
 def test_update_investigation_plan_route_returns_plan(monkeypatch) -> None:

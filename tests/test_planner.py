@@ -3,6 +3,7 @@ import pytest
 from investigation_service.models import (
     BuildInvestigationPlanRequest,
     CorrelatedChangesResponse,
+    EvidenceBatch,
     EvidenceBatchExecution,
     EvidenceBundle,
     ExecuteInvestigationStepRequest,
@@ -10,6 +11,7 @@ from investigation_service.models import (
     InvestigationPlan,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
+    PlanStep,
     TargetRef,
     UpdateInvestigationPlanRequest,
 )
@@ -218,6 +220,19 @@ def test_execute_investigation_step_runs_single_targeted_evidence_batch() -> Non
     assert execution.executed_step_ids == ["collect-target-evidence", "collect-change-candidates"]
     assert execution.artifacts[0].artifact_type == "evidence_bundle"
     assert execution.artifacts[1].artifact_type == "change_candidates"
+    assert execution.artifacts[0].route_provenance is not None
+    assert execution.artifacts[0].route_provenance.requested_capability == "workload_evidence_plane"
+    assert execution.artifacts[0].route_provenance.route_satisfaction == "unmatched"
+    assert execution.artifacts[0].route_provenance.actual_route.mcp_server == "investigation-mcp-server"
+    assert execution.artifacts[0].route_provenance.actual_route.tool_name == "collect_workload_evidence"
+    assert execution.artifacts[0].route_provenance.actual_route.tool_path == [
+        "planner._execute_step",
+        "deps.collect_workload_evidence",
+    ]
+    assert execution.artifacts[1].route_provenance is not None
+    assert execution.artifacts[1].route_provenance.requested_capability == "collect_change_candidates"
+    assert execution.artifacts[1].route_provenance.route_satisfaction == "preferred"
+    assert execution.artifacts[1].route_provenance.actual_route.tool_name == "collect_change_candidates"
     assert calls[-2:] == ["collect_workload_evidence", "collect_change_candidates"]
 
 
@@ -265,7 +280,75 @@ def test_execute_investigation_step_runs_alert_batch_from_alert_input() -> None:
         "collect-target-evidence",
         "collect-change-candidates",
     ]
+    assert execution.artifacts[0].route_provenance is not None
+    assert execution.artifacts[0].route_provenance.requested_capability == "alert_evidence_plane"
+    assert execution.artifacts[0].route_provenance.route_satisfaction == "unmatched"
+    assert execution.artifacts[0].route_provenance.actual_route.tool_name == "collect_alert_evidence"
+    assert execution.artifacts[1].route_provenance is not None
+    assert execution.artifacts[1].route_provenance.requested_capability == "workload_evidence_plane"
+    assert execution.artifacts[1].route_provenance.route_satisfaction == "unmatched"
     assert "collect_alert_evidence" in calls
+
+
+def test_execute_investigation_step_keeps_internal_service_follow_up_unmatched() -> None:
+    calls: list[str] = []
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(
+            namespace="default",
+            target="service/api",
+            profile="service",
+            service_name="api",
+        ),
+        _deps(calls),
+    ).model_copy(
+        update={
+            "steps": [
+                PlanStep(
+                    id="collect-service-follow-up-evidence",
+                    title="Collect service follow-up evidence",
+                    category="evidence",
+                    plane="service",
+                    status="pending",
+                    rationale="Follow up with service evidence.",
+                    suggested_capability="service_evidence_plane",
+                    preferred_mcp_server="prometheus-mcp-server",
+                    preferred_tool_names=["execute_query", "execute_range_query"],
+                    fallback_mcp_server="kubernetes-mcp-server",
+                    fallback_tool_names=["collect_service_evidence"],
+                    depends_on=[],
+                )
+            ],
+            "evidence_batches": [
+                EvidenceBatch(
+                    id="batch-follow-up-service",
+                    title="Service follow-up",
+                    status="pending",
+                    intent="Collect follow-up evidence",
+                    step_ids=["collect-service-follow-up-evidence"],
+                )
+            ],
+            "active_batch_id": "batch-follow-up-service",
+        }
+    )
+
+    execution = execute_investigation_step(
+        ExecuteInvestigationStepRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(
+                namespace="default",
+                target="service/api",
+                profile="service",
+                service_name="api",
+            ),
+        ),
+        _deps(calls),
+    )
+
+    assert execution.executed_step_ids == ["collect-service-follow-up-evidence"]
+    assert execution.artifacts[0].route_provenance is not None
+    assert execution.artifacts[0].route_provenance.requested_capability == "service_evidence_plane"
+    assert execution.artifacts[0].route_provenance.route_satisfaction == "unmatched"
+    assert execution.artifacts[0].route_provenance.actual_route.tool_name == "collect_service_evidence"
 
 
 def test_update_investigation_plan_unlocks_analysis_after_first_batch() -> None:

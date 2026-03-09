@@ -129,6 +129,27 @@ class InvestigationPlan(BaseModel):
     planning_notes: list[str] = Field(default_factory=list)
 
 
+class ActualRoute(BaseModel):
+    source_kind: Literal["investigation_internal", "peer_mcp"]
+    mcp_server: str | None = None
+    tool_name: str | None = None
+    tool_path: list[str] = Field(default_factory=list)
+
+
+class StepRouteProvenance(BaseModel):
+    requested_capability: str | None = None
+    route_satisfaction: Literal["preferred", "fallback", "unmatched", "not_applicable"] = "not_applicable"
+    actual_route: ActualRoute
+
+
+class ExecutedStepTrace(BaseModel):
+    batch_id: str | None = None
+    step_id: str
+    plane: str
+    artifact_type: Literal["evidence_bundle", "change_candidates"]
+    provenance: StepRouteProvenance
+
+
 class StepArtifact(BaseModel):
     step_id: str
     plane: str
@@ -137,6 +158,7 @@ class StepArtifact(BaseModel):
     limitations: list[str] = Field(default_factory=list)
     evidence_bundle: "EvidenceBundle | None" = None
     change_candidates: "CorrelatedChangesResponse | None" = None
+    route_provenance: StepRouteProvenance | None = None
 
 
 class EvidenceBatchExecution(BaseModel):
@@ -409,6 +431,7 @@ class ToolPathTrace(BaseModel):
     mode: InvestigationMode | None = None
     executed_batch_ids: list[str] = Field(default_factory=list)
     executed_step_ids: list[str] = Field(default_factory=list)
+    step_provenance: list[ExecutedStepTrace] = Field(default_factory=list)
 
 
 class InvestigationState(BaseModel):

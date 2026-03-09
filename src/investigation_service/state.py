@@ -3,6 +3,7 @@ from .models import (
     CorrelatedChangesResponse,
     EvidenceBatchExecution,
     EvidenceBundle,
+    ExecutedStepTrace,
     InvestigationPlan,
     InvestigationState,
     InvestigationTarget,
@@ -41,6 +42,24 @@ def _change_candidates_from_artifacts(artifacts: list[StepArtifact]) -> Correlat
     if artifact is None:
         return None
     return artifact.change_candidates
+
+
+def _step_provenance(executions: list[EvidenceBatchExecution]) -> list[ExecutedStepTrace]:
+    traces: list[ExecutedStepTrace] = []
+    for execution in executions:
+        for artifact in execution.artifacts:
+            if artifact.route_provenance is None:
+                continue
+            traces.append(
+                ExecutedStepTrace(
+                    batch_id=execution.batch_id,
+                    step_id=artifact.step_id,
+                    plane=artifact.plane,
+                    artifact_type=artifact.artifact_type,
+                    provenance=artifact.route_provenance,
+                )
+            )
+    return traces
 
 
 def align_target_with_primary_evidence(
@@ -108,6 +127,7 @@ def build_investigation_state(
             for execution in executions
             for step_id in execution.executed_step_ids
         ],
+        step_provenance=_step_provenance(executions),
     )
     return InvestigationState(
         incident=incident,
