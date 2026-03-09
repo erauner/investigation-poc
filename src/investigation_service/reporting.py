@@ -21,6 +21,7 @@ from .models import (
     InvestigationAnalysis,
     InvestigationPlan,
     InvestigationReport,
+    InvestigationReportingRequest,
     InvestigationReportRequest,
     InvestigationState,
     InvestigationTarget,
@@ -148,25 +149,54 @@ def update_investigation_plan(req: UpdateInvestigationPlanRequest) -> Investigat
     return planner.update_investigation_plan(req)
 
 
-def build_investigation_state(req: InvestigationReportRequest) -> InvestigationState:
+def _reporting_execution_context(
+    req: InvestigationReportRequest | InvestigationReportingRequest,
+    incident: BuildInvestigationPlanRequest,
+) -> tuple[InvestigationPlan, InvestigationPlan, list[EvidenceBatchExecution], bool]:
+    context = getattr(req, "execution_context", None)
+    if context is None:
+        plan = build_investigation_plan(incident)
+        return plan, plan, [], True
+
+    initial_plan = context.initial_plan or build_investigation_plan(incident)
+    return (
+        initial_plan,
+        context.updated_plan,
+        list(context.executions),
+        context.allow_bounded_fallback_execution,
+    )
+
+
+def build_investigation_state(req: InvestigationReportingRequest) -> InvestigationState:
     incident = _report_request_to_plan_request(req)
-    plan = build_investigation_plan(incident)
-    if plan.mode == "factual_analysis":
+    initial_plan, updated_plan, executions, allow_bounded_fallback_execution = _reporting_execution_context(req, incident)
+    if updated_plan.mode == "factual_analysis":
         raise ValueError("state-backed RCA analysis is not supported for factual_analysis plans")
-    if plan.target is None:
+    if updated_plan.target is None:
         raise ValueError("investigation plan did not produce a primary target")
-    execution = execute_investigation_step(
+    state = build_investigation_state_artifact(
+        incident=incident,
+        initial_plan=initial_plan,
+        updated_plan=updated_plan,
+        executions=executions,
+    )
+    if state.primary_evidence is not None or not allow_bounded_fallback_execution:
+        return state
+
+    fallback_execution = execute_investigation_step(
         ExecuteInvestigationStepRequest(
-            plan=plan,
+            plan=updated_plan,
             incident=incident,
         )
     )
-    updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=plan, execution=execution))
+    fallback_updated_plan = update_investigation_plan(
+        UpdateInvestigationPlanRequest(plan=updated_plan, execution=fallback_execution)
+    )
     return build_investigation_state_artifact(
         incident=incident,
-        initial_plan=plan,
-        updated_plan=updated_plan,
-        executions=[execution],
+        initial_plan=initial_plan,
+        updated_plan=fallback_updated_plan,
+        executions=[*executions, fallback_execution],
     )
 
 
@@ -326,11 +356,11 @@ def resolve_primary_target(req: InvestigationReportRequest) -> InvestigationTarg
     return planner.resolve_primary_target(req, _planner_deps())
 
 
-def rank_hypotheses(req: InvestigationReportRequest) -> InvestigationAnalysis:
+def rank_hypotheses(req: InvestigationReportingRequest) -> InvestigationAnalysis:
     return rank_hypotheses_from_state(build_investigation_state(req))
 
 
-def render_investigation_report(req: InvestigationReportRequest) -> InvestigationReport:
+def render_investigation_report(req: InvestigationReportingRequest) -> InvestigationReport:
     return render_investigation_report_from_state(
         build_investigation_state(req),
         include_related_data=req.include_related_data,

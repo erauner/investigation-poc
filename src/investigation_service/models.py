@@ -324,6 +324,17 @@ class InvestigationReportRequest(BaseModel):
     node_name: str | None = Field(default=None, description="Optional node override for alert-shaped node investigations")
 
 
+class ReportingExecutionContext(BaseModel):
+    updated_plan: InvestigationPlan
+    executions: list[EvidenceBatchExecution] = Field(default_factory=list)
+    initial_plan: InvestigationPlan | None = None
+    allow_bounded_fallback_execution: bool = True
+
+
+class InvestigationReportingRequest(InvestigationReportRequest):
+    execution_context: ReportingExecutionContext | None = None
+
+
 class AlertInvestigationReportRequest(BaseModel):
     alertname: str = Field(..., description="Alert name")
     labels: dict[str, str] = Field(default_factory=dict, description="Alert labels")

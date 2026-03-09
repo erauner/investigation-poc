@@ -9,9 +9,11 @@ from investigation_service.models import (
     Hypothesis,
     InvestigationAnalysis,
     InvestigationPlan,
+    InvestigationReportingRequest,
     InvestigationReportRequest,
     InvestigationTarget,
     PlanStep,
+    ReportingExecutionContext,
     StepRouteProvenance,
     StepArtifact,
     TargetRef,
@@ -449,3 +451,113 @@ def test_render_investigation_report_preserves_alert_artifact_evidence(monkeypat
     assert any("requested pod/crashy" in item for item in report.evidence)
     assert any("Resolved runtime target: pod/crashy-abc123" in item for item in report.evidence)
     assert any("crashy-abc123" in item for item in report.evidence)
+
+
+def test_build_investigation_state_reuses_reconciled_execution_context_without_fallback(monkeypatch) -> None:
+    plan = _plan().model_copy(update={"active_batch_id": None})
+    execution = _execution()
+
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    monkeypatch.setattr(
+        reporting,
+        "execute_investigation_step",
+        lambda _req: (_ for _ in ()).throw(AssertionError("fallback execution should not run")),
+    )
+
+    state = reporting.build_investigation_state(
+        InvestigationReportingRequest(
+            target="service/api",
+            profile="service",
+            execution_context=ReportingExecutionContext(
+                updated_plan=plan,
+                executions=[execution],
+            ),
+        )
+    )
+
+    assert state.primary_evidence is not None
+    assert state.executions == [execution]
+    assert state.tool_path_trace is not None
+    assert state.tool_path_trace.executed_batch_ids == ["batch-1"]
+
+
+def test_build_investigation_state_adds_one_bounded_fallback_when_needed(monkeypatch) -> None:
+    calls = {"execute": 0}
+
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+
+    def fake_execute(_req):
+        calls["execute"] += 1
+        return _execution()
+
+    monkeypatch.setattr(reporting, "execute_investigation_step", fake_execute)
+    monkeypatch.setattr(
+        reporting,
+        "update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
+    )
+
+    state = reporting.build_investigation_state(
+        InvestigationReportingRequest(
+            target="service/api",
+            profile="service",
+            execution_context=ReportingExecutionContext(
+                updated_plan=_plan(),
+                executions=[],
+            ),
+        )
+    )
+
+    assert calls["execute"] == 1
+    assert state.primary_evidence is not None
+    assert [execution.batch_id for execution in state.executions] == ["batch-1"]
+
+
+def test_build_investigation_state_respects_disabled_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    monkeypatch.setattr(
+        reporting,
+        "execute_investigation_step",
+        lambda _req: (_ for _ in ()).throw(AssertionError("fallback execution should stay disabled")),
+    )
+
+    state = reporting.build_investigation_state(
+        InvestigationReportingRequest(
+            target="service/api",
+            profile="service",
+            execution_context=ReportingExecutionContext(
+                updated_plan=_plan(),
+                executions=[],
+                allow_bounded_fallback_execution=False,
+            ),
+        )
+    )
+
+    assert state.primary_evidence is None
+    assert state.executions == []
+
+
+def test_render_investigation_report_uses_reconciled_execution_context(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    monkeypatch.setattr(
+        reporting,
+        "execute_investigation_step",
+        lambda _req: (_ for _ in ()).throw(AssertionError("fallback execution should not run")),
+    )
+    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
+
+    report = reporting.render_investigation_report(
+        InvestigationReportingRequest(
+            target="service/api",
+            profile="service",
+            include_related_data=False,
+            execution_context=ReportingExecutionContext(
+                updated_plan=_plan().model_copy(update={"active_batch_id": None}),
+                executions=[_execution()],
+            ),
+        )
+    )
+
+    assert report.diagnosis == "Service instability"
+    assert report.tool_path_trace is not None
+    assert report.tool_path_trace.executed_step_ids == ["collect-target-evidence"]

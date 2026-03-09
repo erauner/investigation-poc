@@ -14,6 +14,7 @@ from .models import (
     InvestigationAnalysis,
     InvestigationPlan,
     InvestigationReport,
+    InvestigationReportingRequest,
     InvestigationReportRequest,
     InvestigationTarget,
     SubmitEvidenceArtifactsRequest,
@@ -93,12 +94,12 @@ def find_unhealthy_single(req: FindUnhealthyPodRequest) -> UnhealthyPodResponse:
 
 
 @app.post("/tools/rank_hypotheses", response_model=InvestigationAnalysis)
-def rank_analysis(req: InvestigationReportRequest) -> InvestigationAnalysis:
+def rank_analysis(req: InvestigationReportingRequest) -> InvestigationAnalysis:
     return rank_hypotheses_from_request(req)
 
 
 @app.post("/tools/render_investigation_report", response_model=InvestigationReport)
-def render_report(req: InvestigationReportRequest) -> InvestigationReport:
+def render_report(req: InvestigationReportingRequest) -> InvestigationReport:
     return render_investigation_report(req)
 
 

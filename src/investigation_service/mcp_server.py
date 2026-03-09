@@ -13,6 +13,7 @@ from .models import (
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     GetActiveEvidenceBatchRequest,
+    InvestigationReportingRequest,
     InvestigationReportRequest,
     SubmitEvidenceArtifactsRequest,
     UpdateInvestigationPlanRequest,
@@ -251,10 +252,11 @@ def rank_hypotheses(
     labels: dict[str, str] | None = None,
     annotations: dict[str, str] | None = None,
     node_name: str | None = None,
+    execution_context: dict | None = None,
 ) -> dict:
     """Analyze collected investigation evidence and return ranked hypotheses without rendering the final report."""
     response = rank_hypotheses_impl(
-        InvestigationReportRequest(
+        InvestigationReportingRequest(
             cluster=cluster,
             namespace=namespace,
             target=target,
@@ -265,6 +267,7 @@ def rank_hypotheses(
             labels=labels or {},
             annotations=annotations or {},
             node_name=node_name,
+            execution_context=execution_context,
         )
     )
     return response.model_dump(mode="json")
@@ -286,10 +289,11 @@ def render_investigation_report(
     labels: dict[str, str] | None = None,
     annotations: dict[str, str] | None = None,
     node_name: str | None = None,
+    execution_context: dict | None = None,
 ) -> dict:
     """Render the final investigation report from the staged artifact-oriented pipeline."""
     response = render_investigation_report_impl(
-        InvestigationReportRequest(
+        InvestigationReportingRequest(
             cluster=cluster,
             namespace=namespace,
             target=target,
@@ -304,6 +308,7 @@ def render_investigation_report(
             labels=labels or {},
             annotations=annotations or {},
             node_name=node_name,
+            execution_context=execution_context,
         )
     )
     return response.model_dump(mode="json")

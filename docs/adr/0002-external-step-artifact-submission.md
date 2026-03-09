@@ -84,6 +84,13 @@ The key shift is:
 
 > Treat peer evidence execution as a first-class submitted artifact flow, not as an implicit backend implementation detail.
 
+This direction is now partially implemented:
+
+- the control plane can expose the active evidence batch as an execution-facing contract
+- externally gathered step artifacts can be submitted and reconciled into canonical planner artifacts
+- mixed batches can complete incrementally, with planner-owned steps remaining pending
+- the canonical reporting path can now consume reconciled executions before using bounded internal fallback
+
 This ADR also sets the intended sequencing for a future adapter-facing result envelope:
 
 - first establish external step-artifact submission and reconciliation

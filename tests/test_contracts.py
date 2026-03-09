@@ -24,6 +24,7 @@ from investigation_service.models import (
     InvestigationAnalysis,
     InvestigationPlan,
     InvestigationReport,
+    InvestigationReportingRequest,
     InvestigationReportRequest,
     InvestigationTarget,
     SubmitEvidenceArtifactsRequest,
@@ -967,6 +968,63 @@ def test_render_investigation_report_route_returns_typed_report(monkeypatch) -> 
     body = response.json()
     assert body["target"] == "pod/crashy-abc123"
     assert body["diagnosis"] == "Crash Loop Detected"
+
+
+def test_render_investigation_report_route_accepts_execution_context(monkeypatch) -> None:
+    captured = {}
+
+    def fake_render(req: InvestigationReportingRequest) -> InvestigationReport:
+        captured["execution_context"] = req.execution_context
+        return InvestigationReport(
+            cluster="test-cluster",
+            scope="service",
+            target="service/api",
+            diagnosis="High Service Latency",
+            confidence="medium",
+            evidence=["Latency evidence"],
+            evidence_items=[],
+            related_data=[],
+            limitations=[],
+            recommended_next_step="Check the upstream dependency.",
+        )
+
+    monkeypatch.setattr("investigation_service.main.render_investigation_report", fake_render)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/render_investigation_report",
+        json={
+            "target": "service/api",
+            "profile": "service",
+            "execution_context": {
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": {
+                        "source": "manual",
+                        "scope": "service",
+                        "cluster": "test-cluster",
+                        "namespace": "default",
+                        "requested_target": "service/api",
+                        "target": "service/api",
+                        "service_name": "api",
+                        "profile": "service",
+                        "lookback_minutes": 15,
+                        "normalization_notes": [],
+                    },
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": False,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["execution_context"] is not None
+    assert captured["execution_context"].allow_bounded_fallback_execution is False
 
 
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:

@@ -384,7 +384,7 @@ What is still open in Slice 8:
 
 ### Slice 9: External Evidence Handoff And Reconciliation
 
-Status: Proposed
+Status: In Progress
 
 Goal:
 
@@ -402,6 +402,20 @@ Planner/reconciler responsibilities should remain product-owned:
 - update the plan
 - rank hypotheses
 - render the final report
+
+Delivered so far:
+
+- active evidence batches are now exposed as execution-facing contracts
+- externally gathered step artifacts can now be submitted and reconciled into canonical `StepArtifact` and `EvidenceBatchExecution` records
+- mixed batches now preserve pending planner-owned steps instead of forcing whole-batch completion
+- `execute_investigation_step(...)` now behaves as bounded fallback over the remaining pending steps
+- canonical reporting can now consume reconciled executions before falling back to one bounded internal execution when primary evidence is still missing
+
+Still open in this slice:
+
+- the normal orchestrated runtime still needs to prefer the submission path intentionally rather than treating fallback execution as the easiest default
+- report/rank flows should grow stronger end-to-end coverage for externally submitted plus planner-owned mixed batches
+- target resolution still needs to grow a more explicit subject-to-target-to-execution-target contract rather than relying on the current transitional target model alone
 
 In this slice, target resolution should remain product-owned but should become more operationally explicit.
 
