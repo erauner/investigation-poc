@@ -16,7 +16,9 @@ Use the `mcp__kagent__invoke_agent` tool.
 - If the user supplied an explicit alert phrase such as `Investigate alert PodCrashLooping ...`, set the wrapper header to:
   `[INVESTIGATION_ENTRYPOINT]=alert`
   `Use the planner-led investigation flow for alert handling.`
-  `After extracting alert facts, build_investigation_plan, seed execution_context from the built plan, and prefer advance_investigation_runtime for exactly one active evidence batch.`
+  `After extracting alert facts, build_investigation_plan, call get_active_evidence_batch, satisfy externally preferred evidence steps with peer evidence-plane tools, and submit them with submit_evidence_step_artifacts before advancing the batch.`
+  `Seed execution_context from the built plan, then prefer advance_investigation_runtime only after the external-preferred steps for that active batch have been submitted or when the batch is planner-owned only.`
+  `Call advance_investigation_runtime with incident=<same build request> and execution_context=<seeded or returned execution_context>; do not call it with only batch_id.`
   `If advance_investigation_runtime returns a next_active_batch that clearly asks for one more bounded follow-up evidence batch, advance it once more.`
   `Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path.`
   `Use render_investigation_report late as the canonical final report tool.`
@@ -33,7 +35,10 @@ Use the `mcp__kagent__invoke_agent` tool.
   `[INVESTIGATION_ENTRYPOINT]=generic`
   `Use the planner-led investigation flow.`
   `If the target is vague or operator-backed, resolve it first with resolve_primary_target.`
-  `Then build_investigation_plan, seed execution_context from the built plan, and prefer advance_investigation_runtime for exactly one active evidence batch.`
+  `If the request only says the unhealthy pod in a namespace, use Kubernetes MCP to identify the concrete unhealthy pod first, then continue with the planner-led control-plane path using that target.`
+  `Then build_investigation_plan, call get_active_evidence_batch, satisfy externally preferred evidence steps with peer evidence-plane tools, and submit them with submit_evidence_step_artifacts before advancing the batch.`
+  `Seed execution_context from the built plan, then prefer advance_investigation_runtime only after the external-preferred steps for that active batch have been submitted or when the batch is planner-owned only.`
+  `Call advance_investigation_runtime with incident=<same build request> and execution_context=<seeded or returned execution_context>; do not call it with only batch_id.`
   `If advance_investigation_runtime returns a next_active_batch that clearly asks for one more bounded follow-up evidence batch, advance it once more.`
   `Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path.`
   `Use render_investigation_report late as the canonical final report tool.`

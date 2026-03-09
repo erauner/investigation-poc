@@ -58,8 +58,10 @@ Across clients, `Investigate` should preserve these semantics:
 For backend tool surfaces, prefer the planner-led control plane when available:
 
 - generic targeted investigations should prefer `resolve_primary_target`, `build_investigation_plan`, `advance_investigation_runtime`, and `render_investigation_report`
+- generic targeted investigations should prefer `resolve_primary_target`, `build_investigation_plan`, `get_active_evidence_batch`, `submit_evidence_step_artifacts`, `advance_investigation_runtime`, and `render_investigation_report`
 - alert-shaped investigations should preserve alert routing, but still treat `render_investigation_report` as the canonical final report surface
 - `advance_investigation_runtime` is the preferred runtime-progress step after plan creation and should carry forward `execution_context` into any bounded follow-up advance or final render
+- when the active batch includes externally preferred evidence steps, callers should first use `get_active_evidence_batch`, satisfy those steps with peer evidence-plane tools, submit them with `submit_evidence_step_artifacts`, and only then advance the batch
 - `execute_investigation_step` and `update_investigation_plan` remain lower-level fallback/debug seams rather than the preferred runtime-progress path
 - direct logs, events, resource inspection, metrics queries, alert queries, and exemplar lookups should be treated as evidence-plane work, not as replacements for planning or final rendering
 

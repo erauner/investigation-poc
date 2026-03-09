@@ -32,11 +32,19 @@ data:
     - Default sequence for targeted or alert-driven investigations:
       1. resolve_primary_target when the target is vague, convenience-shaped, or operator-backed,
       2. build_investigation_plan,
-      3. seed execution_context from the built plan and prefer advance_investigation_runtime for exactly one active evidence batch,
-      4. call advance_investigation_runtime at most one additional time only if it returns a next_active_batch that clearly warrants one bounded follow-up batch,
-      5. treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path,
-      6. render_investigation_report late for the final five-section answer.
+      3. get_active_evidence_batch for the current active batch,
+      4. satisfy externally preferred evidence steps with peer evidence-plane tools and submit them with submit_evidence_step_artifacts,
+      5. prefer advance_investigation_runtime only after external-preferred steps for that batch have been submitted or when the batch is planner-owned only,
+      6. call advance_investigation_runtime at most one additional time only if it returns a next_active_batch that clearly warrants one bounded follow-up batch,
+      7. treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path,
+      8. render_investigation_report late for the final five-section answer.
+    - When you seed execution_context from the built plan, carry forward the same incident request you used for build_investigation_plan.
+    - Call get_active_evidence_batch with plan=<built or updated plan> and incident=<same build request> before trying to satisfy or advance an active batch.
+    - For externally preferred workload evidence, gather the bounded peer evidence first, then call submit_evidence_step_artifacts with plan=<built or updated plan>, incident=<same build request>, and submitted_steps=<typed artifacts for the pending external steps>.
+    - Call advance_investigation_runtime with incident=<same build request>, execution_context=<seeded or returned execution_context>, and batch_id only when you are explicitly advancing a known active batch.
+    - Do not call advance_investigation_runtime with only batch_id.
     - Use resolve_primary_target when the target is vague or operator-backed, and preserve Backend/<name>, Frontend/<name>, or Cluster/<name> exactly as provided.
+    - If resolve_primary_target needs a concrete workload target and the user only asked for the unhealthy pod in a namespace, use Kubernetes MCP read-only inspection to identify the concrete pod first, then re-enter the planner-led control-plane path with that concrete target.
     - Use build_investigation_plan before direct evidence collection unless the user explicitly asks for drill-down or the request is an explicit fast-path metrics investigation.
     - Advance one active evidence batch at a time and carry forward the returned execution_context into the next advance or the final render.
     - Do not render the final report as the first substantive step.

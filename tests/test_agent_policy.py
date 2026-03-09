@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_INVESTIGATION_AGENT_TOOLS = {
     "resolve_primary_target",
     "build_investigation_plan",
+    "get_active_evidence_batch",
+    "submit_evidence_step_artifacts",
     "advance_investigation_runtime",
     "execute_investigation_step",
     "update_investigation_plan",
@@ -71,12 +73,15 @@ BANNED_PROMPT_PHRASES = (
 
 PLANNER_LED_REQUIRED_PHRASES = (
     "build_investigation_plan",
+    "get_active_evidence_batch",
+    "submit_evidence_step_artifacts",
     "advance_investigation_runtime",
     "execute_investigation_step",
     "update_investigation_plan",
     "fallback/debug primitives",
     "Advance one active evidence batch at a time",
     "Do not render the final report as the first substantive step.",
+    "Do not call advance_investigation_runtime with only batch_id.",
 )
 
 ALERT_CONTEXT_REQUIRED_PHRASE = (
@@ -157,11 +162,14 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
     ]
     required_phrases = [
         "build_investigation_plan",
+        "get_active_evidence_batch",
+        "submit_evidence_step_artifacts",
         "advance_investigation_runtime",
         "execute_investigation_step",
         "update_investigation_plan",
         "render_investigation_report",
         "fallback/debug primitives",
+        "do not call it with only batch_id",
     ]
     banned_phrases = [
         "build_investigation_report",

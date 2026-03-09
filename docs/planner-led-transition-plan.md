@@ -411,11 +411,17 @@ Delivered so far:
 - `execute_investigation_step(...)` now behaves as bounded fallback over the remaining pending steps
 - canonical reporting can now consume reconciled executions before falling back to one bounded internal execution when primary evidence is still missing
 - a canonical runtime-progress helper can now advance one active batch by reconciling submitted external evidence first and then auto-running only the remaining same-batch planner-owned steps
+- the agent-visible allowlist and taught wrappers now include:
+  - `get_active_evidence_batch`
+  - `submit_evidence_step_artifacts`
+  - `advance_investigation_runtime`
 
 Still open in this slice:
 
 - the normal orchestrated runtime still needs to prefer the submission path intentionally rather than treating fallback execution as the easiest default
-- the agent-visible allowlist, prompts, wrappers, and validation lanes still need to teach `advance_investigation_runtime` as the preferred runtime-progress surface
+- live validation now shows the fine-grained handoff tools are still too choreography-heavy to be the only preferred agent-facing happy path
+- the agent understands the intended sequence conceptually, but still mis-shapes low-level arguments such as `plan`, `incident`, `submitted_steps`, and `execution_context`
+- the next sub-slice should add a higher-level batch handoff helper above the fine-grained primitives while keeping those primitives available for adapters, testing, and debugging
 - report/rank flows should grow stronger end-to-end coverage for externally submitted plus planner-owned mixed batches
 - target resolution still needs to grow a more explicit subject-to-target-to-execution-target contract rather than relying on the current transitional target model alone
 
@@ -565,15 +571,19 @@ Why:
 - the deletion pass is complete, so the remaining risk is behavior quality rather than surface sprawl
 - real-cluster diagnosis quality has already improved, but the slice is not complete yet
 - observability now shows that peer tool usage is part of the runtime story and still needs better attribution
-- once Slice 8 observability is good enough, the next highest-leverage move is explicit external evidence handoff, reconciliation, and runtime adoption of `advance_investigation_runtime`
+- once Slice 8 observability is good enough, the next highest-leverage move is explicit external evidence handoff, reconciliation, runtime adoption of `advance_investigation_runtime`, and then a higher-level batch handoff helper for agent reliability
 
 Implementation order after current Slice 8 work:
 
 1. expose active evidence batches as execution-facing contracts
 2. add typed submitted-step-artifact reconciliation
 3. add the canonical runtime-progress helper and keep `execute_investigation_step(...)` as bounded fallback during transition
-4. update the agent-visible contract, wrappers, and validation prompts so `advance_investigation_runtime` is the taught default
-5. add `InvestigationOutcome` only after reconciled execution becomes canonical
+4. keep the fine-grained primitives available for adapters, testing, and debugging:
+   - `get_active_evidence_batch`
+   - `submit_evidence_step_artifacts`
+   - `advance_investigation_runtime`
+5. add a higher-level batch handoff helper for the preferred agent-facing runtime path so the model does not have to reconstruct low-level orchestration repeatedly
+6. add `InvestigationOutcome` only after reconciled execution becomes canonical
 
 As part of Slice 9, make target resolution intentionally feed execution-facing target details into the active evidence batch contract rather than remaining only an internal normalization step.
 

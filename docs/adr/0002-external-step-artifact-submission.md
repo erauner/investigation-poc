@@ -99,6 +99,18 @@ This ADR also sets the intended sequencing for a future adapter-facing result en
 
 `InvestigationOutcome` is still desirable, but it is not the next foundational contract. The evidence-step handoff is.
 
+Recent live validation refines that conclusion further.
+
+The fine-grained handoff primitives are now correct enough to serve as canonical building blocks, but they are still too choreography-heavy to be the only preferred agent-facing runtime path.
+
+In practice, live runs still frequently mis-shape calls such as:
+
+- `get_active_evidence_batch(plan=..., incident=..., batch_id=...)`
+- `submit_evidence_step_artifacts(plan=..., incident=..., submitted_steps=..., batch_id=...)`
+- `advance_investigation_runtime(incident=..., execution_context=..., submitted_steps=..., batch_id=...)`
+
+The result is that the low-level contract is valuable for adapters, testing, and debugging, but the preferred agent-facing path should converge on a higher-level batch handoff helper above these primitives.
+
 ## Role Model
 
 The target architecture should be understood as three cooperating roles.
@@ -263,6 +275,23 @@ Likely tool ownership remains:
 
 Alert extraction remains transitional and product-owned for now.
 
+The fine-grained control-plane toolbox now includes:
+
+- `get_active_evidence_batch`
+- `submit_evidence_step_artifacts`
+- `advance_investigation_runtime`
+
+These should remain available as canonical low-level building blocks for adapters, testing, and debugging.
+
+However, live validation now shows they should not remain the only preferred agent-facing happy path.
+
+The preferred agent-facing runtime surface should converge on a higher-level helper that:
+
+1. prepares the current active batch with planner-owned state attached
+2. accepts externally satisfied evidence artifacts
+3. advances only the remaining same-batch planner-owned work
+4. returns updated execution context plus the next active batch when more evidence work remains
+
 ## Why
 
 This shift aligns the runtime with the architecture we already claim to have:
@@ -397,6 +426,7 @@ But it should not be introduced before the evidence-step handoff contract exists
 - peer evidence planes become operationally real rather than only advisory
 - provenance becomes actionable rather than merely diagnostic
 - the product layer remains the semantic owner without owning every evidence fetch
+- the low-level submission contract remains available for adapters and debugging while the preferred agent path can become simpler and more reliable
 
 ### Negative
 
@@ -405,6 +435,7 @@ But it should not be introduced before the evidence-step handoff contract exists
 - transition will temporarily require supporting both:
   - external artifact submission
   - internal helper fallback
+- the fine-grained primitives are not, by themselves, a reliable enough agent-facing happy path, so an additional higher-level helper is warranted
 
 ## Implementation Direction
 
@@ -415,6 +446,7 @@ The next implementation slice should likely do the following:
 3. extend plan update or add a dedicated submission route/tool for externally satisfied evidence steps
 4. keep `execute_investigation_step(...)` as bounded fallback execution during transition
 5. ensure final rendering consumes reconciled artifacts identically regardless of whether they were submitted externally or executed internally
+6. add a higher-level batch handoff helper above the fine-grained primitives so the preferred agent-facing path does not have to reconstruct low-level orchestration repeatedly
 
 The slice after that should likely introduce the adapter-facing `InvestigationOutcome` envelope on top of the now-honest reconciled state.
 
@@ -424,9 +456,11 @@ The intended order of implementation is:
 
 1. expose active evidence batches as execution-facing contracts
 2. add typed submitted-step-artifact reconciliation
-3. make external evidence submission the preferred path for workload, service, and node evidence
-4. keep internal helper execution as explicit bounded fallback during transition
-5. introduce the adapter-facing `InvestigationOutcome` envelope only after reconciled execution is canonical
+3. add a canonical runtime-progress helper on top of the fine-grained submission flow
+4. keep the fine-grained primitives available for adapters, testing, and debugging
+5. add a higher-level batch handoff helper for the preferred agent-facing runtime path
+6. keep internal helper execution as explicit bounded fallback during transition
+7. introduce the adapter-facing `InvestigationOutcome` envelope only after reconciled execution is canonical
 
 This work should also intentionally evolve target resolution so that active evidence steps carry not only a canonical investigation target, but also the concrete execution-facing target details required by the evidence gatherer.
 
