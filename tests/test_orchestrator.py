@@ -398,3 +398,60 @@ def test_run_orchestrated_investigation_attaches_resolved_concrete_pod_for_alert
 
     assert report.target == "pod/crashy-abc123"
     assert any("Resolved concrete crash-looping pod: pod/crashy-abc123" in item for item in report.evidence)
+
+
+def test_run_orchestrated_investigation_preserves_render_request_fields(monkeypatch) -> None:
+    incident = _incident()
+    captured = {}
+
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+
+    def fake_render(req, _execution_context):
+        captured["req"] = req
+        return InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="deployment/crashy",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=["evidence"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="next",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=[],
+            tool_path_trace=None,
+        )
+
+    monkeypatch.setattr(entrypoint, "render_report", fake_render)
+    monkeypatch.setattr(
+        entrypoint,
+        "find_unhealthy_pod",
+        lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})(),
+    )
+
+    run_orchestrated_investigation(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+            include_related_data=False,
+            correlation_window_minutes=123,
+            correlation_limit=7,
+            anchor_timestamp="2026-03-09T12:00:00Z",
+        )
+    )
+
+    preserved = captured["req"]
+    assert preserved.include_related_data is False
+    assert preserved.correlation_window_minutes == 123
+    assert preserved.correlation_limit == 7
+    assert preserved.anchor_timestamp == "2026-03-09T12:00:00Z"

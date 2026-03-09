@@ -5,6 +5,7 @@ from .models import (
     GetActiveEvidenceBatchRequest,
     InvestigationPlan,
     InvestigationReport,
+    InvestigationReportRequest,
     InvestigationReportingRequest,
     ReportingExecutionContext,
     SubmittedStepArtifact,
@@ -84,12 +85,12 @@ def advance_batch(
 
 
 def render_report(
-    incident: BuildInvestigationPlanRequest,
+    req: InvestigationReportRequest,
     execution_context: ReportingExecutionContext,
 ) -> InvestigationReport:
     return render_investigation_report(
         InvestigationReportingRequest(
-            **incident.model_dump(mode="python"),
+            **req.model_dump(mode="python"),
             execution_context=execution_context,
         )
     )

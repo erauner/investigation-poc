@@ -109,5 +109,5 @@ def run_orchestrated_investigation(
         execution_context = advance_response.execution_context
         remaining_batch_budget -= 1
 
-    report = render_report(incident, execution_context)
+    report = render_report(req, execution_context)
     return _maybe_attach_resolved_pod_context(req, report)

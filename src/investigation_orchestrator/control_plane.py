@@ -3,6 +3,7 @@ from investigation_service.models import (
     AdvanceInvestigationRuntimeResponse,
     BuildInvestigationPlanRequest,
     InvestigationReport,
+    InvestigationReportRequest,
     ReportingExecutionContext,
     SubmittedStepArtifact,
 )
@@ -45,7 +46,7 @@ def advance_batch(
 
 
 def render_report(
-    incident: BuildInvestigationPlanRequest,
+    req: InvestigationReportRequest,
     execution_context: ReportingExecutionContext,
 ) -> InvestigationReport:
-    return runtime_api.render_report(incident, execution_context)
+    return runtime_api.render_report(req, execution_context)
