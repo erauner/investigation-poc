@@ -1,0 +1,16 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: incident-triage-adk
+  namespace: kagent
+spec:
+  description: Canary BYO ADK investigation agent that runs the alert handoff loop in code.
+  type: BYO
+  byo:
+    deployment:
+      image: investigation-adk-agent:local
+      env:
+        - name: KAGENT_URL
+          value: http://kagent-controller.kagent.svc.cluster.local:8083
+        - name: A2A_MAX_CONTENT_LENGTH
+          value: "10485760"
