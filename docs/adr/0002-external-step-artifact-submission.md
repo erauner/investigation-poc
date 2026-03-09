@@ -292,6 +292,8 @@ The preferred agent-facing runtime surface should converge on a higher-level hel
 3. advances only the remaining same-batch planner-owned work
 4. returns updated execution context plus the next active batch when more evidence work remains
 
+That higher-level helper now belongs in the intended direction of this ADR as the preferred agent-facing runtime surface, while the fine-grained primitives remain canonical lower-level seams.
+
 ## Why
 
 This shift aligns the runtime with the architecture we already claim to have:

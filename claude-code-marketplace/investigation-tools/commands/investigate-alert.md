@@ -12,12 +12,13 @@ Use the `mcp__kagent__invoke_agent` tool.
 - Wrapper header:
   `[INVESTIGATION_ENTRYPOINT]=alert`
   `Use the planner-led investigation flow for alert handling.`
-  `After extracting alert facts, build_investigation_plan, call get_active_evidence_batch, satisfy externally preferred evidence steps with peer evidence-plane tools, and submit them with submit_evidence_step_artifacts before advancing the batch.`
-  `Seed execution_context from the built plan, then prefer advance_investigation_runtime only after the external-preferred steps for that active batch have been submitted or when the batch is planner-owned only.`
-  `Call advance_investigation_runtime with incident=<same build request> and execution_context=<seeded or returned execution_context>; do not call it with only batch_id.`
-  `If advance_investigation_runtime returns a next_active_batch that clearly asks for one more bounded follow-up evidence batch, advance it once more.`
-  `Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path.`
+  `After extracting alert facts, build_investigation_plan and prefer handoff_active_evidence_batch as the default runtime-progress helper.`
+  `Seed execution_context from the built plan, call handoff_active_evidence_batch with incident=<same build request> and execution_context=<seeded or returned execution_context>, and use the returned active_batch when external evidence still needs to be gathered.`
+  `If handoff_active_evidence_batch returns an active_batch with externally preferred steps, satisfy those bounded steps with peer evidence-plane tools and call handoff_active_evidence_batch again with submitted_steps=<typed artifacts for the pending external steps>.`
+  `If handoff_active_evidence_batch returns another active_batch that clearly asks for one more bounded follow-up evidence batch, hand it off once more.`
+  `Treat get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams, and treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives.`
   `Use render_investigation_report late as the canonical final report tool for the five-section response.`
+  `Use exactly these Markdown headings verbatim: ## Diagnosis, ## Evidence, ## Related Data, ## Limitations, ## Recommended next step.`
 - Add these instructions in the wrapper before the original request:
   `Treat the pasted content below as alert text to extract, not as a workload target string.`
   `Extract alertname, labels, annotations, namespace, pod, service, instance, severity, and status from the pasted alert text before using the planner-led investigation path.`
@@ -29,6 +30,7 @@ Use the `mcp__kagent__invoke_agent` tool.
   `Do not investigate the first freeform words of the pasted message as the target unless they are explicitly a Kubernetes object reference such as pod/<name> or service/<name>.`
   `If live runtime evidence disagrees with the alert payload, call out the mismatch explicitly as possible stale alert metadata or drift between alert time and current state.`
   `Preserve the original alert name and the resolved operational target name explicitly in the final five-section answer when they are present in the request or report evidence.`
+  `Also preserve the original alert-derived target string explicitly, such as pod/<name>, even if runtime resolution later points to a deployment or a specific replica pod.`
   `Return exactly these five sections and no extra appendix sections: Diagnosis, Evidence, Related Data, Limitations, Recommended next step.`
 - Preserve any alert details the user included in the original request, such as the alert name, namespace, pod, service, labels, or annotations.
 - Do not rewrite `Backend/<name>`, `Frontend/<name>`, or `Cluster/<name>` into alert names.

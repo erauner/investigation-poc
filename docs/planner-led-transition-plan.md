@@ -425,6 +425,11 @@ Still open in this slice:
 - report/rank flows should grow stronger end-to-end coverage for externally submitted plus planner-owned mixed batches
 - target resolution still needs to grow a more explicit subject-to-target-to-execution-target contract rather than relying on the current transitional target model alone
 
+Preferred direction inside the slice:
+
+- teach a higher-level batch handoff helper as the default agent-facing runtime surface
+- keep the fine-grained handoff tools available as lower-level seams for adapters, debugging, and explicit choreography
+
 In this slice, target resolution should remain product-owned but should become more operationally explicit.
 
 That means it should continue to preserve:

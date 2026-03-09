@@ -265,6 +265,19 @@ class AdvanceInvestigationRuntimeResponse(BaseModel):
     next_active_batch: "ActiveEvidenceBatchContract | None" = None
 
 
+class HandoffActiveEvidenceBatchRequest(BaseModel):
+    incident: BuildInvestigationPlanRequest
+    execution_context: "ReportingExecutionContext | None" = None
+    batch_id: str | None = None
+    submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
+
+
+class HandoffActiveEvidenceBatchResponse(BaseModel):
+    execution_context: "ReportingExecutionContext"
+    active_batch: "ActiveEvidenceBatchContract | None" = None
+    execution: EvidenceBatchExecution | None = None
+
+
 class CollectNodeContextRequest(BaseModel):
     cluster: str | None = Field(default=None, description="Logical cluster alias")
     node_name: str = Field(..., description="Cluster node name")

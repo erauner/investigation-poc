@@ -22,6 +22,8 @@ from investigation_service.models import (
     EvidenceBatchExecution,
     EvidenceItem,
     GetActiveEvidenceBatchRequest,
+    HandoffActiveEvidenceBatchRequest,
+    HandoffActiveEvidenceBatchResponse,
     Finding,
     InvestigationAnalysis,
     InvestigationPlan,
@@ -1098,6 +1100,103 @@ def test_advance_investigation_runtime_route_returns_execution_context(monkeypat
     assert response.status_code == 200
     assert captured["request"].incident.target == "service/api"
     assert response.json()["execution_context"]["allow_bounded_fallback_execution"] is False
+
+
+def test_handoff_active_evidence_batch_route_returns_actionable_batch_and_context(monkeypatch) -> None:
+    captured = {}
+
+    def fake_handoff(req: HandoffActiveEvidenceBatchRequest) -> HandoffActiveEvidenceBatchResponse:
+        captured["request"] = req
+        return HandoffActiveEvidenceBatchResponse(
+            execution_context={
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": {
+                        "source": "manual",
+                        "scope": "service",
+                        "cluster": "test-cluster",
+                        "namespace": "default",
+                        "requested_target": "service/api",
+                        "target": "service/api",
+                        "service_name": "api",
+                        "profile": "service",
+                        "lookback_minutes": 15,
+                        "normalization_notes": [],
+                    },
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": False,
+            },
+            active_batch={
+                "batch_id": "batch-1",
+                "title": "Initial evidence",
+                "intent": "Collect service evidence.",
+                "subject": {
+                    "source": "manual",
+                    "kind": "target",
+                    "summary": "Investigate service/api",
+                    "requested_target": "service/api",
+                    "alertname": None,
+                },
+                "canonical_target": {
+                    "source": "manual",
+                    "scope": "service",
+                    "cluster": "test-cluster",
+                    "namespace": "default",
+                    "requested_target": "service/api",
+                    "target": "service/api",
+                    "service_name": "api",
+                    "profile": "service",
+                    "lookback_minutes": 15,
+                    "normalization_notes": [],
+                },
+                "steps": [],
+            },
+            execution=None,
+        )
+
+    monkeypatch.setattr("investigation_service.main.handoff_active_evidence_batch_from_request", fake_handoff)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/handoff_active_evidence_batch",
+        json={
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service"},
+            "execution_context": {
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": {
+                        "source": "manual",
+                        "scope": "service",
+                        "cluster": "test-cluster",
+                        "namespace": "default",
+                        "requested_target": "service/api",
+                        "target": "service/api",
+                        "service_name": "api",
+                        "profile": "service",
+                        "lookback_minutes": 15,
+                        "normalization_notes": [],
+                    },
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": True,
+            },
+            "submitted_steps": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["request"].incident.target == "service/api"
+    assert response.json()["execution_context"]["allow_bounded_fallback_execution"] is False
+    assert response.json()["active_batch"]["batch_id"] == "batch-1"
 
 
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:

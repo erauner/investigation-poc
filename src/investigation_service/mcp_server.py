@@ -2,6 +2,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
+from .mcp_logging import run_logged_tool
 from .models import (
     AdvanceInvestigationRuntimeRequest,
     BuildInvestigationPlanRequest,
@@ -14,6 +15,7 @@ from .models import (
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     GetActiveEvidenceBatchRequest,
+    HandoffActiveEvidenceBatchRequest,
     InvestigationReportingRequest,
     InvestigationReportRequest,
     SubmitEvidenceArtifactsRequest,
@@ -24,6 +26,7 @@ from .correlation import collect_change_candidates as collect_change_candidates_
 from .reporting import build_investigation_plan as build_investigation_plan_impl
 from .reporting import execute_investigation_step as execute_investigation_step_impl
 from .reporting import get_active_evidence_batch as get_active_evidence_batch_impl
+from .reporting import handoff_active_evidence_batch as handoff_active_evidence_batch_impl
 from .reporting import rank_hypotheses as rank_hypotheses_impl
 from .reporting import render_investigation_report as render_investigation_report_impl
 from .reporting import resolve_primary_target as resolve_primary_target_impl
@@ -55,21 +58,35 @@ def normalize_alert_input(
     lookback_minutes: int = 15,
 ) -> dict:
     """Normalize alert-shaped input into a typed investigation request without collecting data. Use mainly for debugging or explicit routing inspection."""
-    response = normalize_alert_input_impl(
-        CollectAlertContextRequest(
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            cluster=cluster,
-            namespace=namespace,
-            node_name=node_name,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-        )
+    return run_logged_tool(
+        "normalize_alert_input",
+        {
+            "alertname": alertname,
+            "labels": labels or {},
+            "annotations": annotations or {},
+            "cluster": cluster,
+            "namespace": namespace,
+            "node_name": node_name,
+            "target": target,
+            "profile": profile,
+            "service_name": service_name,
+            "lookback_minutes": lookback_minutes,
+        },
+        lambda: normalize_alert_input_impl(
+            CollectAlertContextRequest(
+                alertname=alertname,
+                labels=labels or {},
+                annotations=annotations or {},
+                cluster=cluster,
+                namespace=namespace,
+                node_name=node_name,
+                target=target,
+                profile=profile,
+                service_name=service_name,
+                lookback_minutes=lookback_minutes,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -86,21 +103,35 @@ def resolve_primary_target(
     node_name: str | None = None,
 ) -> dict:
     """Resolve the primary investigation target, including convenience targets and vague workload expansion, without collecting evidence."""
-    response = resolve_primary_target_impl(
-        InvestigationReportRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            node_name=node_name,
-        )
+    return run_logged_tool(
+        "resolve_primary_target",
+        {
+            "target": target,
+            "cluster": cluster,
+            "namespace": namespace,
+            "profile": profile,
+            "service_name": service_name,
+            "lookback_minutes": lookback_minutes,
+            "alertname": alertname,
+            "labels": labels or {},
+            "annotations": annotations or {},
+            "node_name": node_name,
+        },
+        lambda: resolve_primary_target_impl(
+            InvestigationReportRequest(
+                cluster=cluster,
+                namespace=namespace,
+                target=target,
+                profile=profile,
+                service_name=service_name,
+                lookback_minutes=lookback_minutes,
+                alertname=alertname,
+                labels=labels or {},
+                annotations=annotations or {},
+                node_name=node_name,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -119,23 +150,39 @@ def build_investigation_plan(
     question: str | None = None,
 ) -> dict:
     """Build an explicit investigation plan without collecting evidence. Typically call this once before advance_investigation_runtime."""
-    response = build_investigation_plan_impl(
-        BuildInvestigationPlanRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            node_name=node_name,
-            objective=objective,
-            question=question,
-        )
+    return run_logged_tool(
+        "build_investigation_plan",
+        {
+            "target": target,
+            "cluster": cluster,
+            "namespace": namespace,
+            "profile": profile,
+            "service_name": service_name,
+            "lookback_minutes": lookback_minutes,
+            "alertname": alertname,
+            "labels": labels or {},
+            "annotations": annotations or {},
+            "node_name": node_name,
+            "objective": objective,
+            "question": question,
+        },
+        lambda: build_investigation_plan_impl(
+            BuildInvestigationPlanRequest(
+                cluster=cluster,
+                namespace=namespace,
+                target=target,
+                profile=profile,
+                service_name=service_name,
+                lookback_minutes=lookback_minutes,
+                alertname=alertname,
+                labels=labels or {},
+                annotations=annotations or {},
+                node_name=node_name,
+                objective=objective,
+                question=question,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -145,14 +192,17 @@ def execute_investigation_step(
     batch_id: str | None = None,
 ) -> dict:
     """Execute the remaining pending steps in one bounded evidence batch. This is a lower-level bounded fallback/debug primitive; prefer advance_investigation_runtime for normal orchestration."""
-    response = execute_investigation_step_impl(
-        ExecuteInvestigationStepRequest(
-            plan=plan,
-            incident=incident,
-            batch_id=batch_id,
-        )
+    return run_logged_tool(
+        "execute_investigation_step",
+        {"plan": plan, "incident": incident, "batch_id": batch_id},
+        lambda: execute_investigation_step_impl(
+            ExecuteInvestigationStepRequest(
+                plan=plan,
+                incident=incident,
+                batch_id=batch_id,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -166,14 +216,17 @@ def get_active_evidence_batch(plan: dict, incident: dict, batch_id: str | None =
 
     Do not call this tool with only batch_id.
     """
-    response = get_active_evidence_batch_impl(
-        GetActiveEvidenceBatchRequest(
-            plan=plan,
-            incident=incident,
-            batch_id=batch_id,
-        )
+    return run_logged_tool(
+        "get_active_evidence_batch",
+        {"plan": plan, "incident": incident, "batch_id": batch_id},
+        lambda: get_active_evidence_batch_impl(
+            GetActiveEvidenceBatchRequest(
+                plan=plan,
+                incident=incident,
+                batch_id=batch_id,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -193,15 +246,23 @@ def submit_evidence_step_artifacts(
 
     Use this after get_active_evidence_batch and before advance_investigation_runtime when the active batch still requires external evidence submission.
     """
-    response = submit_evidence_step_artifacts_impl(
-        SubmitEvidenceArtifactsRequest(
-            plan=plan,
-            incident=incident,
-            batch_id=batch_id,
-            submitted_steps=submitted_steps,
-        )
+    return run_logged_tool(
+        "submit_evidence_step_artifacts",
+        {
+            "plan": plan,
+            "incident": incident,
+            "submitted_steps": submitted_steps,
+            "batch_id": batch_id,
+        },
+        lambda: submit_evidence_step_artifacts_impl(
+            SubmitEvidenceArtifactsRequest(
+                plan=plan,
+                incident=incident,
+                batch_id=batch_id,
+                submitted_steps=submitted_steps,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -222,43 +283,103 @@ def advance_investigation_runtime(
     Do not call this tool with only batch_id.
     Prefer this only after external-preferred steps for the active batch have already been submitted, or when the batch is planner-owned only.
     """
-    response = advance_investigation_runtime_impl(
-        AdvanceInvestigationRuntimeRequest(
-            incident=incident,
-            execution_context=execution_context,
-            submitted_steps=submitted_steps or [],
-            batch_id=batch_id,
-        )
+    return run_logged_tool(
+        "advance_investigation_runtime",
+        {
+            "incident": incident,
+            "execution_context": execution_context,
+            "submitted_steps": submitted_steps or [],
+            "batch_id": batch_id,
+        },
+        lambda: advance_investigation_runtime_impl(
+            AdvanceInvestigationRuntimeRequest(
+                incident=incident,
+                execution_context=execution_context,
+                submitted_steps=submitted_steps or [],
+                batch_id=batch_id,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def handoff_active_evidence_batch(
+    incident: dict,
+    execution_context: dict | None = None,
+    submitted_steps: list[dict] | None = None,
+    batch_id: str | None = None,
+) -> dict:
+    """Preferred agent-facing runtime helper for one bounded evidence-batch handoff.
+
+    Required call shape:
+    - incident=<the same request shape used to build the plan>
+    - execution_context=<optional seeded or carried-forward runtime context>
+    - submitted_steps=<optional typed artifacts for externally satisfied pending steps>
+    - batch_id=<optional explicit batch id>
+
+    Behavior:
+    - on the first call, returns the current actionable active batch if external evidence is still required
+    - after submitted_steps are provided, reconciles them, auto-runs only remaining same-batch planner-owned steps, and returns updated execution_context
+    - returns active_batch=None when no more evidence batches remain
+
+    Prefer this over manually choreographing get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime.
+    """
+    return run_logged_tool(
+        "handoff_active_evidence_batch",
+        {
+            "incident": incident,
+            "execution_context": execution_context,
+            "submitted_steps": submitted_steps or [],
+            "batch_id": batch_id,
+        },
+        lambda: handoff_active_evidence_batch_impl(
+            HandoffActiveEvidenceBatchRequest(
+                incident=incident,
+                execution_context=execution_context,
+                submitted_steps=submitted_steps or [],
+                batch_id=batch_id,
+            )
+        ).model_dump(mode="json")
+    )
 
 
 @mcp.tool()
 def update_investigation_plan(plan: dict, execution: dict) -> dict:
     """Update plan state after one executed evidence batch. This is a lower-level fallback/debug primitive; prefer advance_investigation_runtime for normal orchestration."""
-    response = update_investigation_plan_impl(
-        UpdateInvestigationPlanRequest(
-            plan=plan,
-            execution=execution,
-        )
+    return run_logged_tool(
+        "update_investigation_plan",
+        {"plan": plan, "execution": execution},
+        lambda: update_investigation_plan_impl(
+            UpdateInvestigationPlanRequest(
+                plan=plan,
+                execution=execution,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
 def find_unhealthy_workloads(namespace: str, limit: int = 5, cluster: str | None = None) -> dict:
     """List concrete unhealthy pod targets in a namespace for debugging or exploratory routing inspection. Prefer resolve_primary_target for the planner-led path."""
-    response = find_unhealthy_workloads_impl(
-        FindUnhealthyWorkloadsRequest(cluster=cluster, namespace=namespace, limit=limit)
+    return run_logged_tool(
+        "find_unhealthy_workloads",
+        {"cluster": cluster, "namespace": namespace, "limit": limit},
+        lambda: find_unhealthy_workloads_impl(
+            FindUnhealthyWorkloadsRequest(cluster=cluster, namespace=namespace, limit=limit)
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
 def find_unhealthy_pod(namespace: str, cluster: str | None = None) -> dict:
     """Find the single best unhealthy pod candidate in a namespace for debugging or exploratory routing inspection. Prefer resolve_primary_target for the planner-led path."""
-    response = find_unhealthy_pod_impl(FindUnhealthyPodRequest(cluster=cluster, namespace=namespace))
-    return response.model_dump(mode="json")
+    return run_logged_tool(
+        "find_unhealthy_pod",
+        {"cluster": cluster, "namespace": namespace},
+        lambda: find_unhealthy_pod_impl(
+            FindUnhealthyPodRequest(cluster=cluster, namespace=namespace)
+        ).model_dump(mode="json"),
+    )
 
 
 @mcp.tool()
@@ -273,19 +394,31 @@ def collect_change_candidates(
     limit: int = 10,
 ) -> dict:
     """Collect ranked change candidates related to the current investigation target."""
-    response = collect_change_candidates_impl(
-        CollectCorrelatedChangesRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-            anchor_timestamp=anchor_timestamp,
-            limit=limit,
-        )
+    return run_logged_tool(
+        "collect_change_candidates",
+        {
+            "target": target,
+            "cluster": cluster,
+            "namespace": namespace,
+            "profile": profile,
+            "service_name": service_name,
+            "lookback_minutes": lookback_minutes,
+            "anchor_timestamp": anchor_timestamp,
+            "limit": limit,
+        },
+        lambda: collect_change_candidates_impl(
+            CollectCorrelatedChangesRequest(
+                cluster=cluster,
+                namespace=namespace,
+                target=target,
+                profile=profile,
+                service_name=service_name,
+                lookback_minutes=lookback_minutes,
+                anchor_timestamp=anchor_timestamp,
+                limit=limit,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -303,22 +436,37 @@ def rank_hypotheses(
     execution_context: dict | None = None,
 ) -> dict:
     """Analyze collected investigation evidence and return ranked hypotheses without rendering the final report."""
-    response = rank_hypotheses_impl(
-        InvestigationReportingRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            node_name=node_name,
-            execution_context=execution_context,
-        )
+    return run_logged_tool(
+        "rank_hypotheses",
+        {
+            "target": target,
+            "cluster": cluster,
+            "namespace": namespace,
+            "profile": profile,
+            "service_name": service_name,
+            "lookback_minutes": lookback_minutes,
+            "alertname": alertname,
+            "labels": labels or {},
+            "annotations": annotations or {},
+            "node_name": node_name,
+            "execution_context": execution_context,
+        },
+        lambda: rank_hypotheses_impl(
+            InvestigationReportingRequest(
+                cluster=cluster,
+                namespace=namespace,
+                target=target,
+                profile=profile,
+                service_name=service_name,
+                lookback_minutes=lookback_minutes,
+                alertname=alertname,
+                labels=labels or {},
+                annotations=annotations or {},
+                node_name=node_name,
+                execution_context=execution_context,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -340,26 +488,45 @@ def render_investigation_report(
     execution_context: dict | None = None,
 ) -> dict:
     """Render the final investigation report from the staged artifact-oriented pipeline. Prefer passing execution_context from advance_investigation_runtime when available."""
-    response = render_investigation_report_impl(
-        InvestigationReportingRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-            include_related_data=include_related_data,
-            correlation_window_minutes=correlation_window_minutes,
-            correlation_limit=correlation_limit,
-            anchor_timestamp=anchor_timestamp,
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            node_name=node_name,
-            execution_context=execution_context,
-        )
+    return run_logged_tool(
+        "render_investigation_report",
+        {
+            "target": target,
+            "cluster": cluster,
+            "namespace": namespace,
+            "profile": profile,
+            "service_name": service_name,
+            "lookback_minutes": lookback_minutes,
+            "include_related_data": include_related_data,
+            "correlation_window_minutes": correlation_window_minutes,
+            "correlation_limit": correlation_limit,
+            "anchor_timestamp": anchor_timestamp,
+            "alertname": alertname,
+            "labels": labels or {},
+            "annotations": annotations or {},
+            "node_name": node_name,
+            "execution_context": execution_context,
+        },
+        lambda: render_investigation_report_impl(
+            InvestigationReportingRequest(
+                cluster=cluster,
+                namespace=namespace,
+                target=target,
+                profile=profile,
+                service_name=service_name,
+                lookback_minutes=lookback_minutes,
+                include_related_data=include_related_data,
+                correlation_window_minutes=correlation_window_minutes,
+                correlation_limit=correlation_limit,
+                anchor_timestamp=anchor_timestamp,
+                alertname=alertname,
+                labels=labels or {},
+                annotations=annotations or {},
+                node_name=node_name,
+                execution_context=execution_context,
+            )
+        ).model_dump(mode="json")
     )
-    return response.model_dump(mode="json")
 
 
 if __name__ == "__main__":

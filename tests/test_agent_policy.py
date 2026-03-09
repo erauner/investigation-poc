@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_INVESTIGATION_AGENT_TOOLS = {
     "resolve_primary_target",
     "build_investigation_plan",
+    "handoff_active_evidence_batch",
     "get_active_evidence_batch",
     "submit_evidence_step_artifacts",
     "advance_investigation_runtime",
@@ -73,6 +74,7 @@ BANNED_PROMPT_PHRASES = (
 
 PLANNER_LED_REQUIRED_PHRASES = (
     "build_investigation_plan",
+    "handoff_active_evidence_batch",
     "get_active_evidence_batch",
     "submit_evidence_step_artifacts",
     "advance_investigation_runtime",
@@ -81,7 +83,8 @@ PLANNER_LED_REQUIRED_PHRASES = (
     "fallback/debug primitives",
     "Advance one active evidence batch at a time",
     "Do not render the final report as the first substantive step.",
-    "Do not call advance_investigation_runtime with only batch_id.",
+    "fine-grained runtime seams",
+    "## Recommended next step",
 )
 
 ALERT_CONTEXT_REQUIRED_PHRASE = (
@@ -162,6 +165,7 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
     ]
     required_phrases = [
         "build_investigation_plan",
+        "handoff_active_evidence_batch",
         "get_active_evidence_batch",
         "submit_evidence_step_artifacts",
         "advance_investigation_runtime",
@@ -169,7 +173,7 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
         "update_investigation_plan",
         "render_investigation_report",
         "fallback/debug primitives",
-        "do not call it with only batch_id",
+        "fine-grained runtime seams",
     ]
     banned_phrases = [
         "build_investigation_report",

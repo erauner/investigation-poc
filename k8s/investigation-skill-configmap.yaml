@@ -28,20 +28,24 @@ data:
     - When the alert payload alone does not prove the root cause, say so clearly and phrase any explanation as a likely interpretation rather than a confirmed diagnosis.
     - Do not claim that an alert resolved for a specific operational reason unless that reason is supported by the extracted alert fields or tool evidence.
     - For alert-shaped investigations, preserve the original alert name and the resolved operational target name explicitly in the final five-section answer when they are present in the request or report evidence.
+    - For alert-shaped investigations, also preserve the original alert-derived target string explicitly, such as `pod/<name>`, even when the runtime investigation later resolves to a deployment or a specific replica pod.
     - Prefer the canonical planner-led control-plane tools for orchestration, target resolution, plan updates, hypothesis ranking, and final rendering.
     - Default sequence for targeted or alert-driven investigations:
       1. resolve_primary_target when the target is vague, convenience-shaped, or operator-backed,
       2. build_investigation_plan,
-      3. get_active_evidence_batch for the current active batch,
-      4. satisfy externally preferred evidence steps with peer evidence-plane tools and submit them with submit_evidence_step_artifacts,
-      5. prefer advance_investigation_runtime only after external-preferred steps for that batch have been submitted or when the batch is planner-owned only,
-      6. call advance_investigation_runtime at most one additional time only if it returns a next_active_batch that clearly warrants one bounded follow-up batch,
+      3. prefer handoff_active_evidence_batch as the default runtime-progress helper,
+      4. if handoff_active_evidence_batch returns an active_batch that still needs external evidence, satisfy those bounded evidence steps with peer evidence-plane tools and call handoff_active_evidence_batch again with submitted_steps,
+      5. call handoff_active_evidence_batch at most one additional time only if it returns another active_batch that clearly warrants one bounded follow-up batch,
+      6. treat get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams for adapters, debugging, or when explicit choreography is required,
       7. treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path,
       8. render_investigation_report late for the final five-section answer.
     - When you seed execution_context from the built plan, carry forward the same incident request you used for build_investigation_plan.
-    - Call get_active_evidence_batch with plan=<built or updated plan> and incident=<same build request> before trying to satisfy or advance an active batch.
-    - For externally preferred workload evidence, gather the bounded peer evidence first, then call submit_evidence_step_artifacts with plan=<built or updated plan>, incident=<same build request>, and submitted_steps=<typed artifacts for the pending external steps>.
-    - Call advance_investigation_runtime with incident=<same build request>, execution_context=<seeded or returned execution_context>, and batch_id only when you are explicitly advancing a known active batch.
+    - Call handoff_active_evidence_batch with incident=<same build request> and execution_context=<seeded or returned execution_context>; it returns the current actionable active_batch when external evidence is still required, or updated execution_context after one bounded batch handoff completes.
+    - If handoff_active_evidence_batch returns an active_batch with externally preferred steps, gather the bounded peer evidence and call handoff_active_evidence_batch again with submitted_steps=<typed artifacts for the pending external steps>.
+    - Use get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime only when you need the fine-grained low-level choreography explicitly.
+    - Call get_active_evidence_batch with plan=<built or updated plan> and incident=<same build request> before trying to satisfy or advance an active batch when using the low-level path.
+    - For externally preferred workload evidence on the low-level path, gather the bounded peer evidence first, then call submit_evidence_step_artifacts with plan=<built or updated plan>, incident=<same build request>, and submitted_steps=<typed artifacts for the pending external steps>.
+    - Call advance_investigation_runtime with incident=<same build request>, execution_context=<seeded or returned execution_context>, and batch_id only when you are explicitly advancing a known active batch on the low-level path.
     - Do not call advance_investigation_runtime with only batch_id.
     - Use resolve_primary_target when the target is vague or operator-backed, and preserve Backend/<name>, Frontend/<name>, or Cluster/<name> exactly as provided.
     - If resolve_primary_target needs a concrete workload target and the user only asked for the unhealthy pod in a namespace, use Kubernetes MCP read-only inspection to identify the concrete pod first, then re-enter the planner-led control-plane path with that concrete target.
@@ -90,6 +94,16 @@ data:
       3. Related Data
       4. Limitations
       5. Recommended next step
+    - Use these exact Markdown headings verbatim and with the same casing:
+      - `## Diagnosis`
+      - `## Evidence`
+      - `## Related Data`
+      - `## Limitations`
+      - `## Recommended next step`
+    - For alert-shaped investigations, make sure the final answer explicitly includes:
+      - the original alert name
+      - the original alert-derived target string
+      - the resolved operational target or concrete runtime pod when known
     - Do not append extra sections beyond those five headings.
     - Service/observability alert examples:
       - "Investigate EnvoyHighErrorRate for service kagent-controller in namespace kagent."

@@ -20,6 +20,8 @@ from .models import (
     EvidenceBatchExecution,
     ExecuteInvestigationStepRequest,
     GetActiveEvidenceBatchRequest,
+    HandoffActiveEvidenceBatchRequest,
+    HandoffActiveEvidenceBatchResponse,
     InvestigationAnalysis,
     InvestigationPlan,
     InvestigationReport,
@@ -170,6 +172,38 @@ def _reporting_execution_context(
     )
 
 
+def _runtime_context(
+    *,
+    initial_plan: InvestigationPlan,
+    updated_plan: InvestigationPlan,
+    executions: list[EvidenceBatchExecution],
+    allow_bounded_fallback_execution: bool = False,
+) -> ReportingExecutionContext:
+    return ReportingExecutionContext(
+        initial_plan=initial_plan,
+        updated_plan=updated_plan,
+        executions=executions,
+        allow_bounded_fallback_execution=allow_bounded_fallback_execution,
+    )
+
+
+def _active_batch_contract_or_none(
+    *,
+    plan: InvestigationPlan,
+    incident: BuildInvestigationPlanRequest,
+    batch_id: str | None = None,
+) -> ActiveEvidenceBatchContract | None:
+    if plan.active_batch_id is None:
+        return None
+    return planner.get_active_evidence_batch_contract(
+        GetActiveEvidenceBatchRequest(
+            plan=plan,
+            incident=incident,
+            batch_id=batch_id or plan.active_batch_id,
+        )
+    )
+
+
 def build_investigation_state(req: InvestigationReportingRequest) -> InvestigationState:
     incident = _report_request_to_plan_request(req)
     initial_plan, updated_plan, executions, allow_bounded_fallback_execution = _reporting_execution_context(req, incident)
@@ -218,23 +252,73 @@ def advance_investigation_runtime(req: AdvanceInvestigationRuntimeRequest) -> Ad
         batch_id=req.batch_id,
         deps=_planner_deps(),
     )
-    next_active_batch = None
-    if result.updated_plan.active_batch_id is not None:
-        next_active_batch = planner.get_active_evidence_batch_contract(
-            GetActiveEvidenceBatchRequest(
-                plan=result.updated_plan,
-                incident=req.incident,
-                batch_id=result.updated_plan.active_batch_id,
-            )
-        )
+    next_active_batch = _active_batch_contract_or_none(
+        plan=result.updated_plan,
+        incident=req.incident,
+        batch_id=result.updated_plan.active_batch_id,
+    )
     return AdvanceInvestigationRuntimeResponse(
-        execution_context=ReportingExecutionContext(
+        execution_context=_runtime_context(
             initial_plan=initial_plan,
             updated_plan=result.updated_plan,
             executions=[*executions, result.execution],
-            allow_bounded_fallback_execution=False,
         ),
         next_active_batch=next_active_batch,
+    )
+
+
+def handoff_active_evidence_batch(req: HandoffActiveEvidenceBatchRequest) -> HandoffActiveEvidenceBatchResponse:
+    initial_plan, updated_plan, executions, _allow_bounded_fallback_execution = _reporting_execution_context(
+        InvestigationReportingRequest(
+            **req.incident.model_dump(mode="python"),
+            execution_context=req.execution_context,
+        ),
+        req.incident,
+    )
+    seeded_context = _runtime_context(
+        initial_plan=initial_plan,
+        updated_plan=updated_plan,
+        executions=executions,
+    )
+    active_batch = _active_batch_contract_or_none(
+        plan=updated_plan,
+        incident=req.incident,
+        batch_id=req.batch_id,
+    )
+    if active_batch is None:
+        return HandoffActiveEvidenceBatchResponse(
+            execution_context=seeded_context,
+            active_batch=None,
+            execution=None,
+        )
+
+    requires_external_submission = any(step.execution_mode == "external_preferred" for step in active_batch.steps)
+    if requires_external_submission and not req.submitted_steps:
+        return HandoffActiveEvidenceBatchResponse(
+            execution_context=seeded_context,
+            active_batch=active_batch,
+            execution=None,
+        )
+
+    result = planner.advance_active_evidence_batch(
+        plan=updated_plan,
+        incident=req.incident,
+        submitted_steps=req.submitted_steps,
+        batch_id=req.batch_id,
+        deps=_planner_deps(),
+    )
+    return HandoffActiveEvidenceBatchResponse(
+        execution_context=_runtime_context(
+            initial_plan=initial_plan,
+            updated_plan=result.updated_plan,
+            executions=[*executions, result.execution],
+        ),
+        active_batch=_active_batch_contract_or_none(
+            plan=result.updated_plan,
+            incident=req.incident,
+            batch_id=result.updated_plan.active_batch_id,
+        ),
+        execution=result.execution,
     )
 
 

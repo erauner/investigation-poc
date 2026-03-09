@@ -1,6 +1,7 @@
 from investigation_service.models import (
     ActualRoute,
     AdvanceInvestigationRuntimeRequest,
+    HandoffActiveEvidenceBatchRequest,
     BuildInvestigationPlanRequest,
     CorrelatedChange,
     CorrelatedChangesResponse,
@@ -626,6 +627,173 @@ def test_advance_investigation_runtime_returns_context_without_fallback(monkeypa
         "collect-change-candidates",
     ]
     assert response.next_active_batch is None
+
+
+def test_handoff_active_evidence_batch_prepares_external_batch_without_advancing(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    monkeypatch.setattr(
+        reporting,
+        "execute_investigation_step",
+        lambda _req: (_ for _ in ()).throw(AssertionError("fallback execution should not run")),
+    )
+
+    response = reporting.handoff_active_evidence_batch(
+        HandoffActiveEvidenceBatchRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+            execution_context=ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[]),
+        )
+    )
+
+    assert response.execution is None
+    assert response.active_batch is not None
+    assert response.active_batch.steps[0].step_id == "collect-target-evidence"
+    assert response.execution_context.allow_bounded_fallback_execution is False
+    assert response.execution_context.executions == []
+
+
+def test_handoff_active_evidence_batch_advances_after_submission(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    monkeypatch.setattr(
+        reporting,
+        "collect_change_candidates",
+        lambda _req: CorrelatedChangesResponse(
+            cluster="artifact-cluster",
+            scope="service",
+            target="service/api-resolved",
+            changes=[],
+            limitations=[],
+        ),
+    )
+
+    response = reporting.handoff_active_evidence_batch(
+        HandoffActiveEvidenceBatchRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+            execution_context=ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[]),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="prometheus-mcp-server",
+                        tool_name="execute_query",
+                        tool_path=["prometheus-mcp-server", "execute_query"],
+                    ),
+                )
+            ],
+        )
+    )
+
+    assert response.execution is not None
+    assert response.execution.executed_step_ids == [
+        "collect-target-evidence",
+        "collect-change-candidates",
+    ]
+    assert response.active_batch is None
+    assert response.execution_context.allow_bounded_fallback_execution is False
+
+
+def test_handoff_active_evidence_batch_auto_advances_planner_owned_batch(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    monkeypatch.setattr(
+        reporting,
+        "_planner_deps",
+        lambda: reporting.PlannerDeps(
+            normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError("unexpected alert normalization")),
+            canonical_target=lambda target, profile, service_name: target,
+            scope_from_target=lambda target, profile: "workload",
+            resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "artifact-cluster"})(),
+            get_backend_cr=lambda *args, **kwargs: {},
+            get_frontend_cr=lambda *args, **kwargs: {},
+            get_cluster_cr=lambda *args, **kwargs: {},
+            find_unhealthy_pod=lambda req: None,
+            collect_alert_evidence=lambda req: _bundle().model_copy(
+                update={
+                    "target": TargetRef(namespace="artifact-ns", kind="pod", name="api-alert"),
+                    "object_state": {"kind": "pod", "name": "api-alert"},
+                }
+            ),
+            collect_node_evidence=lambda req: _bundle().model_copy(
+                update={
+                    "target": TargetRef(namespace="artifact-ns", kind="node", name=req.node_name),
+                    "object_state": {"kind": "node", "name": req.node_name},
+                }
+            ),
+            collect_service_evidence=lambda req: _bundle().model_copy(
+                update={
+                    "target": TargetRef(namespace="artifact-ns", kind="service", name=req.service_name),
+                    "object_state": {"kind": "service", "name": req.service_name},
+                }
+            ),
+            collect_workload_evidence=lambda req: _bundle().model_copy(
+                update={
+                    "target": TargetRef(namespace="artifact-ns", kind="pod", name="api"),
+                    "object_state": {"kind": "pod", "name": "api"},
+                }
+            ),
+            collect_change_candidates=lambda req: CorrelatedChangesResponse(
+                cluster="artifact-cluster",
+                scope="workload",
+                target="pod/api",
+                changes=[],
+                limitations=[],
+            ),
+        ),
+    )
+    alert_target = InvestigationTarget(
+        source="alert",
+        scope="workload",
+        cluster="artifact-cluster",
+        namespace="artifact-ns",
+        requested_target="pod/api",
+        target="pod/api",
+        node_name=None,
+        service_name=None,
+        profile="workload",
+        lookback_minutes=15,
+        normalization_notes=["alertname=PodCrashLooping"],
+    )
+    alert_plan = InvestigationPlan(
+        mode="alert_rca",
+        objective="Investigate alert PodCrashLooping",
+        target=alert_target,
+        steps=[
+            PlanStep(
+                id="collect-alert-evidence",
+                title="Collect alert evidence",
+                category="evidence",
+                plane="alert",
+                rationale="Collect alert evidence",
+                suggested_capability="alert_evidence_plane",
+            )
+        ],
+        evidence_batches=[
+            EvidenceBatch(
+                id="batch-1",
+                title="Initial evidence",
+                status="pending",
+                intent="Collect alert evidence.",
+                step_ids=["collect-alert-evidence"],
+            )
+        ],
+        active_batch_id="batch-1",
+        planning_notes=["alertname=PodCrashLooping"],
+    )
+
+    response = reporting.handoff_active_evidence_batch(
+        HandoffActiveEvidenceBatchRequest(
+            incident=BuildInvestigationPlanRequest(
+                namespace="artifact-ns",
+                target="pod/api",
+                alertname="PodCrashLooping",
+            ),
+            execution_context=ReportingExecutionContext(updated_plan=alert_plan, executions=[]),
+        )
+    )
+
+    assert response.execution is not None
+    assert response.execution.executed_step_ids == ["collect-alert-evidence"]
+    assert response.active_batch is None
 
 
 def test_render_investigation_report_uses_advanced_runtime_context_without_fallback(monkeypatch) -> None:

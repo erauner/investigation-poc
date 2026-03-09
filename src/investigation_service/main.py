@@ -13,6 +13,8 @@ from .models import (
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     GetActiveEvidenceBatchRequest,
+    HandoffActiveEvidenceBatchRequest,
+    HandoffActiveEvidenceBatchResponse,
     InvestigationAnalysis,
     InvestigationPlan,
     InvestigationReport,
@@ -31,6 +33,7 @@ from .reporting import (
     build_investigation_plan as build_investigation_plan_from_request,
     execute_investigation_step as execute_investigation_step_from_request,
     get_active_evidence_batch as get_active_evidence_batch_from_request,
+    handoff_active_evidence_batch as handoff_active_evidence_batch_from_request,
     rank_hypotheses as rank_hypotheses_from_request,
     render_investigation_report,
     resolve_primary_target as resolve_primary_target_from_request,
@@ -84,6 +87,11 @@ def submit_evidence(req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceRec
 @app.post("/tools/advance_investigation_runtime", response_model=AdvanceInvestigationRuntimeResponse)
 def advance_runtime(req: AdvanceInvestigationRuntimeRequest) -> AdvanceInvestigationRuntimeResponse:
     return advance_investigation_runtime_from_request(req)
+
+
+@app.post("/tools/handoff_active_evidence_batch", response_model=HandoffActiveEvidenceBatchResponse)
+def handoff_active_batch(req: HandoffActiveEvidenceBatchRequest) -> HandoffActiveEvidenceBatchResponse:
+    return handoff_active_evidence_batch_from_request(req)
 
 
 @app.post("/tools/update_investigation_plan", response_model=InvestigationPlan)
