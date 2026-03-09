@@ -422,6 +422,7 @@ Still open in this slice:
 - live validation now shows the fine-grained handoff tools are still too choreography-heavy to be the only preferred agent-facing happy path
 - the agent understands the intended sequence conceptually, but still mis-shapes low-level arguments such as `plan`, `incident`, `submitted_steps`, and `execution_context`
 - the next sub-slice should add a higher-level batch handoff helper above the fine-grained primitives while keeping those primitives available for adapters, testing, and debugging
+- the first code-owned canary should be a parallel BYO ADK path that reuses `handoff_active_evidence_batch(...)` and proves the alert handoff loop locally before any broader deployment cutover
 - report/rank flows should grow stronger end-to-end coverage for externally submitted plus planner-owned mixed batches
 - target resolution still needs to grow a more explicit subject-to-target-to-execution-target contract rather than relying on the current transitional target model alone
 
@@ -488,6 +489,7 @@ Validation gate:
 - tests proving externally submitted step artifacts advance plan state correctly
 - tests proving follow-up insertion and batch progression work from submitted artifacts
 - tests proving fallback internal execution and external submission converge on the same artifact semantics
+- tests proving a plain-Python alert canary can materialize non-empty `submitted_steps`, resume with `handoff_token`, and render from reconciled execution context
 - real-cluster validation that distinguishes preferred peer evidence paths from bounded fallback execution
 
 ### Slice 10: Stable Outcome Envelope
