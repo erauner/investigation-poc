@@ -328,3 +328,73 @@ def test_run_orchestrated_investigation_fails_when_budget_exhausted_with_non_ren
         assert "non-render work still pending" in str(exc)
     else:
         raise AssertionError("expected orchestrator to fail when budget is exhausted before non-render work is complete")
+
+
+def test_run_orchestrated_investigation_attaches_resolved_concrete_pod_for_alerts(monkeypatch) -> None:
+    incident = _incident()
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="deployment/crashy",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=[
+                "Alert PodCrashLooping requested pod/crashy",
+                "Resolved runtime target: deployment/crashy",
+            ],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="Inspect logs and recent deployment changes before taking write actions.",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=["alertname=PodCrashLooping"],
+            tool_path_trace=None,
+        ),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "find_unhealthy_pod",
+        lambda _req: type(
+            "UnhealthyPodResponseStub",
+            (),
+            {
+                "candidate": type(
+                    "CandidateStub",
+                    (),
+                    {
+                        "target": "pod/crashy-abc123",
+                        "namespace": "operator-smoke",
+                        "kind": "pod",
+                        "name": "crashy-abc123",
+                        "phase": "Running",
+                        "reason": "CrashLoopBackOff",
+                        "restart_count": 3,
+                        "ready": False,
+                        "summary": "Crash looping",
+                    },
+                )()
+            },
+        )(),
+    )
+
+    report = run_orchestrated_investigation(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+        )
+    )
+
+    assert report.target == "pod/crashy-abc123"
+    assert any("Resolved concrete crash-looping pod: pod/crashy-abc123" in item for item in report.evidence)

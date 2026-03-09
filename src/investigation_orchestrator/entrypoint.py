@@ -1,9 +1,11 @@
 from investigation_service.models import (
     BuildInvestigationPlanRequest,
+    FindUnhealthyPodRequest,
     InvestigationPlan,
     InvestigationReport,
     InvestigationReportRequest,
 )
+from investigation_service.tools import find_unhealthy_pod
 
 from .control_plane import advance_batch, get_active_batch, render_report, seed_context
 from .evidence_runner import run_required_external_steps
@@ -37,6 +39,40 @@ def _active_batch_is_render_only(plan: InvestigationPlan) -> bool:
     steps_by_id = {step.id: step for step in plan.steps}
     batch_steps = [steps_by_id[step_id] for step_id in batch.step_ids if step_id in steps_by_id]
     return bool(batch_steps) and all(step.category == "render" for step in batch_steps)
+
+
+def _maybe_attach_resolved_pod_context(
+    req: InvestigationReportRequest,
+    report: InvestigationReport,
+) -> InvestigationReport:
+    if not req.alertname or not req.namespace or not req.target or not req.target.startswith("pod/"):
+        return report
+    if report.target.startswith("pod/") and "-" in report.target.split("/", 1)[1]:
+        return report
+
+    candidate = find_unhealthy_pod(
+        FindUnhealthyPodRequest(
+            cluster=req.cluster,
+            namespace=req.namespace,
+        )
+    ).candidate
+    if candidate is None:
+        return report
+
+    requested_name = req.target.split("/", 1)[1]
+    if not candidate.name.startswith(f"{requested_name}-"):
+        return report
+
+    evidence_line = f"Resolved concrete crash-looping pod: {candidate.target}"
+    if evidence_line in report.evidence:
+        return report.model_copy(update={"target": candidate.target})
+
+    return report.model_copy(
+        update={
+            "target": candidate.target,
+            "evidence": [*report.evidence, evidence_line],
+        }
+    )
 
 
 def run_orchestrated_investigation(
@@ -73,4 +109,5 @@ def run_orchestrated_investigation(
         execution_context = advance_response.execution_context
         remaining_batch_budget -= 1
 
-    return render_report(incident, execution_context)
+    report = render_report(incident, execution_context)
+    return _maybe_attach_resolved_pod_context(req, report)

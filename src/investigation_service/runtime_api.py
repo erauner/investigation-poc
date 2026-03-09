@@ -2,6 +2,7 @@ from .models import (
     ActiveEvidenceBatchContract,
     AdvanceInvestigationRuntimeResponse,
     BuildInvestigationPlanRequest,
+    GetActiveEvidenceBatchRequest,
     InvestigationPlan,
     InvestigationReport,
     InvestigationReportingRequest,
@@ -43,11 +44,11 @@ def get_active_batch(
     if plan.active_batch_id is None:
         return None
     return get_active_evidence_batch_contract(
-        req={
-            "plan": plan,
-            "incident": incident,
-            "batch_id": batch_id or plan.active_batch_id,
-        }
+        GetActiveEvidenceBatchRequest(
+            plan=plan,
+            incident=incident,
+            batch_id=batch_id or plan.active_batch_id,
+        )
     )
 
 
