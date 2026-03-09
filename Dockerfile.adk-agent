@@ -1,0 +1,14 @@
+FROM python:3.12-alpine
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir .
+
+# BYO ADK dependencies are intentionally not baked into the default image yet.
+# This Dockerfile is a canary packaging skeleton for the future incident-triage-adk agent.
+
+CMD ["python", "-c", "from investigation_adk_agent.main import create_app; create_app(); print('ADK canary app import ok')"]
