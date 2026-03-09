@@ -1,3 +1,8 @@
+import base64
+import hashlib
+import json
+import zlib
+
 from .analysis import (
     adjusted_confidence_from_hypotheses,
     ambiguity_limitations_from_hypotheses,
@@ -50,6 +55,7 @@ from . import planner
 
 _EMPTY_CORRELATION_LIMITATION = "no correlated changes found in the requested time window"
 _EMPTY_RELATED_DATA_NOTE = "no meaningful correlated changes found in the requested time window"
+_HANDOFF_TOKEN_VERSION = 1
 
 
 def _is_empty_correlation_limitation(value: str) -> bool:
@@ -187,6 +193,58 @@ def _runtime_context(
     )
 
 
+def _incident_fingerprint(incident: BuildInvestigationPlanRequest) -> str:
+    encoded = json.dumps(incident.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _encode_handoff_token(
+    *,
+    incident: BuildInvestigationPlanRequest,
+    context: ReportingExecutionContext,
+) -> str:
+    payload = {
+        "version": _HANDOFF_TOKEN_VERSION,
+        "incident_fingerprint": _incident_fingerprint(incident),
+        "context": context.model_dump(mode="json"),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(zlib.compress(raw)).decode("ascii")
+
+
+def _decode_handoff_token(
+    *,
+    incident: BuildInvestigationPlanRequest,
+    token: str,
+) -> ReportingExecutionContext:
+    try:
+        decoded = zlib.decompress(base64.urlsafe_b64decode(token.encode("ascii")))
+        payload = json.loads(decoded.decode("utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive decode guard
+        raise ValueError("invalid handoff_token") from exc
+    if payload.get("version") != _HANDOFF_TOKEN_VERSION:
+        raise ValueError("unsupported handoff_token version")
+    if payload.get("incident_fingerprint") != _incident_fingerprint(incident):
+        raise ValueError("handoff_token does not match the supplied incident")
+    context_payload = payload.get("context")
+    if not isinstance(context_payload, dict):
+        raise ValueError("handoff_token is missing runtime context")
+    return ReportingExecutionContext.model_validate(context_payload)
+
+
+def _handoff_runtime_context(req: HandoffActiveEvidenceBatchRequest) -> ReportingExecutionContext:
+    if req.handoff_token and req.execution_context is not None:
+        raise ValueError("provide either handoff_token or execution_context, not both")
+    if req.handoff_token:
+        return _decode_handoff_token(incident=req.incident, token=req.handoff_token).model_copy(
+            update={"allow_bounded_fallback_execution": False}
+        )
+    if req.execution_context is not None:
+        return req.execution_context.model_copy(update={"allow_bounded_fallback_execution": False})
+    plan = build_investigation_plan(req.incident)
+    return _runtime_context(initial_plan=plan, updated_plan=plan, executions=[], allow_bounded_fallback_execution=False)
+
+
 def _active_batch_contract_or_none(
     *,
     plan: InvestigationPlan,
@@ -202,6 +260,23 @@ def _active_batch_contract_or_none(
             batch_id=batch_id or plan.active_batch_id,
         )
     )
+
+
+def _required_external_step_ids(batch: ActiveEvidenceBatchContract | None) -> list[str]:
+    if batch is None:
+        return []
+    return [step.step_id for step in batch.steps if step.execution_mode == "external_preferred"]
+
+
+def _handoff_guidance(
+    batch: ActiveEvidenceBatchContract | None,
+) -> tuple[str, str, list[str]]:
+    required_external_step_ids = _required_external_step_ids(batch)
+    if batch is None:
+        return "complete", "render_report", []
+    if required_external_step_ids:
+        return "awaiting_external_submission", "submit_external_steps", required_external_step_ids
+    return "ready_for_next_handoff", "call_handoff_again", []
 
 
 def build_investigation_state(req: InvestigationReportingRequest) -> InvestigationState:
@@ -268,36 +343,38 @@ def advance_investigation_runtime(req: AdvanceInvestigationRuntimeRequest) -> Ad
 
 
 def handoff_active_evidence_batch(req: HandoffActiveEvidenceBatchRequest) -> HandoffActiveEvidenceBatchResponse:
-    initial_plan, updated_plan, executions, _allow_bounded_fallback_execution = _reporting_execution_context(
-        InvestigationReportingRequest(
-            **req.incident.model_dump(mode="python"),
-            execution_context=req.execution_context,
-        ),
-        req.incident,
-    )
-    seeded_context = _runtime_context(
-        initial_plan=initial_plan,
-        updated_plan=updated_plan,
-        executions=executions,
-    )
+    seeded_context = _handoff_runtime_context(req)
+    initial_plan = seeded_context.initial_plan or build_investigation_plan(req.incident)
+    updated_plan = seeded_context.updated_plan
+    executions = list(seeded_context.executions)
     active_batch = _active_batch_contract_or_none(
         plan=updated_plan,
         incident=req.incident,
         batch_id=req.batch_id,
     )
     if active_batch is None:
+        handoff_status, next_action, required_external_step_ids = _handoff_guidance(active_batch)
         return HandoffActiveEvidenceBatchResponse(
             execution_context=seeded_context,
+            handoff_token=_encode_handoff_token(incident=req.incident, context=seeded_context),
             active_batch=None,
             execution=None,
+            handoff_status=handoff_status,
+            next_action=next_action,
+            required_external_step_ids=required_external_step_ids,
         )
 
     requires_external_submission = any(step.execution_mode == "external_preferred" for step in active_batch.steps)
     if requires_external_submission and not req.submitted_steps:
+        handoff_status, next_action, required_external_step_ids = _handoff_guidance(active_batch)
         return HandoffActiveEvidenceBatchResponse(
             execution_context=seeded_context,
+            handoff_token=_encode_handoff_token(incident=req.incident, context=seeded_context),
             active_batch=active_batch,
             execution=None,
+            handoff_status=handoff_status,
+            next_action=next_action,
+            required_external_step_ids=required_external_step_ids,
         )
 
     result = planner.advance_active_evidence_batch(
@@ -307,18 +384,25 @@ def handoff_active_evidence_batch(req: HandoffActiveEvidenceBatchRequest) -> Han
         batch_id=req.batch_id,
         deps=_planner_deps(),
     )
+    next_active_batch = _active_batch_contract_or_none(
+        plan=result.updated_plan,
+        incident=req.incident,
+        batch_id=result.updated_plan.active_batch_id,
+    )
+    handoff_status, next_action, required_external_step_ids = _handoff_guidance(next_active_batch)
+    returned_context = _runtime_context(
+        initial_plan=initial_plan,
+        updated_plan=result.updated_plan,
+        executions=[*executions, result.execution],
+    )
     return HandoffActiveEvidenceBatchResponse(
-        execution_context=_runtime_context(
-            initial_plan=initial_plan,
-            updated_plan=result.updated_plan,
-            executions=[*executions, result.execution],
-        ),
-        active_batch=_active_batch_contract_or_none(
-            plan=result.updated_plan,
-            incident=req.incident,
-            batch_id=result.updated_plan.active_batch_id,
-        ),
+        execution_context=returned_context,
+        handoff_token=_encode_handoff_token(incident=req.incident, context=returned_context),
+        active_batch=next_active_batch,
         execution=result.execution,
+        handoff_status=handoff_status,
+        next_action=next_action,
+        required_external_step_ids=required_external_step_ids,
     )
 
 

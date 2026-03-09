@@ -1,3 +1,5 @@
+import pytest
+
 from investigation_service.models import (
     ActualRoute,
     AdvanceInvestigationRuntimeRequest,
@@ -649,6 +651,10 @@ def test_handoff_active_evidence_batch_prepares_external_batch_without_advancing
     assert response.active_batch.steps[0].step_id == "collect-target-evidence"
     assert response.execution_context.allow_bounded_fallback_execution is False
     assert response.execution_context.executions == []
+    assert response.handoff_status == "awaiting_external_submission"
+    assert response.next_action == "submit_external_steps"
+    assert response.required_external_step_ids == ["collect-target-evidence"]
+    assert response.handoff_token
 
 
 def test_handoff_active_evidence_batch_advances_after_submission(monkeypatch) -> None:
@@ -691,6 +697,10 @@ def test_handoff_active_evidence_batch_advances_after_submission(monkeypatch) ->
     ]
     assert response.active_batch is None
     assert response.execution_context.allow_bounded_fallback_execution is False
+    assert response.handoff_status == "complete"
+    assert response.next_action == "render_report"
+    assert response.required_external_step_ids == []
+    assert response.handoff_token
 
 
 def test_handoff_active_evidence_batch_auto_advances_planner_owned_batch(monkeypatch) -> None:
@@ -794,6 +804,140 @@ def test_handoff_active_evidence_batch_auto_advances_planner_owned_batch(monkeyp
     assert response.execution is not None
     assert response.execution.executed_step_ids == ["collect-alert-evidence"]
     assert response.active_batch is None
+    assert response.handoff_status == "complete"
+    assert response.next_action == "render_report"
+    assert response.required_external_step_ids == []
+    assert response.handoff_token
+
+
+def test_handoff_active_evidence_batch_returns_ready_for_next_handoff_when_next_batch_is_planner_owned(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    next_batch_plan = _runtime_plan().model_copy(
+        update={
+            "evidence_batches": [
+                EvidenceBatch(
+                    id="batch-2",
+                    title="Follow-up evidence",
+                    status="pending",
+                    intent="Collect change candidates.",
+                    step_ids=["collect-change-candidates"],
+                )
+            ],
+            "active_batch_id": "batch-2",
+        }
+    )
+
+    monkeypatch.setattr(
+        reporting.planner,
+        "advance_active_evidence_batch",
+        lambda **_kwargs: type(
+            "AdvanceResult",
+            (),
+            {
+                "updated_plan": next_batch_plan,
+                "execution": EvidenceBatchExecution(
+                    batch_id="batch-1",
+                    executed_step_ids=["collect-target-evidence"],
+                    artifacts=[],
+                    execution_notes=[],
+                ),
+            },
+        )(),
+    )
+
+    response = reporting.handoff_active_evidence_batch(
+        HandoffActiveEvidenceBatchRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+            execution_context=ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[]),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="prometheus-mcp-server",
+                        tool_name="execute_query",
+                        tool_path=["prometheus-mcp-server", "execute_query"],
+                    ),
+                )
+            ],
+        )
+    )
+
+    assert response.execution is not None
+    assert response.active_batch is not None
+    assert response.active_batch.batch_id == "batch-2"
+    assert response.handoff_status == "ready_for_next_handoff"
+    assert response.next_action == "call_handoff_again"
+    assert response.required_external_step_ids == []
+    assert response.handoff_token
+
+
+def test_handoff_active_evidence_batch_accepts_handoff_token_on_follow_up(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _runtime_plan())
+    monkeypatch.setattr(
+        reporting,
+        "collect_change_candidates",
+        lambda _req: CorrelatedChangesResponse(
+            cluster="artifact-cluster",
+            scope="service",
+            target="service/api-resolved",
+            changes=[],
+            limitations=[],
+        ),
+    )
+
+    first = reporting.handoff_active_evidence_batch(
+        HandoffActiveEvidenceBatchRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+        )
+    )
+
+    second = reporting.handoff_active_evidence_batch(
+        HandoffActiveEvidenceBatchRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+            handoff_token=first.handoff_token,
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="prometheus-mcp-server",
+                        tool_name="execute_query",
+                        tool_path=["prometheus-mcp-server", "execute_query"],
+                    ),
+                )
+            ],
+        )
+    )
+
+    assert second.execution is not None
+    assert second.handoff_status == "complete"
+    assert second.next_action == "render_report"
+    assert second.execution_context.executions[0].executed_step_ids == [
+        "collect-target-evidence",
+        "collect-change-candidates",
+    ]
+
+
+def test_handoff_active_evidence_batch_rejects_token_and_execution_context_together(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _runtime_plan())
+
+    first = reporting.handoff_active_evidence_batch(
+        HandoffActiveEvidenceBatchRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+        )
+    )
+
+    with pytest.raises(ValueError, match="either handoff_token or execution_context"):
+        reporting.handoff_active_evidence_batch(
+            HandoffActiveEvidenceBatchRequest(
+                incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+                handoff_token=first.handoff_token,
+                execution_context=first.execution_context,
+            )
+        )
 
 
 def test_render_investigation_report_uses_advanced_runtime_context_without_fallback(monkeypatch) -> None:

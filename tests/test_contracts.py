@@ -1131,6 +1131,7 @@ def test_handoff_active_evidence_batch_route_returns_actionable_batch_and_contex
                 "executions": [],
                 "allow_bounded_fallback_execution": False,
             },
+            handoff_token="opaque-handoff-token",
             active_batch={
                 "batch_id": "batch-1",
                 "title": "Initial evidence",
@@ -1157,6 +1158,9 @@ def test_handoff_active_evidence_batch_route_returns_actionable_batch_and_contex
                 "steps": [],
             },
             execution=None,
+            handoff_status="awaiting_external_submission",
+            next_action="submit_external_steps",
+            required_external_step_ids=["collect-target-evidence"],
         )
 
     monkeypatch.setattr("investigation_service.main.handoff_active_evidence_batch_from_request", fake_handoff)
@@ -1196,7 +1200,11 @@ def test_handoff_active_evidence_batch_route_returns_actionable_batch_and_contex
     assert response.status_code == 200
     assert captured["request"].incident.target == "service/api"
     assert response.json()["execution_context"]["allow_bounded_fallback_execution"] is False
+    assert response.json()["handoff_token"] == "opaque-handoff-token"
     assert response.json()["active_batch"]["batch_id"] == "batch-1"
+    assert response.json()["handoff_status"] == "awaiting_external_submission"
+    assert response.json()["next_action"] == "submit_external_steps"
+    assert response.json()["required_external_step_ids"] == ["collect-target-evidence"]
 
 
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:

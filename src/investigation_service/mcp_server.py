@@ -306,6 +306,7 @@ def advance_investigation_runtime(
 def handoff_active_evidence_batch(
     incident: dict,
     execution_context: dict | None = None,
+    handoff_token: str | None = None,
     submitted_steps: list[dict] | None = None,
     batch_id: str | None = None,
 ) -> dict:
@@ -313,22 +314,30 @@ def handoff_active_evidence_batch(
 
     Required call shape:
     - incident=<the same request shape used to build the plan>
-    - execution_context=<optional seeded or carried-forward runtime context>
+    - first call: omit both execution_context and handoff_token
+    - follow-up calls: prefer handoff_token=<the opaque token returned by the previous handoff response>
+    - execution_context=<legacy optional seeded or carried-forward runtime context; prefer handoff_token for handoff continuation>
     - submitted_steps=<optional typed artifacts for externally satisfied pending steps>
     - batch_id=<optional explicit batch id>
 
     Behavior:
-    - on the first call, returns the current actionable active batch if external evidence is still required
-    - after submitted_steps are provided, reconciles them, auto-runs only remaining same-batch planner-owned steps, and returns updated execution_context
-    - returns active_batch=None when no more evidence batches remain
+    - on the first call, returns a response with handoff_status=awaiting_external_submission, next_action=submit_external_steps, and required_external_step_ids when peer evidence is still required
+    - when next_action=submit_external_steps, build submitted_steps from the matching required_external_step_ids in active_batch.steps
+    - each submitted_steps item should include step_id=<the step contract id>, actual_route=<the peer MCP route actually used>, and the payload field named by that step's artifact_type
+    - do not call handoff_active_evidence_batch again with an empty submitted_steps list after next_action=submit_external_steps
+    - after submitted_steps are provided, reconciles them, auto-runs only remaining same-batch planner-owned steps, and returns updated execution_context plus a refreshed handoff_token
+    - if another planner-owned batch remains, returns handoff_status=ready_for_next_handoff and next_action=call_handoff_again
+    - if no more evidence batches remain, returns handoff_status=complete and next_action=render_report
 
     Prefer this over manually choreographing get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime.
+    Follow next_action directly instead of inferring the next step only from active_batch.
     """
     return run_logged_tool(
         "handoff_active_evidence_batch",
         {
             "incident": incident,
             "execution_context": execution_context,
+            "handoff_token": handoff_token,
             "submitted_steps": submitted_steps or [],
             "batch_id": batch_id,
         },
@@ -336,6 +345,7 @@ def handoff_active_evidence_batch(
             HandoffActiveEvidenceBatchRequest(
                 incident=incident,
                 execution_context=execution_context,
+                handoff_token=handoff_token,
                 submitted_steps=submitted_steps or [],
                 batch_id=batch_id,
             )

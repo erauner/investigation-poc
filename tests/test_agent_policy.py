@@ -85,10 +85,18 @@ PLANNER_LED_REQUIRED_PHRASES = (
     "Do not render the final report as the first substantive step.",
     "fine-grained runtime seams",
     "## Recommended next step",
+    "required_external_step_ids",
+    "submitted_steps",
+    "active_batch.steps",
+    "artifact_type",
+    "Do not call handoff_active_evidence_batch again with an empty submitted_steps list after next_action=submit_external_steps.",
 )
 
 ALERT_CONTEXT_REQUIRED_PHRASE = (
     "preserve the original alert name and the resolved operational target name explicitly"
+)
+ALERT_TARGET_VERBATIM_REQUIRED_PHRASE = (
+    "preserve the exact original alert-derived target string verbatim"
 )
 
 
@@ -152,6 +160,7 @@ def test_skill_configmap_stops_teaching_report_first_or_hidden_tools() -> None:
     for phrase in PLANNER_LED_REQUIRED_PHRASES:
         assert phrase in system_message
     assert ALERT_CONTEXT_REQUIRED_PHRASE in system_message.lower()
+    assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE in system_message.lower()
 
 
 def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
@@ -187,5 +196,6 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
             assert phrase in text, path
         if "alert" in path.lower():
             assert ALERT_CONTEXT_REQUIRED_PHRASE in text.lower(), path
+            assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE in text.lower(), path
         for phrase in banned_phrases:
             assert phrase not in text, path

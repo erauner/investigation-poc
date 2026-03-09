@@ -105,6 +105,8 @@ def summarize_tool_inputs(tool_name: str, raw_args: dict[str, Any]) -> dict[str,
     }:
         summary.update(_incident_summary(raw_args.get("incident")))
         summary.update(_execution_context_summary(raw_args.get("execution_context")))
+        summary["has_handoff_token"] = bool(raw_args.get("handoff_token"))
+        summary["handoff_token_length"] = len(raw_args.get("handoff_token") or "")
         summary["submitted_steps_count"] = len(raw_args.get("submitted_steps") or [])
         summary["has_batch_id"] = bool(raw_args.get("batch_id"))
         return summary

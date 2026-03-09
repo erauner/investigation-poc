@@ -20,6 +20,7 @@ def test_summarize_runtime_tool_inputs_uses_flags_and_counts() -> None:
                 "executions": [{"batch_id": "batch-1"}],
                 "allow_bounded_fallback_execution": False,
             },
+            "handoff_token": "opaque-token",
             "submitted_steps": [{"step_id": "collect-target-evidence", "payload": {"logs": "secret"}}],
             "batch_id": "batch-1",
         },
@@ -30,6 +31,8 @@ def test_summarize_runtime_tool_inputs_uses_flags_and_counts() -> None:
     assert summary["incident_has_namespace"] is True
     assert summary["incident_profile"] == "workload"
     assert summary["has_execution_context"] is True
+    assert summary["has_handoff_token"] is True
+    assert summary["handoff_token_length"] == len("opaque-token")
     assert summary["has_updated_plan"] is True
     assert summary["execution_count"] == 1
     assert summary["submitted_steps_count"] == 1
@@ -65,7 +68,7 @@ def test_run_logged_tool_logs_failure_type_only(caplog: pytest.LogCaptureFixture
     with pytest.raises(ValueError):
         run_logged_tool(
             "advance_investigation_runtime",
-            {"incident": {"namespace": "operator-smoke"}, "execution_context": {}, "submitted_steps": []},
+            {"incident": {"namespace": "operator-smoke"}, "execution_context": {}, "handoff_token": "opaque", "submitted_steps": []},
             lambda: (_ for _ in ()).throw(ValueError("incident target pod/crashy invalid")),
         )
 

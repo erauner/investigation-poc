@@ -9,6 +9,8 @@ InvestigationMode = Literal["alert_rca", "targeted_rca", "factual_analysis"]
 PlanStatus = Literal["pending", "completed", "deferred"]
 ConfidenceType = Literal["low", "medium", "high"]
 GuidelineCategory = Literal["interpretation", "data_source", "next_step", "delegation", "safety"]
+HandoffStatus = Literal["awaiting_external_submission", "ready_for_next_handoff", "complete"]
+HandoffNextAction = Literal["submit_external_steps", "call_handoff_again", "render_report"]
 
 
 class TargetRef(BaseModel):
@@ -268,14 +270,19 @@ class AdvanceInvestigationRuntimeResponse(BaseModel):
 class HandoffActiveEvidenceBatchRequest(BaseModel):
     incident: BuildInvestigationPlanRequest
     execution_context: "ReportingExecutionContext | None" = None
+    handoff_token: str | None = None
     batch_id: str | None = None
     submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
 
 
 class HandoffActiveEvidenceBatchResponse(BaseModel):
     execution_context: "ReportingExecutionContext"
+    handoff_token: str
     active_batch: "ActiveEvidenceBatchContract | None" = None
     execution: EvidenceBatchExecution | None = None
+    handoff_status: HandoffStatus = "complete"
+    next_action: HandoffNextAction = "render_report"
+    required_external_step_ids: list[str] = Field(default_factory=list)
 
 
 class CollectNodeContextRequest(BaseModel):
