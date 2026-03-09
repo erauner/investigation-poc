@@ -35,6 +35,7 @@ Use the `mcp__kagent__invoke_agent` tool.
   `Then build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.`
   `If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.`
   `Use render_investigation_report late as the canonical final report tool.`
+  `Treat Kubernetes MCP and Prometheus MCP as first-class evidence planes when they are the most direct bounded source of evidence.`
 - Return the agent's result directly.
 - Treat this skill as read-only investigation help for follow-up clarification. Do not take write actions, cleanup actions, or mutation requests through this skill.
 - If no arguments were supplied, ask the user what they want investigated.

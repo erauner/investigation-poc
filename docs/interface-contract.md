@@ -53,11 +53,13 @@ Across clients, `Investigate` should preserve these semantics:
 - cluster-awareness rules are backend-owned
 - report composition remains backend-owned
 - controller and agent implementation details stay hidden from the primary UX
+- planner/control-plane behavior stays product-owned, while direct runtime and metrics evidence may come from peer MCP servers such as Kubernetes MCP and Prometheus MCP
 
 For backend tool surfaces, prefer the planner-led control plane when available:
 
 - generic targeted investigations should prefer `resolve_primary_target`, `build_investigation_plan`, and `render_investigation_report`
 - alert-shaped investigations should preserve alert routing, but still treat `render_investigation_report` as the canonical final report surface
+- direct logs, events, resource inspection, metrics queries, alert queries, and exemplar lookups should be treated as evidence-plane work, not as replacements for planning or final rendering
 
 ## Client-side routing
 

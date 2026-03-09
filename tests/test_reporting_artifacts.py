@@ -45,7 +45,7 @@ def _plan() -> InvestigationPlan:
                 category="evidence",
                 plane="service",
                 rationale="Collect target evidence",
-                suggested_tool="collect_service_evidence",
+                suggested_capability="service_evidence_plane",
             ),
             PlanStep(
                 id="collect-change-candidates",
@@ -53,7 +53,7 @@ def _plan() -> InvestigationPlan:
                 category="evidence",
                 plane="changes",
                 rationale="Collect change candidates",
-                suggested_tool="collect_change_candidates",
+                suggested_capability="collect_change_candidates",
             ),
         ],
         evidence_batches=[],

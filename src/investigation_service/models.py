@@ -103,7 +103,7 @@ class PlanStep(BaseModel):
     plane: str
     status: PlanStatus = "pending"
     rationale: str
-    suggested_tool: str | None = None
+    suggested_capability: str | None = None
     depends_on: list[str] = Field(default_factory=list)
 
 
