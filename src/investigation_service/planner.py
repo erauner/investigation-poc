@@ -74,6 +74,13 @@ class PlannerDeps:
     )
 
 
+@dataclass(frozen=True)
+class StepRuntimeSpec:
+    artifact_type: str
+    execution_mode: str
+    external_submission_allowed: bool
+
+
 def classify_investigation_mode(
     req: BuildInvestigationPlanRequest | InvestigationReportRequest,
 ) -> InvestigationMode:
@@ -521,16 +528,37 @@ def _route_provenance(step: PlanStep, *, target: InvestigationTarget) -> StepRou
     )
 
 
-def _artifact_type_for_step(step: PlanStep) -> str:
+def _runtime_spec(step: PlanStep) -> StepRuntimeSpec:
     if step.id == "collect-change-candidates":
-        return "change_candidates"
-    return "evidence_bundle"
+        return StepRuntimeSpec(
+            artifact_type="change_candidates",
+            execution_mode="control_plane_only",
+            external_submission_allowed=False,
+        )
+    if step.suggested_capability in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}:
+        return StepRuntimeSpec(
+            artifact_type="evidence_bundle",
+            execution_mode="external_preferred",
+            external_submission_allowed=True,
+        )
+    return StepRuntimeSpec(
+        artifact_type="evidence_bundle",
+        execution_mode="control_plane_only",
+        external_submission_allowed=True,
+    )
+
+
+def _artifact_type_for_step(step: PlanStep) -> str:
+    return _runtime_spec(step).artifact_type
 
 
 def _execution_mode_for_step(step: PlanStep) -> str:
-    if step.suggested_capability in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}:
-        return "external_preferred"
-    return "control_plane_only"
+    return _runtime_spec(step).execution_mode
+
+
+def _pending_batch_steps(plan: InvestigationPlan, batch: EvidenceBatch) -> list[PlanStep]:
+    steps = _step_map(plan)
+    return [steps[step_id] for step_id in batch.step_ids if steps[step_id].status != "completed"]
 
 
 def _subject_from_incident(
@@ -619,10 +647,10 @@ def _step_execution_inputs(
 
 def get_active_evidence_batch_contract(req: GetActiveEvidenceBatchRequest) -> ActiveEvidenceBatchContract:
     batch = select_active_evidence_batch(req.plan, batch_id=req.batch_id)
-    steps = _step_map(req.plan)
     target = req.plan.target
     if target is None:
         raise ValueError("investigation plan did not produce a primary target")
+    pending_steps = _pending_batch_steps(req.plan, batch)
     return ActiveEvidenceBatchContract(
         batch_id=batch.id,
         title=batch.title,
@@ -643,7 +671,7 @@ def get_active_evidence_batch_contract(req: GetActiveEvidenceBatchRequest) -> Ac
                 execution_mode=_execution_mode_for_step(step),
                 execution_inputs=_step_execution_inputs(step, target=target, incident=req.incident),
             )
-            for step in [steps[step_id] for step_id in batch.step_ids]
+            for step in pending_steps
         ],
     )
 
@@ -696,18 +724,16 @@ def submit_evidence_step_artifacts(req: SubmitEvidenceArtifactsRequest) -> Submi
     if req.plan.mode == "factual_analysis":
         raise ValueError("external evidence submission is not supported for factual_analysis plans")
     batch = select_active_evidence_batch(req.plan, batch_id=req.batch_id)
-    steps = _step_map(req.plan)
     target = req.plan.target
     if target is None:
         raise ValueError("investigation plan did not produce a primary target")
-    batch_step_ids = set(batch.step_ids)
-    completed_step_ids = {step.id for step in req.plan.steps if step.status == "completed"}
+    pending_steps = {step.id: step for step in _pending_batch_steps(req.plan, batch)}
     submissions_by_step: dict[str, SubmittedStepArtifact] = {}
     for submission in req.submitted_steps:
-        if submission.step_id not in batch_step_ids:
+        if submission.step_id not in pending_steps:
             raise ValueError(f"submitted step {submission.step_id} is not part of active batch {batch.id}")
-        if submission.step_id in completed_step_ids:
-            raise ValueError(f"submitted step {submission.step_id} is already completed")
+        if not _runtime_spec(pending_steps[submission.step_id]).external_submission_allowed:
+            raise ValueError(f"submitted step {submission.step_id} is control-plane-only and cannot be submitted externally")
         if submission.step_id in submissions_by_step:
             raise ValueError(f"submitted step {submission.step_id} was provided more than once")
         submissions_by_step[submission.step_id] = submission
@@ -715,7 +741,7 @@ def submit_evidence_step_artifacts(req: SubmitEvidenceArtifactsRequest) -> Submi
         raise ValueError("submitted_steps must contain at least one step artifact")
     artifacts = [
         _step_artifact_from_submission(
-            steps[step_id],
+            pending_steps[step_id],
             target=target,
             incident=req.incident,
             submission=submissions_by_step[step_id],
@@ -1087,14 +1113,14 @@ def execute_investigation_step(
         raise ValueError("execute_investigation_step is not supported for factual_analysis plans")
 
     batch = select_active_evidence_batch(req.plan, batch_id=req.batch_id)
-    steps = _step_map(req.plan)
+    pending_steps = _pending_batch_steps(req.plan, batch)
     artifacts = [
-        _execute_step(steps[step_id], plan=req.plan, incident=req.incident, deps=deps)
-        for step_id in batch.step_ids
+        _execute_step(step, plan=req.plan, incident=req.incident, deps=deps)
+        for step in pending_steps
     ]
     return EvidenceBatchExecution(
         batch_id=batch.id,
-        executed_step_ids=list(batch.step_ids),
+        executed_step_ids=[step.id for step in pending_steps],
         artifacts=artifacts,
         execution_notes=[f"executed bounded evidence batch {batch.id}"],
     )

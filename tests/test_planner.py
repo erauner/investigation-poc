@@ -423,6 +423,107 @@ def test_submit_evidence_step_artifacts_reconciles_partial_batch_without_complet
     assert updated.active_batch_id == "batch-1"
 
 
+def test_get_active_evidence_batch_contract_only_returns_pending_steps_after_partial_submission() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        _deps([]),
+    )
+    result = submit_evidence_step_artifacts(
+        SubmitEvidenceArtifactsRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="kubernetes-mcp-server",
+                        tool_name="resources_get",
+                        tool_path=["kubernetes-mcp-server", "resources_get"],
+                    ),
+                )
+            ],
+        )
+    )
+
+    contract = get_active_evidence_batch_contract(
+        GetActiveEvidenceBatchRequest(
+            plan=result.updated_plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        )
+    )
+
+    assert contract.batch_id == "batch-1"
+    assert [step.step_id for step in contract.steps] == ["collect-change-candidates"]
+    assert contract.steps[0].execution_mode == "control_plane_only"
+
+
+def test_execute_investigation_step_only_runs_remaining_pending_steps_after_partial_submission() -> None:
+    calls: list[str] = []
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        _deps(calls),
+    )
+    result = submit_evidence_step_artifacts(
+        SubmitEvidenceArtifactsRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="kubernetes-mcp-server",
+                        tool_name="resources_get",
+                        tool_path=["kubernetes-mcp-server", "resources_get"],
+                    ),
+                )
+            ],
+        )
+    )
+
+    execution = execute_investigation_step(
+        ExecuteInvestigationStepRequest(
+            plan=result.updated_plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        ),
+        _deps(calls),
+    )
+
+    assert execution.executed_step_ids == ["collect-change-candidates"]
+    assert execution.artifacts[0].step_id == "collect-change-candidates"
+    assert calls[-1] == "collect_change_candidates"
+
+
+def test_submit_evidence_step_artifacts_rejects_control_plane_only_steps() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        _deps([]),
+    )
+
+    with pytest.raises(ValueError, match="control-plane-only"):
+        submit_evidence_step_artifacts(
+            SubmitEvidenceArtifactsRequest(
+                plan=plan,
+                incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+                submitted_steps=[
+                    SubmittedStepArtifact(
+                        step_id="collect-change-candidates",
+                        change_candidates=_changes(),
+                        actual_route=ActualRoute(
+                            source_kind="peer_mcp",
+                            mcp_server="prometheus-mcp-server",
+                            tool_name="execute_query",
+                            tool_path=["prometheus-mcp-server", "execute_query"],
+                        ),
+                    )
+                ],
+            )
+        )
+
+
 def test_update_investigation_plan_unlocks_analysis_after_first_batch() -> None:
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),

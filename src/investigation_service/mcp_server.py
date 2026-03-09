@@ -141,7 +141,7 @@ def execute_investigation_step(
     incident: dict,
     batch_id: str | None = None,
 ) -> dict:
-    """Execute one bounded evidence batch from an investigation plan. This is a control-plane step that dispatches only planner-owned evidence batches."""
+    """Execute the remaining pending steps in one bounded evidence batch. Use this for planner-owned steps or bounded fallback execution."""
     response = execute_investigation_step_impl(
         ExecuteInvestigationStepRequest(
             plan=plan,
@@ -154,7 +154,7 @@ def execute_investigation_step(
 
 @mcp.tool()
 def get_active_evidence_batch(plan: dict, incident: dict, batch_id: str | None = None) -> dict:
-    """Expose the current bounded evidence batch as an execution-facing contract for external evidence gathering."""
+    """Expose the current bounded evidence batch as an execution-facing contract for the remaining pending steps."""
     response = get_active_evidence_batch_impl(
         GetActiveEvidenceBatchRequest(
             plan=plan,
@@ -172,7 +172,7 @@ def submit_evidence_step_artifacts(
     submitted_steps: list[dict],
     batch_id: str | None = None,
 ) -> dict:
-    """Submit externally gathered step artifacts for reconciliation back into the planner-owned control plane."""
+    """Submit externally gathered artifacts for externally satisfiable pending steps and reconcile them into the planner-owned control plane."""
     response = submit_evidence_step_artifacts_impl(
         SubmitEvidenceArtifactsRequest(
             plan=plan,
