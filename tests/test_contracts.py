@@ -725,21 +725,7 @@ def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
     assert "alertname: PodCrashLooping" in body["limitations"]
 
 
-def test_build_root_cause_report_route_returns_typed_report(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.build_root_cause_report_from_request",
-        lambda _req: RootCauseReport(
-            scope="workload",
-            target="pod/crashy-abc123",
-            diagnosis="Container Restart Failure Details",
-            likely_cause="Container command 'sh -c echo starting && sleep 2 && exit 1' is exiting with code 1, driving repeated CrashLoopBackOff restarts.",
-            confidence="high",
-            evidence=["k8s: Container Restart Failure Details - exit code=1"],
-            limitations=[],
-            recommended_next_step="Confirm the failure with describe output, recent logs, and rollout history before taking write actions.",
-            suggested_follow_ups=[],
-        ),
-    )
+def test_build_root_cause_report_route_is_removed_from_public_surface() -> None:
     client = TestClient(app)
 
     response = client.post(
@@ -747,34 +733,10 @@ def test_build_root_cause_report_route_returns_typed_report(monkeypatch) -> None
         json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["target"] == "pod/crashy-abc123"
-    assert body["confidence"] == "high"
+    assert response.status_code == 404
 
 
-def test_collect_correlated_changes_route_returns_ranked_changes(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.collect_correlated_changes",
-        lambda _req: CorrelatedChangesResponse(
-            scope="workload",
-            target="pod/crashy-abc123",
-            changes=[
-                {
-                    "fingerprint": "event|pod|kagent-smoke|crashy-abc123|backoff|back-off restarting failed container",
-                    "timestamp": _now_iso(),
-                    "source": "k8s_event",
-                    "resource_kind": "pod",
-                    "namespace": "kagent-smoke",
-                    "name": "crashy-abc123",
-                    "relation": "direct",
-                    "summary": "BackOff: restarting failed container",
-                    "confidence": "high",
-                }
-            ],
-            limitations=[],
-        ),
-    )
+def test_collect_correlated_changes_route_is_removed_from_public_surface() -> None:
     client = TestClient(app)
 
     response = client.post(
@@ -782,10 +744,7 @@ def test_collect_correlated_changes_route_returns_ranked_changes(monkeypatch) ->
         json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["scope"] == "workload"
-    assert body["changes"][0]["relation"] == "direct"
+    assert response.status_code == 404
 
 
 def test_collect_change_candidates_route_returns_ranked_changes(monkeypatch) -> None:

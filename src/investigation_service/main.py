@@ -8,7 +8,6 @@ from .models import (
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
-    BuildRootCauseReportRequest,
     CollectedContextResponse,
     CorrelatedChangesResponse,
     EvidenceBundle,
@@ -23,17 +22,15 @@ from .models import (
     InvestigationTarget,
     InvestigateRequest,
     InvestigationResponse,
-    RootCauseReport,
     UpdateInvestigationPlanRequest,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
-from .correlation import collect_change_candidates, collect_correlated_changes
+from .correlation import collect_change_candidates
 from .reporting import (
     build_alert_investigation_report,
     build_investigation_plan as build_investigation_plan_from_request,
     build_investigation_report,
-    build_root_cause_report as build_root_cause_report_from_request,
     execute_investigation_step as execute_investigation_step_from_request,
     normalize_incident_input as normalize_incident_input_from_request,
     rank_hypotheses as rank_hypotheses_from_request,
@@ -143,11 +140,6 @@ def find_unhealthy_single(req: FindUnhealthyPodRequest) -> UnhealthyPodResponse:
     return find_unhealthy_pod(req)
 
 
-@app.post("/tools/build_root_cause_report", response_model=RootCauseReport)
-def build_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
-    return build_root_cause_report_from_request(req)
-
-
 @app.post("/tools/rank_hypotheses", response_model=InvestigationAnalysis)
 def rank_analysis(req: InvestigationReportRequest) -> InvestigationAnalysis:
     return rank_hypotheses_from_request(req)
@@ -166,11 +158,6 @@ def render_report(req: InvestigationReportRequest) -> InvestigationReport:
 @app.post("/tools/build_alert_investigation_report", response_model=InvestigationReport)
 def build_alert_investigation(req: AlertInvestigationReportRequest) -> InvestigationReport:
     return build_alert_investigation_report(req)
-
-
-@app.post("/tools/collect_correlated_changes", response_model=CorrelatedChangesResponse)
-def collect_related(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
-    return collect_correlated_changes(req)
 
 
 @app.post("/tools/collect_change_candidates", response_model=CorrelatedChangesResponse)

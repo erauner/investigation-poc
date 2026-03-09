@@ -54,7 +54,7 @@ What is now true:
 What is still missing:
 
 - a real alert-plane artifact instead of alert-shaped runtime indirection
-- a tighter public tool surface with redundant facades and context-shaped duplicates removed or demoted
+- further cleanup of exploratory context surfaces from the intentional agent-visible catalog
 - agent/runtime behavior that intentionally prefers the planner-led path
 
 ## Completed Slices
@@ -156,22 +156,23 @@ What is still missing after Slice 3:
 
 ### Slice 4: Narrow and Clean the Public Surface
 
-Status: Planned
+Status: Completed
 
-Once state is canonical, make the public surface match the architecture.
+Delivered:
 
-Goals:
+- removed the public FastAPI route for `build_root_cause_report`
+- removed the public FastAPI route for `collect_correlated_changes`
+- removed the corresponding MCP tools from `mcp_server.py`
+- retained internal Python helpers temporarily where they still support tests or compatibility code paths
+- clarified MCP descriptions so context tools are explicitly exploratory rather than planner-led core
+- kept `collect_change_candidates` as the canonical staged change-review surface
 
-- make control-plane tools clearly canonical
-- make evidence-plane tools clearly exploratory
-- remove or demote transition-only and redundant surfaces
+What was intentionally left out of this slice:
 
-Likely changes:
-
-- prefer `collect_change_candidates` over `collect_correlated_changes`
-- remove `build_root_cause_report` first
-- demote or retire `collect_*_context` from the intentional agent surface
-- keep only thin request-based wrappers that still earn their place
+- no removal of `build_investigation_report` or `build_alert_investigation_report` yet
+- no removal of `collect_*_context` routes/tools yet
+- no alert-plane artifact redesign
+- no agent prompt/config change yet
 
 Validation gate:
 
@@ -238,12 +239,13 @@ Validation gate:
 
 The next implementation move should be:
 
-### Implement Slice 4
+### Implement Slice 5
 
 Why:
 
-- Slice 3 made state canonical, so redundant transition surfaces can now be cleaned up without blocking the core engine
-- the next source of architectural drag is overlapping public naming and compatibility aliases that still look more important than they are
+- the core engine and public control-plane surface are now cleaner
+- the next meaningful gain is constraining what the agent is actually taught to use
+- the remaining overlap is now mostly about intentional tool policy rather than deep architectural seams
 
 What not to do yet:
 

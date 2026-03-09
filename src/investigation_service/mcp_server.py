@@ -10,7 +10,6 @@ from .models import (
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
-    BuildRootCauseReportRequest,
     ExecuteInvestigationStepRequest,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
@@ -18,11 +17,9 @@ from .models import (
     UpdateInvestigationPlanRequest,
 )
 from .correlation import collect_change_candidates as collect_change_candidates_impl
-from .correlation import collect_correlated_changes as collect_correlated_changes_impl
 from .reporting import build_alert_investigation_report as build_alert_investigation_report_impl
 from .reporting import build_investigation_plan as build_investigation_plan_impl
 from .reporting import build_investigation_report as build_investigation_report_impl
-from .reporting import build_root_cause_report as build_root_cause_report_impl
 from .reporting import execute_investigation_step as execute_investigation_step_impl
 from .reporting import normalize_incident_input as normalize_incident_input_impl
 from .reporting import rank_hypotheses as rank_hypotheses_impl
@@ -391,29 +388,6 @@ def find_unhealthy_pod(namespace: str, cluster: str | None = None) -> dict:
 
 
 @mcp.tool()
-def build_root_cause_report(
-    target: str,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 15,
-) -> dict:
-    """Compatibility alias over the canonical render path with related data disabled. Do not treat this as the primary planner-led surface."""
-    response = build_root_cause_report_impl(
-        BuildRootCauseReportRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
 def collect_change_candidates(
     target: str,
     cluster: str | None = None,
@@ -583,33 +557,6 @@ def build_alert_investigation_report(
             correlation_window_minutes=correlation_window_minutes,
             correlation_limit=correlation_limit,
             anchor_timestamp=anchor_timestamp,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
-def collect_correlated_changes(
-    target: str,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 60,
-    anchor_timestamp: str | None = None,
-    limit: int = 10,
-) -> dict:
-    """Deprecated compatibility alias for change collection. Prefer collect_change_candidates for the canonical staged change-review surface."""
-    response = collect_correlated_changes_impl(
-        CollectCorrelatedChangesRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-            anchor_timestamp=anchor_timestamp,
-            limit=limit,
         )
     )
     return response.model_dump(mode="json")
