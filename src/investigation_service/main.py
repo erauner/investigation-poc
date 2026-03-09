@@ -2,6 +2,8 @@ from fastapi import FastAPI
 
 from .models import (
     ActiveEvidenceBatchContract,
+    AdvanceInvestigationRuntimeRequest,
+    AdvanceInvestigationRuntimeResponse,
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
@@ -25,6 +27,7 @@ from .models import (
 )
 from .correlation import collect_change_candidates
 from .reporting import (
+    advance_investigation_runtime as advance_investigation_runtime_from_request,
     build_investigation_plan as build_investigation_plan_from_request,
     execute_investigation_step as execute_investigation_step_from_request,
     get_active_evidence_batch as get_active_evidence_batch_from_request,
@@ -76,6 +79,11 @@ def get_active_batch(req: GetActiveEvidenceBatchRequest) -> ActiveEvidenceBatchC
 @app.post("/tools/submit_evidence_step_artifacts", response_model=SubmittedEvidenceReconciliationResult)
 def submit_evidence(req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
     return submit_evidence_step_artifacts_from_request(req)
+
+
+@app.post("/tools/advance_investigation_runtime", response_model=AdvanceInvestigationRuntimeResponse)
+def advance_runtime(req: AdvanceInvestigationRuntimeRequest) -> AdvanceInvestigationRuntimeResponse:
+    return advance_investigation_runtime_from_request(req)
 
 
 @app.post("/tools/update_investigation_plan", response_model=InvestigationPlan)

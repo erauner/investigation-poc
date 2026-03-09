@@ -20,6 +20,7 @@ from investigation_service.models import (
     UpdateInvestigationPlanRequest,
 )
 from investigation_service.planner import (
+    advance_active_evidence_batch,
     PlannerDeps,
     build_investigation_plan,
     classify_investigation_mode,
@@ -497,6 +498,117 @@ def test_execute_investigation_step_only_runs_remaining_pending_steps_after_part
     assert calls[-1] == "collect_change_candidates"
 
 
+def test_advance_active_evidence_batch_combines_submitted_and_control_plane_steps() -> None:
+    calls: list[str] = []
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        _deps(calls),
+    )
+
+    result = advance_active_evidence_batch(
+        plan=plan,
+        incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        submitted_steps=[
+            SubmittedStepArtifact(
+                step_id="collect-target-evidence",
+                evidence_bundle=_bundle(),
+                actual_route=ActualRoute(
+                    source_kind="peer_mcp",
+                    mcp_server="kubernetes-mcp-server",
+                    tool_name="resources_get",
+                    tool_path=["kubernetes-mcp-server", "resources_get"],
+                ),
+            )
+        ],
+        batch_id=None,
+        deps=_deps(calls),
+    )
+
+    assert result.execution.executed_step_ids == ["collect-target-evidence", "collect-change-candidates"]
+    assert result.execution.artifacts[0].route_provenance is not None
+    assert result.execution.artifacts[0].route_provenance.route_satisfaction == "preferred"
+    assert result.execution.artifacts[1].step_id == "collect-change-candidates"
+    assert result.updated_plan.active_batch_id is None
+    assert calls[-1] == "collect_change_candidates"
+    assert "collect_workload_evidence" not in calls
+
+
+def test_advance_active_evidence_batch_rejects_missing_external_submission() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        _deps([]),
+    )
+
+    with pytest.raises(ValueError, match="active batch still requires external evidence submission for: collect-target-evidence"):
+        advance_active_evidence_batch(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+            submitted_steps=[],
+            batch_id=None,
+            deps=_deps([]),
+        )
+
+
+def test_advance_active_evidence_batch_keeps_alert_evidence_planner_owned() -> None:
+    calls: list[str] = []
+    deps = _deps(calls)
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "normalize_alert_input": lambda req: NormalizedInvestigationRequest(
+                source="alert",
+                scope="workload",
+                cluster=req.cluster,
+                namespace=req.labels.get("namespace"),
+                target=f"pod/{req.labels['pod']}",
+                node_name=None,
+                service_name=None,
+                profile="workload",
+                lookback_minutes=req.lookback_minutes,
+                normalization_notes=["alert normalized"],
+            ),
+        }
+    )
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(
+            alertname="PodCrashLooping",
+            labels={"namespace": "default", "pod": "api-123"},
+        ),
+        deps,
+    )
+
+    result = advance_active_evidence_batch(
+        plan=plan,
+        incident=BuildInvestigationPlanRequest(
+            alertname="PodCrashLooping",
+            labels={"namespace": "default", "pod": "api-123"},
+        ),
+        submitted_steps=[
+            SubmittedStepArtifact(
+                step_id="collect-target-evidence",
+                evidence_bundle=_bundle(name="api-123"),
+                actual_route=ActualRoute(
+                    source_kind="peer_mcp",
+                    mcp_server="kubernetes-mcp-server",
+                    tool_name="resources_get",
+                    tool_path=["kubernetes-mcp-server", "resources_get"],
+                ),
+            )
+        ],
+        batch_id=None,
+        deps=deps,
+    )
+
+    assert result.execution.executed_step_ids == [
+        "collect-alert-evidence",
+        "collect-target-evidence",
+        "collect-change-candidates",
+    ]
+    assert "collect_alert_evidence" in calls
+    assert "collect_change_candidates" in calls
+    assert "collect_workload_evidence" not in calls
+
+
 def test_submit_evidence_step_artifacts_rejects_control_plane_only_steps() -> None:
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
@@ -522,6 +634,45 @@ def test_submit_evidence_step_artifacts_rejects_control_plane_only_steps() -> No
                 ],
             )
         )
+
+
+def test_advance_active_evidence_batch_preserves_service_follow_up_insertion() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api", service_name="api"),
+        _deps([]),
+    )
+
+    result = advance_active_evidence_batch(
+        plan=plan,
+        incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api", service_name="api"),
+        submitted_steps=[
+            SubmittedStepArtifact(
+                step_id="collect-target-evidence",
+                evidence_bundle=_bundle(
+                    findings=[
+                        Finding(
+                            severity="info",
+                            source="heuristic",
+                            title="No Critical Signals Found",
+                            evidence="nothing decisive",
+                        )
+                    ]
+                ),
+                actual_route=ActualRoute(
+                    source_kind="peer_mcp",
+                    mcp_server="kubernetes-mcp-server",
+                    tool_name="resources_get",
+                    tool_path=["kubernetes-mcp-server", "resources_get"],
+                ),
+            )
+        ],
+        batch_id=None,
+        deps=_deps([]),
+    )
+
+    assert result.updated_plan.active_batch_id == "batch-follow-up-service"
+    follow_up = next(step for step in result.updated_plan.steps if step.id == "collect-service-follow-up-evidence")
+    assert follow_up.status == "pending"
 
 
 def test_update_investigation_plan_unlocks_analysis_after_first_batch() -> None:

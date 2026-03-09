@@ -535,6 +535,12 @@ def _runtime_spec(step: PlanStep) -> StepRuntimeSpec:
             execution_mode="control_plane_only",
             external_submission_allowed=False,
         )
+    if step.id == "collect-alert-evidence":
+        return StepRuntimeSpec(
+            artifact_type="evidence_bundle",
+            execution_mode="control_plane_only",
+            external_submission_allowed=False,
+        )
     if step.suggested_capability in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}:
         return StepRuntimeSpec(
             artifact_type="evidence_bundle",
@@ -720,16 +726,22 @@ def _step_artifact_from_submission(
     )
 
 
-def submit_evidence_step_artifacts(req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
-    if req.plan.mode == "factual_analysis":
+def _pending_steps_and_submissions(
+    *,
+    plan: InvestigationPlan,
+    incident: BuildInvestigationPlanRequest,
+    batch_id: str | None,
+    submitted_steps: list[SubmittedStepArtifact],
+) -> tuple[EvidenceBatch, InvestigationTarget, dict[str, PlanStep], dict[str, SubmittedStepArtifact]]:
+    if plan.mode == "factual_analysis":
         raise ValueError("external evidence submission is not supported for factual_analysis plans")
-    batch = select_active_evidence_batch(req.plan, batch_id=req.batch_id)
-    target = req.plan.target
+    batch = select_active_evidence_batch(plan, batch_id=batch_id)
+    target = plan.target
     if target is None:
         raise ValueError("investigation plan did not produce a primary target")
-    pending_steps = {step.id: step for step in _pending_batch_steps(req.plan, batch)}
+    pending_steps = {step.id: step for step in _pending_batch_steps(plan, batch)}
     submissions_by_step: dict[str, SubmittedStepArtifact] = {}
-    for submission in req.submitted_steps:
+    for submission in submitted_steps:
         if submission.step_id not in pending_steps:
             raise ValueError(f"submitted step {submission.step_id} is not part of active batch {batch.id}")
         if not _runtime_spec(pending_steps[submission.step_id]).external_submission_allowed:
@@ -737,25 +749,138 @@ def submit_evidence_step_artifacts(req: SubmitEvidenceArtifactsRequest) -> Submi
         if submission.step_id in submissions_by_step:
             raise ValueError(f"submitted step {submission.step_id} was provided more than once")
         submissions_by_step[submission.step_id] = submission
+    return batch, target, pending_steps, submissions_by_step
+
+
+def _submitted_artifacts_for_batch(
+    *,
+    batch: EvidenceBatch,
+    target: InvestigationTarget,
+    incident: BuildInvestigationPlanRequest,
+    pending_steps: dict[str, PlanStep],
+    submissions_by_step: dict[str, SubmittedStepArtifact],
+) -> list[StepArtifact]:
     if not submissions_by_step:
         raise ValueError("submitted_steps must contain at least one step artifact")
-    artifacts = [
+    return [
         _step_artifact_from_submission(
             pending_steps[step_id],
             target=target,
-            incident=req.incident,
+            incident=incident,
             submission=submissions_by_step[step_id],
         )
         for step_id in batch.step_ids
         if step_id in submissions_by_step
     ]
-    execution = EvidenceBatchExecution(
-        batch_id=batch.id,
-        executed_step_ids=list(submissions_by_step.keys()),
+
+
+def _execute_steps(
+    steps: list[PlanStep],
+    *,
+    plan: InvestigationPlan,
+    incident: BuildInvestigationPlanRequest,
+    deps: PlannerDeps,
+) -> list[StepArtifact]:
+    return [
+        _execute_step(step, plan=plan, incident=incident, deps=deps)
+        for step in steps
+    ]
+
+
+def _execution_for_batch(
+    batch_id: str,
+    artifacts: list[StepArtifact],
+    *,
+    note: str,
+) -> EvidenceBatchExecution:
+    return EvidenceBatchExecution(
+        batch_id=batch_id,
+        executed_step_ids=[artifact.step_id for artifact in artifacts],
         artifacts=artifacts,
-        execution_notes=[f"reconciled externally submitted evidence for {batch.id}"],
+        execution_notes=[note],
+    )
+
+
+def submit_evidence_step_artifacts(req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
+    batch, target, pending_steps, submissions_by_step = _pending_steps_and_submissions(
+        plan=req.plan,
+        incident=req.incident,
+        batch_id=req.batch_id,
+        submitted_steps=req.submitted_steps,
+    )
+    artifacts = _submitted_artifacts_for_batch(
+        batch=batch,
+        target=target,
+        incident=req.incident,
+        pending_steps=pending_steps,
+        submissions_by_step=submissions_by_step,
+    )
+    execution = _execution_for_batch(
+        batch.id,
+        artifacts,
+        note=f"reconciled externally submitted evidence for {batch.id}",
     )
     updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=req.plan, execution=execution))
+    return SubmittedEvidenceReconciliationResult(execution=execution, updated_plan=updated_plan)
+
+
+def advance_active_evidence_batch(
+    *,
+    plan: InvestigationPlan,
+    incident: BuildInvestigationPlanRequest,
+    submitted_steps: list[SubmittedStepArtifact],
+    batch_id: str | None,
+    deps: PlannerDeps,
+) -> SubmittedEvidenceReconciliationResult:
+    if plan.mode == "factual_analysis":
+        raise ValueError("advance_active_evidence_batch is not supported for factual_analysis plans")
+
+    batch = select_active_evidence_batch(plan, batch_id=batch_id)
+    pending_steps = _pending_batch_steps(plan, batch)
+    pending_by_id = {step.id: step for step in pending_steps}
+    submitted_artifacts: list[StepArtifact] = []
+    submitted_step_ids: set[str] = set()
+
+    if submitted_steps:
+        _, target, _, submissions_by_step = _pending_steps_and_submissions(
+            plan=plan,
+            incident=incident,
+            batch_id=batch.id,
+            submitted_steps=submitted_steps,
+        )
+        submitted_artifacts = _submitted_artifacts_for_batch(
+            batch=batch,
+            target=target,
+            incident=incident,
+            pending_steps=pending_by_id,
+            submissions_by_step=submissions_by_step,
+        )
+        submitted_step_ids = set(submissions_by_step.keys())
+
+    remaining_steps = [step for step in pending_steps if step.id not in submitted_step_ids]
+    blocked_steps = [
+        step.id for step in remaining_steps if _runtime_spec(step).execution_mode != "control_plane_only"
+    ]
+    if blocked_steps:
+        blocked = ", ".join(blocked_steps)
+        raise ValueError(f"active batch still requires external evidence submission for: {blocked}")
+
+    control_plane_artifacts = _execute_steps(
+        remaining_steps,
+        plan=plan,
+        incident=incident,
+        deps=deps,
+    )
+    artifacts_by_step = {
+        artifact.step_id: artifact for artifact in [*submitted_artifacts, *control_plane_artifacts]
+    }
+    artifacts = [artifacts_by_step[step_id] for step_id in batch.step_ids if step_id in artifacts_by_step]
+    execution = _execution_for_batch(
+        batch.id,
+        artifacts,
+        note=f"advanced bounded evidence batch {batch.id}",
+    )
+    updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=plan, execution=execution))
     return SubmittedEvidenceReconciliationResult(execution=execution, updated_plan=updated_plan)
 
 
@@ -1114,15 +1239,16 @@ def execute_investigation_step(
 
     batch = select_active_evidence_batch(req.plan, batch_id=req.batch_id)
     pending_steps = _pending_batch_steps(req.plan, batch)
-    artifacts = [
-        _execute_step(step, plan=req.plan, incident=req.incident, deps=deps)
-        for step in pending_steps
-    ]
-    return EvidenceBatchExecution(
-        batch_id=batch.id,
-        executed_step_ids=[step.id for step in pending_steps],
-        artifacts=artifacts,
-        execution_notes=[f"executed bounded evidence batch {batch.id}"],
+    artifacts = _execute_steps(
+        pending_steps,
+        plan=req.plan,
+        incident=req.incident,
+        deps=deps,
+    )
+    return _execution_for_batch(
+        batch.id,
+        artifacts,
+        note=f"executed bounded evidence batch {batch.id}",
     )
 
 

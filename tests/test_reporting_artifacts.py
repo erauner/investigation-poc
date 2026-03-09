@@ -1,8 +1,10 @@
 from investigation_service.models import (
     ActualRoute,
+    AdvanceInvestigationRuntimeRequest,
     BuildInvestigationPlanRequest,
     CorrelatedChange,
     CorrelatedChangesResponse,
+    EvidenceBatch,
     EvidenceBatchExecution,
     EvidenceBundle,
     Finding,
@@ -16,6 +18,7 @@ from investigation_service.models import (
     ReportingExecutionContext,
     StepRouteProvenance,
     StepArtifact,
+    SubmittedStepArtifact,
     TargetRef,
 )
 from investigation_service import reporting
@@ -63,6 +66,22 @@ def _plan() -> InvestigationPlan:
         evidence_batches=[],
         active_batch_id="batch-1",
         planning_notes=["artifact-note"],
+    )
+
+
+def _runtime_plan() -> InvestigationPlan:
+    return _plan().model_copy(
+        update={
+            "evidence_batches": [
+                EvidenceBatch(
+                    id="batch-1",
+                    title="Initial evidence",
+                    status="pending",
+                    intent="Collect target evidence.",
+                    step_ids=["collect-target-evidence", "collect-change-candidates"],
+                )
+            ]
+        }
     )
 
 
@@ -561,3 +580,105 @@ def test_render_investigation_report_uses_reconciled_execution_context(monkeypat
     assert report.diagnosis == "Service instability"
     assert report.tool_path_trace is not None
     assert report.tool_path_trace.executed_step_ids == ["collect-target-evidence"]
+
+
+def test_advance_investigation_runtime_returns_context_without_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    monkeypatch.setattr(
+        reporting,
+        "collect_change_candidates",
+        lambda _req: CorrelatedChangesResponse(
+            cluster="artifact-cluster",
+            scope="service",
+            target="service/api-resolved",
+            changes=[],
+            limitations=[],
+        ),
+    )
+    monkeypatch.setattr(
+        reporting,
+        "execute_investigation_step",
+        lambda _req: (_ for _ in ()).throw(AssertionError("fallback execution should not run")),
+    )
+
+    response = reporting.advance_investigation_runtime(
+        AdvanceInvestigationRuntimeRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+            execution_context=ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[]),
+            submitted_steps=[
+                {
+                    "step_id": "collect-target-evidence",
+                    "evidence_bundle": _bundle(),
+                    "actual_route": {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "prometheus-mcp-server",
+                        "tool_name": "execute_query",
+                        "tool_path": ["prometheus-mcp-server", "execute_query"],
+                    },
+                }
+            ],
+        )
+    )
+
+    assert response.execution_context.allow_bounded_fallback_execution is False
+    assert response.execution_context.executions[0].executed_step_ids == [
+        "collect-target-evidence",
+        "collect-change-candidates",
+    ]
+    assert response.next_active_batch is None
+
+
+def test_render_investigation_report_uses_advanced_runtime_context_without_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    monkeypatch.setattr(
+        reporting,
+        "collect_change_candidates",
+        lambda _req: CorrelatedChangesResponse(
+            cluster="artifact-cluster",
+            scope="service",
+            target="service/api-resolved",
+            changes=[],
+            limitations=[],
+        ),
+    )
+    monkeypatch.setattr(
+        reporting,
+        "execute_investigation_step",
+        lambda _req: (_ for _ in ()).throw(AssertionError("fallback execution should remain disabled")),
+    )
+    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
+
+    runtime = reporting.advance_investigation_runtime(
+        AdvanceInvestigationRuntimeRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+            execution_context=ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[]),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="prometheus-mcp-server",
+                        tool_name="execute_query",
+                        tool_path=["prometheus-mcp-server", "execute_query"],
+                    ),
+                )
+            ],
+        )
+    )
+
+    report = reporting.render_investigation_report(
+        InvestigationReportingRequest(
+            target="service/api",
+            profile="service",
+            include_related_data=False,
+            execution_context=runtime.execution_context,
+        )
+    )
+
+    assert report.diagnosis == "Service instability"
+    assert report.tool_path_trace is not None
+    assert report.tool_path_trace.executed_step_ids == [
+        "collect-target-evidence",
+        "collect-change-candidates",
+    ]

@@ -253,6 +253,18 @@ class SubmittedEvidenceReconciliationResult(BaseModel):
     updated_plan: InvestigationPlan
 
 
+class AdvanceInvestigationRuntimeRequest(BaseModel):
+    incident: BuildInvestigationPlanRequest
+    execution_context: "ReportingExecutionContext | None" = None
+    batch_id: str | None = None
+    submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
+
+
+class AdvanceInvestigationRuntimeResponse(BaseModel):
+    execution_context: "ReportingExecutionContext"
+    next_active_batch: "ActiveEvidenceBatchContract | None" = None
+
+
 class CollectNodeContextRequest(BaseModel):
     cluster: str | None = Field(default=None, description="Logical cluster alias")
     node_name: str = Field(..., description="Cluster node name")

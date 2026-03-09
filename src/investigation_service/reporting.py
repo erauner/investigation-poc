@@ -13,6 +13,8 @@ from .guidelines import guideline_context_from_analysis, load_guideline_rules, r
 from .k8s_adapter import get_backend_cr, get_cluster_cr, get_frontend_cr
 from .models import (
     ActiveEvidenceBatchContract,
+    AdvanceInvestigationRuntimeRequest,
+    AdvanceInvestigationRuntimeResponse,
     BuildInvestigationPlanRequest,
     CorrelatedChange,
     EvidenceBatchExecution,
@@ -25,6 +27,7 @@ from .models import (
     InvestigationReportRequest,
     InvestigationState,
     InvestigationTarget,
+    ReportingExecutionContext,
     ResolvedGuideline,
     SubmitEvidenceArtifactsRequest,
     SubmittedEvidenceReconciliationResult,
@@ -197,6 +200,41 @@ def build_investigation_state(req: InvestigationReportingRequest) -> Investigati
         initial_plan=initial_plan,
         updated_plan=fallback_updated_plan,
         executions=[*executions, fallback_execution],
+    )
+
+
+def advance_investigation_runtime(req: AdvanceInvestigationRuntimeRequest) -> AdvanceInvestigationRuntimeResponse:
+    initial_plan, updated_plan, executions, _allow_bounded_fallback_execution = _reporting_execution_context(
+        InvestigationReportingRequest(
+            **req.incident.model_dump(mode="python"),
+            execution_context=req.execution_context,
+        ),
+        req.incident,
+    )
+    result = planner.advance_active_evidence_batch(
+        plan=updated_plan,
+        incident=req.incident,
+        submitted_steps=req.submitted_steps,
+        batch_id=req.batch_id,
+        deps=_planner_deps(),
+    )
+    next_active_batch = None
+    if result.updated_plan.active_batch_id is not None:
+        next_active_batch = planner.get_active_evidence_batch_contract(
+            GetActiveEvidenceBatchRequest(
+                plan=result.updated_plan,
+                incident=req.incident,
+                batch_id=result.updated_plan.active_batch_id,
+            )
+        )
+    return AdvanceInvestigationRuntimeResponse(
+        execution_context=ReportingExecutionContext(
+            initial_plan=initial_plan,
+            updated_plan=result.updated_plan,
+            executions=[*executions, result.execution],
+            allow_bounded_fallback_execution=False,
+        ),
+        next_active_batch=next_active_batch,
     )
 
 

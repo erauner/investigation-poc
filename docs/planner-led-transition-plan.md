@@ -410,6 +410,7 @@ Delivered so far:
 - mixed batches now preserve pending planner-owned steps instead of forcing whole-batch completion
 - `execute_investigation_step(...)` now behaves as bounded fallback over the remaining pending steps
 - canonical reporting can now consume reconciled executions before falling back to one bounded internal execution when primary evidence is still missing
+- a canonical runtime-progress helper can now advance one active batch by reconciling submitted external evidence first and then auto-running only the remaining same-batch planner-owned steps
 
 Still open in this slice:
 

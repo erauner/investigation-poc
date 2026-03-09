@@ -3,6 +3,7 @@ import os
 from mcp.server.fastmcp import FastMCP
 
 from .models import (
+    AdvanceInvestigationRuntimeRequest,
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
@@ -18,6 +19,7 @@ from .models import (
     SubmitEvidenceArtifactsRequest,
     UpdateInvestigationPlanRequest,
 )
+from .reporting import advance_investigation_runtime as advance_investigation_runtime_impl
 from .correlation import collect_change_candidates as collect_change_candidates_impl
 from .reporting import build_investigation_plan as build_investigation_plan_impl
 from .reporting import execute_investigation_step as execute_investigation_step_impl
@@ -180,6 +182,25 @@ def submit_evidence_step_artifacts(
             incident=incident,
             batch_id=batch_id,
             submitted_steps=submitted_steps,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def advance_investigation_runtime(
+    incident: dict,
+    execution_context: dict | None = None,
+    submitted_steps: list[dict] | None = None,
+    batch_id: str | None = None,
+) -> dict:
+    """Advance exactly one active evidence batch by reconciling submitted external evidence first, then auto-running only the remaining planner-owned same-batch steps."""
+    response = advance_investigation_runtime_impl(
+        AdvanceInvestigationRuntimeRequest(
+            incident=incident,
+            execution_context=execution_context,
+            submitted_steps=submitted_steps or [],
+            batch_id=batch_id,
         )
     )
     return response.model_dump(mode="json")

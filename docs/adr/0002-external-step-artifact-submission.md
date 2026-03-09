@@ -90,6 +90,7 @@ This direction is now partially implemented:
 - externally gathered step artifacts can be submitted and reconciled into canonical planner artifacts
 - mixed batches can complete incrementally, with planner-owned steps remaining pending
 - the canonical reporting path can now consume reconciled executions before using bounded internal fallback
+- a canonical runtime-progress helper can now advance one active batch by reconciling submitted evidence first and auto-running only the remaining same-batch planner-owned steps
 
 This ADR also sets the intended sequencing for a future adapter-facing result envelope:
 

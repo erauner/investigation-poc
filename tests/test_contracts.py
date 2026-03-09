@@ -11,6 +11,8 @@ from investigation_service.k8s_adapter import get_k8s_object
 from investigation_service.main import app
 from investigation_service.models import (
     ActualRoute,
+    AdvanceInvestigationRuntimeRequest,
+    AdvanceInvestigationRuntimeResponse,
     BuildInvestigationPlanRequest,
     BuildRootCauseReportRequest,
     CollectAlertContextRequest,
@@ -1025,6 +1027,77 @@ def test_render_investigation_report_route_accepts_execution_context(monkeypatch
     assert response.status_code == 200
     assert captured["execution_context"] is not None
     assert captured["execution_context"].allow_bounded_fallback_execution is False
+
+
+def test_advance_investigation_runtime_route_returns_execution_context(monkeypatch) -> None:
+    captured = {}
+
+    def fake_advance(req: AdvanceInvestigationRuntimeRequest) -> AdvanceInvestigationRuntimeResponse:
+        captured["request"] = req
+        return AdvanceInvestigationRuntimeResponse(
+            execution_context={
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": {
+                        "source": "manual",
+                        "scope": "service",
+                        "cluster": "test-cluster",
+                        "namespace": "default",
+                        "requested_target": "service/api",
+                        "target": "service/api",
+                        "service_name": "api",
+                        "profile": "service",
+                        "lookback_minutes": 15,
+                        "normalization_notes": [],
+                    },
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": False,
+            },
+            next_active_batch=None,
+        )
+
+    monkeypatch.setattr("investigation_service.main.advance_investigation_runtime_from_request", fake_advance)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/advance_investigation_runtime",
+        json={
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service"},
+            "execution_context": {
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": {
+                        "source": "manual",
+                        "scope": "service",
+                        "cluster": "test-cluster",
+                        "namespace": "default",
+                        "requested_target": "service/api",
+                        "target": "service/api",
+                        "service_name": "api",
+                        "profile": "service",
+                        "lookback_minutes": 15,
+                        "normalization_notes": [],
+                    },
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": True,
+            },
+            "submitted_steps": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["request"].incident.target == "service/api"
+    assert response.json()["execution_context"]["allow_bounded_fallback_execution"] is False
 
 
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:
