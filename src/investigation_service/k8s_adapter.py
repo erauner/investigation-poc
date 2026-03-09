@@ -46,6 +46,8 @@ def _cluster_args(cluster: ResolvedCluster | None) -> list[str]:
     args: list[str] = []
     if not cluster:
         return args
+    if cluster.use_in_cluster:
+        return args
     if cluster.kubeconfig_path:
         args.extend(["--kubeconfig", cluster.kubeconfig_path])
     if cluster.kube_context:

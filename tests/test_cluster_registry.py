@@ -28,6 +28,7 @@ clusters:
     assert resolved.kube_context == "kind-investigation-b"
     assert resolved.prometheus_url == "http://prom-b:9090"
     assert resolved.kubeconfig_path == str(kubeconfig)
+    assert resolved.use_in_cluster is False
     assert resolved.source == "explicit"
 
 
@@ -48,6 +49,9 @@ clusters:
 """
     )
     monkeypatch.setenv("CLUSTER_REGISTRY_PATH", str(path))
+    kubeconfig = tmp_path / "multi-kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\nkind: Config\n")
+    monkeypatch.setenv("KUBECONFIG_PATH", str(kubeconfig))
 
     resolved = resolve_cluster(None, {"cluster": "remote-b"})
 
@@ -104,12 +108,38 @@ clusters:
     )
     monkeypatch.setenv("CLUSTER_REGISTRY_PATH", str(path))
     monkeypatch.setenv("KUBECONFIG_PATH", "/etc/investigation/kubeconfig/config")
+    monkeypatch.setenv("CLUSTER_NAME", "erauner-home")
 
     resolved = resolve_cluster(None)
 
     assert resolved.alias == "erauner-home"
     assert resolved.kubeconfig_path is None
     assert resolved.kube_context is None
+    assert resolved.use_in_cluster is True
+
+
+def test_resolve_cluster_rejects_remote_alias_when_kubeconfig_is_missing(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "clusters.yaml"
+    path.write_text(
+        """
+clusters:
+  erauner-home:
+    kube_context: erauner-home
+    default: true
+  remote-a:
+    kube_context: remote-a
+"""
+    )
+    monkeypatch.setenv("CLUSTER_REGISTRY_PATH", str(path))
+    monkeypatch.setenv("KUBECONFIG_PATH", "/etc/investigation/kubeconfig/config")
+    monkeypatch.setenv("CLUSTER_NAME", "erauner-home")
+
+    try:
+        resolve_cluster("remote-a")
+    except ValueError as exc:
+        assert "requires kubeconfig context" in str(exc)
+    else:
+        raise AssertionError("expected remote alias to fail when kubeconfig is missing")
 
 
 def test_resolve_cluster_accepts_explicit_current_context_in_legacy_mode(monkeypatch) -> None:
@@ -120,6 +150,7 @@ def test_resolve_cluster_accepts_explicit_current_context_in_legacy_mode(monkeyp
     resolved = resolve_cluster("current-context")
 
     assert resolved.alias == "current-context"
+    assert resolved.use_in_cluster is True
     assert resolved.source == "legacy_current_context"
 
 
@@ -131,6 +162,7 @@ def test_resolve_cluster_accepts_explicit_cluster_name_in_legacy_mode(monkeypatc
     resolved = resolve_cluster("kind-investigation")
 
     assert resolved.alias == "kind-investigation"
+    assert resolved.use_in_cluster is True
     assert resolved.source == "legacy_current_context"
 
 

@@ -25,6 +25,7 @@ class ResolvedCluster(BaseModel):
     alias: str
     kube_context: str | None = None
     kubeconfig_path: str | None = None
+    use_in_cluster: bool = False
     prometheus_url: str | None = None
     source: str
     allowed_namespaces: list[str] | None = None
@@ -91,12 +92,24 @@ def list_clusters() -> list[str]:
     return sorted(load_cluster_registry().clusters.keys())
 
 
-def _resolve_registered_cluster(config: ClusterConfig, source: str) -> ResolvedCluster:
+def _resolve_registered_cluster(
+    config: ClusterConfig,
+    source: str,
+    *,
+    local_alias: str | None,
+) -> ResolvedCluster:
     kubeconfig_path = _resolved_kubeconfig_path()
+    use_in_cluster = not kubeconfig_path and _normalize_alias(config.alias) == local_alias
+    if config.kube_context and not kubeconfig_path and not use_in_cluster:
+        raise ValueError(
+            f"cluster alias {config.alias} requires kubeconfig context {config.kube_context}, "
+            "but no kubeconfig is mounted"
+        )
     return ResolvedCluster(
         alias=config.alias,
         kube_context=config.kube_context if kubeconfig_path else None,
         kubeconfig_path=kubeconfig_path,
+        use_in_cluster=use_in_cluster,
         prometheus_url=config.prometheus_url or get_prometheus_url(),
         source=source,
         allowed_namespaces=config.allowed_namespaces,
@@ -104,10 +117,12 @@ def _resolve_registered_cluster(config: ClusterConfig, source: str) -> ResolvedC
 
 
 def _legacy_cluster() -> ResolvedCluster:
+    kubeconfig_path = _resolved_kubeconfig_path()
     return ResolvedCluster(
         alias=_normalize_alias(get_cluster_name()) or "current-context",
         kube_context=None,
-        kubeconfig_path=_resolved_kubeconfig_path(),
+        kubeconfig_path=kubeconfig_path,
+        use_in_cluster=not kubeconfig_path,
         prometheus_url=get_prometheus_url(),
         source="legacy_current_context",
         allowed_namespaces=None,
@@ -131,7 +146,7 @@ def resolve_cluster(requested_cluster: str | None, labels: dict[str, str] | None
         config = registry.clusters.get(requested_alias)
         if config is None:
             raise ValueError(f"unknown cluster alias: {requested_cluster}")
-        return _resolve_registered_cluster(config, "explicit")
+        return _resolve_registered_cluster(config, "explicit", local_alias=configured_legacy_alias)
 
     labels = labels or {}
     candidate_labels = [
@@ -145,17 +160,17 @@ def resolve_cluster(requested_cluster: str | None, labels: dict[str, str] | None
             continue
         direct = registry.clusters.get(normalized)
         if direct is not None:
-            return _resolve_registered_cluster(direct, "alert_label")
+            return _resolve_registered_cluster(direct, "alert_label", local_alias=configured_legacy_alias)
         for config in registry.clusters.values():
             if normalized in {_normalize_alias(alias) for alias in config.label_aliases}:
-                return _resolve_registered_cluster(config, "alert_label")
+                return _resolve_registered_cluster(config, "alert_label", local_alias=configured_legacy_alias)
         raise ValueError(f"unknown cluster alias from alert labels: {value}")
 
     if registry.default_cluster:
         config = registry.clusters.get(registry.default_cluster)
         if config is None:
             raise ValueError(f"default cluster alias is not configured: {registry.default_cluster}")
-        return _resolve_registered_cluster(config, "default")
+        return _resolve_registered_cluster(config, "default", local_alias=configured_legacy_alias)
 
     if registry.clusters:
         raise ValueError("cluster is required because multiple clusters are configured and no default is set")
