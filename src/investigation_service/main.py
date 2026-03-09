@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from .models import (
+    ActiveEvidenceBatchContract,
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
@@ -9,11 +10,14 @@ from .models import (
     ExecuteInvestigationStepRequest,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
+    GetActiveEvidenceBatchRequest,
     InvestigationAnalysis,
     InvestigationPlan,
     InvestigationReport,
     InvestigationReportRequest,
     InvestigationTarget,
+    SubmitEvidenceArtifactsRequest,
+    SubmittedEvidenceReconciliationResult,
     UpdateInvestigationPlanRequest,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
@@ -22,9 +26,11 @@ from .correlation import collect_change_candidates
 from .reporting import (
     build_investigation_plan as build_investigation_plan_from_request,
     execute_investigation_step as execute_investigation_step_from_request,
+    get_active_evidence_batch as get_active_evidence_batch_from_request,
     rank_hypotheses as rank_hypotheses_from_request,
     render_investigation_report,
     resolve_primary_target as resolve_primary_target_from_request,
+    submit_evidence_step_artifacts as submit_evidence_step_artifacts_from_request,
     update_investigation_plan as update_investigation_plan_from_request,
 )
 from .tools import (
@@ -59,6 +65,16 @@ def build_plan(req: BuildInvestigationPlanRequest) -> InvestigationPlan:
 @app.post("/tools/execute_investigation_step", response_model=EvidenceBatchExecution)
 def execute_plan_step(req: ExecuteInvestigationStepRequest) -> EvidenceBatchExecution:
     return execute_investigation_step_from_request(req)
+
+
+@app.post("/tools/get_active_evidence_batch", response_model=ActiveEvidenceBatchContract)
+def get_active_batch(req: GetActiveEvidenceBatchRequest) -> ActiveEvidenceBatchContract:
+    return get_active_evidence_batch_from_request(req)
+
+
+@app.post("/tools/submit_evidence_step_artifacts", response_model=SubmittedEvidenceReconciliationResult)
+def submit_evidence(req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
+    return submit_evidence_step_artifacts_from_request(req)
 
 
 @app.post("/tools/update_investigation_plan", response_model=InvestigationPlan)

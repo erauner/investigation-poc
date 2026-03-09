@@ -4,6 +4,7 @@ from typing import Any
 
 from .execution_policy import policy_fields
 from .models import (
+    ActiveEvidenceBatchContract,
     ActualRoute,
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
@@ -15,16 +16,23 @@ from .models import (
     EvidenceBatch,
     EvidenceBatchExecution,
     EvidenceBundle,
+    EvidenceStepContract,
     ExecuteInvestigationStepRequest,
     FindUnhealthyPodRequest,
+    GetActiveEvidenceBatchRequest,
+    InvestigationSubject,
     InvestigationPlan,
     InvestigationTarget,
     InvestigationMode,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
     PlanStep,
+    StepExecutionInputs,
     StepRouteProvenance,
     StepArtifact,
+    SubmitEvidenceArtifactsRequest,
+    SubmittedEvidenceReconciliationResult,
+    SubmittedStepArtifact,
     UpdateInvestigationPlanRequest,
 )
 
@@ -513,6 +521,218 @@ def _route_provenance(step: PlanStep, *, target: InvestigationTarget) -> StepRou
     )
 
 
+def _artifact_type_for_step(step: PlanStep) -> str:
+    if step.id == "collect-change-candidates":
+        return "change_candidates"
+    return "evidence_bundle"
+
+
+def _execution_mode_for_step(step: PlanStep) -> str:
+    if step.suggested_capability in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}:
+        return "external_preferred"
+    return "control_plane_only"
+
+
+def _subject_from_incident(
+    incident: BuildInvestigationPlanRequest,
+    target: InvestigationTarget | None,
+) -> InvestigationSubject:
+    if incident.alertname:
+        summary = incident.question or f"Investigate alert {incident.alertname}"
+        return InvestigationSubject(
+            source="alert",
+            kind="alert",
+            summary=summary,
+            requested_target=target.requested_target if target else incident.target,
+            alertname=incident.alertname,
+        )
+    if incident.target:
+        return InvestigationSubject(
+            source="manual",
+            kind="target",
+            summary=incident.question or f"Investigate {incident.target}",
+            requested_target=incident.target,
+        )
+    return InvestigationSubject(
+        source="manual",
+        kind="question",
+        summary=incident.question or "Investigate the reported issue",
+        requested_target=target.requested_target if target else None,
+    )
+
+
+def _step_execution_inputs(
+    step: PlanStep,
+    *,
+    target: InvestigationTarget,
+    incident: BuildInvestigationPlanRequest,
+) -> StepExecutionInputs:
+    if step.id == "collect-alert-evidence":
+        return StepExecutionInputs(
+            request_kind="alert_context",
+            cluster=target.cluster,
+            namespace=target.namespace or incident.namespace,
+            target=target.target,
+            profile=target.profile,
+            service_name=target.service_name,
+            node_name=target.node_name or incident.node_name,
+            lookback_minutes=target.lookback_minutes,
+            alertname=incident.alertname,
+            labels=dict(incident.labels),
+            annotations=dict(incident.annotations),
+        )
+    if step.id == "collect-change-candidates":
+        request = _change_candidates_request(target)
+        return StepExecutionInputs(
+            request_kind="change_candidates",
+            cluster=request.cluster,
+            namespace=request.namespace,
+            target=request.target,
+            profile=request.profile,
+            service_name=request.service_name,
+            lookback_minutes=request.lookback_minutes,
+            anchor_timestamp=request.anchor_timestamp,
+            limit=request.limit,
+        )
+    if step.id == "collect-service-follow-up-evidence":
+        return StepExecutionInputs(
+            request_kind="service_context",
+            cluster=target.cluster,
+            namespace=target.namespace,
+            target=f"service/{target.service_name}" if target.service_name else None,
+            profile="service",
+            service_name=target.service_name,
+            lookback_minutes=target.lookback_minutes,
+        )
+    request = _target_collect_request(target)
+    return StepExecutionInputs(
+        request_kind="target_context",
+        cluster=request.cluster,
+        namespace=getattr(request, "namespace", None),
+        target=getattr(request, "target", None),
+        profile=getattr(request, "profile", None),
+        service_name=getattr(request, "service_name", None),
+        node_name=getattr(request, "node_name", None),
+        lookback_minutes=request.lookback_minutes,
+    )
+
+
+def get_active_evidence_batch_contract(req: GetActiveEvidenceBatchRequest) -> ActiveEvidenceBatchContract:
+    batch = select_active_evidence_batch(req.plan, batch_id=req.batch_id)
+    steps = _step_map(req.plan)
+    target = req.plan.target
+    if target is None:
+        raise ValueError("investigation plan did not produce a primary target")
+    return ActiveEvidenceBatchContract(
+        batch_id=batch.id,
+        title=batch.title,
+        intent=batch.intent,
+        subject=_subject_from_incident(req.incident, target),
+        canonical_target=target,
+        steps=[
+            EvidenceStepContract(
+                step_id=step.id,
+                title=step.title,
+                plane=step.plane,
+                artifact_type=_artifact_type_for_step(step),
+                requested_capability=step.suggested_capability,
+                preferred_mcp_server=step.preferred_mcp_server,
+                preferred_tool_names=list(step.preferred_tool_names),
+                fallback_mcp_server=step.fallback_mcp_server,
+                fallback_tool_names=list(step.fallback_tool_names),
+                execution_mode=_execution_mode_for_step(step),
+                execution_inputs=_step_execution_inputs(step, target=target, incident=req.incident),
+            )
+            for step in [steps[step_id] for step_id in batch.step_ids]
+        ],
+    )
+
+
+def _step_artifact_from_submission(
+    step: PlanStep,
+    *,
+    target: InvestigationTarget,
+    incident: BuildInvestigationPlanRequest,
+    submission: SubmittedStepArtifact,
+) -> StepArtifact:
+    artifact_type = _artifact_type_for_step(step)
+    route_provenance = StepRouteProvenance(
+        requested_capability=step.suggested_capability,
+        route_satisfaction=_route_satisfaction(step, submission.actual_route),
+        actual_route=submission.actual_route,
+    )
+    if artifact_type == "change_candidates":
+        if submission.change_candidates is None:
+            raise ValueError(f"step {step.id} requires change_candidates payload")
+        changes = submission.change_candidates
+        return StepArtifact(
+            step_id=step.id,
+            plane=step.plane,
+            artifact_type="change_candidates",
+            summary=list(submission.summary) or _summary_for_change_candidates(changes),
+            limitations=list(submission.limitations) or list(changes.limitations),
+            change_candidates=changes,
+            route_provenance=route_provenance,
+        )
+    if submission.evidence_bundle is None:
+        raise ValueError(f"step {step.id} requires evidence_bundle payload")
+    bundle = submission.evidence_bundle
+    if step.id == "collect-alert-evidence":
+        summary = list(submission.summary) or _summary_for_alert_bundle(incident.alertname, target.requested_target, bundle)
+    else:
+        summary = list(submission.summary) or _summary_for_evidence_bundle(bundle)
+    return StepArtifact(
+        step_id=step.id,
+        plane=step.plane,
+        artifact_type="evidence_bundle",
+        summary=summary,
+        limitations=list(submission.limitations) or list(bundle.limitations),
+        evidence_bundle=bundle,
+        route_provenance=route_provenance,
+    )
+
+
+def submit_evidence_step_artifacts(req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
+    if req.plan.mode == "factual_analysis":
+        raise ValueError("external evidence submission is not supported for factual_analysis plans")
+    batch = select_active_evidence_batch(req.plan, batch_id=req.batch_id)
+    steps = _step_map(req.plan)
+    target = req.plan.target
+    if target is None:
+        raise ValueError("investigation plan did not produce a primary target")
+    batch_step_ids = set(batch.step_ids)
+    completed_step_ids = {step.id for step in req.plan.steps if step.status == "completed"}
+    submissions_by_step: dict[str, SubmittedStepArtifact] = {}
+    for submission in req.submitted_steps:
+        if submission.step_id not in batch_step_ids:
+            raise ValueError(f"submitted step {submission.step_id} is not part of active batch {batch.id}")
+        if submission.step_id in completed_step_ids:
+            raise ValueError(f"submitted step {submission.step_id} is already completed")
+        if submission.step_id in submissions_by_step:
+            raise ValueError(f"submitted step {submission.step_id} was provided more than once")
+        submissions_by_step[submission.step_id] = submission
+    if not submissions_by_step:
+        raise ValueError("submitted_steps must contain at least one step artifact")
+    artifacts = [
+        _step_artifact_from_submission(
+            steps[step_id],
+            target=target,
+            incident=req.incident,
+            submission=submissions_by_step[step_id],
+        )
+        for step_id in batch.step_ids
+        if step_id in submissions_by_step
+    ]
+    execution = EvidenceBatchExecution(
+        batch_id=batch.id,
+        executed_step_ids=list(submissions_by_step.keys()),
+        artifacts=artifacts,
+        execution_notes=[f"reconciled externally submitted evidence for {batch.id}"],
+    )
+    updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=req.plan, execution=execution))
+    return SubmittedEvidenceReconciliationResult(execution=execution, updated_plan=updated_plan)
+
+
 def _execute_step(
     step: PlanStep,
     *,
@@ -972,16 +1192,7 @@ def update_investigation_plan(req: UpdateInvestigationPlanRequest) -> Investigat
             continue
         updated_steps.append(step)
 
-    updated_batches: list[EvidenceBatch] = []
-    for batch in plan.evidence_batches:
-        if batch.id == batch_id:
-            updated_batches.append(batch.model_copy(update={"status": "completed"}))
-            continue
-        updated_batches.append(batch)
-
-    plan = plan.model_copy(update={"steps": updated_steps, "evidence_batches": updated_batches, "active_batch_id": None})
-    if _should_insert_service_follow_up(plan, req.execution):
-        return _insert_service_follow_up(plan)
+    plan = plan.model_copy(update={"steps": updated_steps, "active_batch_id": None})
 
     completed_step_ids = {step.id for step in plan.steps if step.status == "completed"}
     refreshed_steps: list[PlanStep] = []
@@ -995,19 +1206,23 @@ def update_investigation_plan(req: UpdateInvestigationPlanRequest) -> Investigat
     refreshed_step_map = {step.id: step for step in refreshed_steps}
     next_active_batch_id: str | None = None
     for batch in plan.evidence_batches:
-        if batch.status == "completed":
-            refreshed_batches.append(batch)
-            continue
         batch_steps = [refreshed_step_map[step_id] for step_id in batch.step_ids]
         if all(step.status == "completed" for step in batch_steps):
             refreshed_batches.append(batch.model_copy(update={"status": "completed"}))
             continue
-        if all(step.status == "pending" for step in batch_steps):
+        if all(step.status in {"completed", "pending"} for step in batch_steps) and any(
+            step.status == "pending" for step in batch_steps
+        ):
             refreshed_batches.append(batch.model_copy(update={"status": "pending"}))
             if next_active_batch_id is None and all(step.category == "evidence" for step in batch_steps):
                 next_active_batch_id = batch.id
             continue
         refreshed_batches.append(batch.model_copy(update={"status": "deferred"}))
+
+    plan = plan.model_copy(update={"steps": refreshed_steps, "evidence_batches": refreshed_batches, "active_batch_id": next_active_batch_id})
+    batch_status = next((batch.status for batch in refreshed_batches if batch.id == batch_id), None)
+    if batch_status == "completed" and _should_insert_service_follow_up(plan, req.execution):
+        return _insert_service_follow_up(plan)
 
     notes = list(plan.planning_notes)
     notes.append(f"updated plan after executing {batch_id}")

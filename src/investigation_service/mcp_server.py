@@ -12,15 +12,19 @@ from .models import (
     ExecuteInvestigationStepRequest,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
+    GetActiveEvidenceBatchRequest,
     InvestigationReportRequest,
+    SubmitEvidenceArtifactsRequest,
     UpdateInvestigationPlanRequest,
 )
 from .correlation import collect_change_candidates as collect_change_candidates_impl
 from .reporting import build_investigation_plan as build_investigation_plan_impl
 from .reporting import execute_investigation_step as execute_investigation_step_impl
+from .reporting import get_active_evidence_batch as get_active_evidence_batch_impl
 from .reporting import rank_hypotheses as rank_hypotheses_impl
 from .reporting import render_investigation_report as render_investigation_report_impl
 from .reporting import resolve_primary_target as resolve_primary_target_impl
+from .reporting import submit_evidence_step_artifacts as submit_evidence_step_artifacts_impl
 from .reporting import update_investigation_plan as update_investigation_plan_impl
 from .tools import find_unhealthy_pod as find_unhealthy_pod_impl
 from .tools import find_unhealthy_workloads as find_unhealthy_workloads_impl
@@ -143,6 +147,38 @@ def execute_investigation_step(
             plan=plan,
             incident=incident,
             batch_id=batch_id,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def get_active_evidence_batch(plan: dict, incident: dict, batch_id: str | None = None) -> dict:
+    """Expose the current bounded evidence batch as an execution-facing contract for external evidence gathering."""
+    response = get_active_evidence_batch_impl(
+        GetActiveEvidenceBatchRequest(
+            plan=plan,
+            incident=incident,
+            batch_id=batch_id,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def submit_evidence_step_artifacts(
+    plan: dict,
+    incident: dict,
+    submitted_steps: list[dict],
+    batch_id: str | None = None,
+) -> dict:
+    """Submit externally gathered step artifacts for reconciliation back into the planner-owned control plane."""
+    response = submit_evidence_step_artifacts_impl(
+        SubmitEvidenceArtifactsRequest(
+            plan=plan,
+            incident=incident,
+            batch_id=batch_id,
+            submitted_steps=submitted_steps,
         )
     )
     return response.model_dump(mode="json")

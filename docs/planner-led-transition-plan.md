@@ -382,6 +382,120 @@ What is still open in Slice 8:
 - public MCP and HTTP surfaces still export some planner-owned evidence helpers that are no longer part of the intended agent vocabulary
 - local wrappers and policy tests still need to encode the new peer evidence-plane contract more explicitly
 
+### Slice 9: External Evidence Handoff And Reconciliation
+
+Status: Proposed
+
+Goal:
+
+- make the planner-led architecture operationally real by separating:
+  - planner/reconciler responsibilities
+  - evidence-gatherer responsibilities
+  - later adapter-facing outcome packaging
+
+Planner/reconciler responsibilities should remain product-owned:
+
+- resolve target
+- build plan
+- expose one bounded active evidence batch
+- reconcile submitted step artifacts
+- update the plan
+- rank hypotheses
+- render the final report
+
+In this slice, target resolution should remain product-owned but should become more operationally explicit.
+
+That means it should continue to preserve:
+
+- the broader investigation subject
+- the canonical resolved current investigation target
+- the resolved investigation scope
+
+And it should also begin to produce:
+
+- execution-facing target details for each bounded evidence step
+- the concrete target inputs an external evidence gatherer needs to satisfy that step without re-owning normalization semantics
+
+This should not assume that every investigation starts from one concrete object reference.
+
+The future shape should support a broader subject such as:
+
+- a single alert
+- a group of related alerts
+- a service symptom
+- an operator-owned convenience object
+- a vague unhealthy workload report
+
+From that broader subject, the planner/reconciler should choose a current canonical target and derive bounded execution targets for evidence gathering.
+
+Evidence gatherer responsibilities should move toward external execution:
+
+- satisfy one bounded evidence step or batch
+- use Kubernetes MCP for runtime evidence where appropriate
+- use Prometheus MCP for metrics evidence where appropriate
+- return typed artifacts plus route provenance
+
+Delivered in this slice should be:
+
+- an execution-facing representation of the active evidence batch
+- a typed submitted-step-artifact contract
+- a reconciliation path that updates plan state from externally satisfied evidence steps
+- execution-facing target details attached to active evidence steps so external evidence gathering does not have to reinterpret canonical target semantics on its own
+- explicit fallback semantics where `execute_investigation_step(...)` remains available as bounded internal execution during transition
+- parity in downstream state/render behavior regardless of whether evidence artifacts were submitted externally or executed internally
+
+Longer term, this slice should set up a clearer distinction between:
+
+- investigation subject
+- canonical current investigation target
+- execution targets for bounded evidence gathering
+
+What this slice should not do:
+
+- do not add a broad raw-tool orchestration layer
+- do not move planning semantics into peer MCP servers
+- do not introduce the final adapter-facing `InvestigationOutcome` envelope yet
+
+Validation gate:
+
+- tests proving externally submitted step artifacts advance plan state correctly
+- tests proving follow-up insertion and batch progression work from submitted artifacts
+- tests proving fallback internal execution and external submission converge on the same artifact semantics
+- real-cluster validation that distinguishes preferred peer evidence paths from bounded fallback execution
+
+### Slice 10: Stable Outcome Envelope
+
+Status: Proposed
+
+Goal:
+
+- add a canonical adapter-facing `InvestigationOutcome` only after external evidence submission and reconciliation are part of the normal flow
+
+Delivered in this slice should be:
+
+- `InvestigationOutcome` wrapping reconciled:
+  - `InvestigationState`
+  - `InvestigationAnalysis`
+  - `InvestigationReport`
+- honest completion status such as:
+  - `completed`
+  - `partial`
+  - `blocked`
+  - `failed`
+- a compact execution summary derived from reconciled submitted artifacts and bounded fallback execution
+
+This slice should remain:
+
+- adapter-facing
+- trigger-agnostic
+- downstream of planner/reconciler and evidence-gatherer handoff
+
+Validation gate:
+
+- tests proving outcome status reflects reconciled execution truth
+- tests proving outcome packaging is stable across externally submitted and fallback-executed evidence paths
+- integration checks for future adapter consumers without widening the agent-visible tool vocabulary
+
 ### Next Cleanup After Peer Evidence-Plane Adoption
 
 Once the peer evidence-plane servers are the normal path, the next cleanup should intentionally remove or demote the remaining transitional public surfaces that overlap with them.
@@ -428,19 +542,30 @@ Validation gate:
 
 The next implementation move should be:
 
-### Continue Slice 8
+### Continue Slice 8, Then Start Slice 9
 
 Why:
 
 - the deletion pass is complete, so the remaining risk is behavior quality rather than surface sprawl
 - real-cluster diagnosis quality has already improved, but the slice is not complete yet
 - observability now shows that peer tool usage is part of the runtime story and still needs better attribution
+- once Slice 8 observability is good enough, the next highest-leverage move is explicit external evidence handoff and reconciliation
+
+Implementation order after current Slice 8 work:
+
+1. expose active evidence batches as execution-facing contracts
+2. add typed submitted-step-artifact reconciliation
+3. keep `execute_investigation_step(...)` as bounded fallback during transition
+4. add `InvestigationOutcome` only after reconciled execution becomes canonical
+
+As part of Slice 9, make target resolution intentionally feed execution-facing target details into the active evidence batch contract rather than remaining only an internal normalization step.
 
 What not to do yet:
 
 - do not introduce a generic raw-tool orchestration layer
 - do not add more compatibility surfaces back into the backend
 - do not assume peer evidence-tool usage is bad by default; measure and judge it first
+- do not introduce `InvestigationOutcome` ahead of the evidence submission boundary
 
 ## End-State E2E Expectations
 

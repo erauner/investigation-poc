@@ -129,6 +129,53 @@ class InvestigationPlan(BaseModel):
     planning_notes: list[str] = Field(default_factory=list)
 
 
+class InvestigationSubject(BaseModel):
+    source: Literal["manual", "alert"]
+    kind: Literal["target", "alert", "question"]
+    summary: str
+    requested_target: str | None = None
+    alertname: str | None = None
+
+
+class StepExecutionInputs(BaseModel):
+    request_kind: Literal["alert_context", "target_context", "service_context", "change_candidates"]
+    cluster: str | None = None
+    namespace: str | None = None
+    target: str | None = None
+    profile: ProfileType | None = None
+    service_name: str | None = None
+    node_name: str | None = None
+    lookback_minutes: int | None = None
+    alertname: str | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+    annotations: dict[str, str] = Field(default_factory=dict)
+    anchor_timestamp: str | None = None
+    limit: int | None = None
+
+
+class EvidenceStepContract(BaseModel):
+    step_id: str
+    title: str
+    plane: str
+    artifact_type: Literal["evidence_bundle", "change_candidates"]
+    requested_capability: str | None = None
+    preferred_mcp_server: str | None = None
+    preferred_tool_names: list[str] = Field(default_factory=list)
+    fallback_mcp_server: str | None = None
+    fallback_tool_names: list[str] = Field(default_factory=list)
+    execution_mode: Literal["external_preferred", "control_plane_only"]
+    execution_inputs: StepExecutionInputs
+
+
+class ActiveEvidenceBatchContract(BaseModel):
+    batch_id: str
+    title: str
+    intent: str
+    subject: InvestigationSubject
+    canonical_target: InvestigationTarget | None = None
+    steps: list[EvidenceStepContract] = Field(default_factory=list)
+
+
 class ActualRoute(BaseModel):
     source_kind: Literal["investigation_internal", "peer_mcp"]
     mcp_server: str | None = None
@@ -177,6 +224,33 @@ class ExecuteInvestigationStepRequest(BaseModel):
 class UpdateInvestigationPlanRequest(BaseModel):
     plan: InvestigationPlan
     execution: EvidenceBatchExecution
+
+
+class SubmittedStepArtifact(BaseModel):
+    step_id: str
+    evidence_bundle: "EvidenceBundle | None" = None
+    change_candidates: "CorrelatedChangesResponse | None" = None
+    actual_route: ActualRoute
+    summary: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+
+
+class GetActiveEvidenceBatchRequest(BaseModel):
+    plan: InvestigationPlan
+    incident: BuildInvestigationPlanRequest
+    batch_id: str | None = None
+
+
+class SubmitEvidenceArtifactsRequest(BaseModel):
+    plan: InvestigationPlan
+    incident: BuildInvestigationPlanRequest
+    batch_id: str | None = None
+    submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
+
+
+class SubmittedEvidenceReconciliationResult(BaseModel):
+    execution: EvidenceBatchExecution
+    updated_plan: InvestigationPlan
 
 
 class CollectNodeContextRequest(BaseModel):

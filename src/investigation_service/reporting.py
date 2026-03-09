@@ -12,10 +12,12 @@ from .event_fingerprints import canonicalize_event_fingerprint
 from .guidelines import guideline_context_from_analysis, load_guideline_rules, resolve_guidelines_for_context
 from .k8s_adapter import get_backend_cr, get_cluster_cr, get_frontend_cr
 from .models import (
+    ActiveEvidenceBatchContract,
     BuildInvestigationPlanRequest,
     CorrelatedChange,
     EvidenceBatchExecution,
     ExecuteInvestigationStepRequest,
+    GetActiveEvidenceBatchRequest,
     InvestigationAnalysis,
     InvestigationPlan,
     InvestigationReport,
@@ -23,6 +25,8 @@ from .models import (
     InvestigationState,
     InvestigationTarget,
     ResolvedGuideline,
+    SubmitEvidenceArtifactsRequest,
+    SubmittedEvidenceReconciliationResult,
     UpdateInvestigationPlanRequest,
 )
 from .planner import PlannerDeps
@@ -130,6 +134,14 @@ def build_investigation_plan(req: BuildInvestigationPlanRequest) -> Investigatio
 
 def execute_investigation_step(req: ExecuteInvestigationStepRequest) -> EvidenceBatchExecution:
     return planner.execute_investigation_step(req, _planner_deps())
+
+
+def get_active_evidence_batch(req: GetActiveEvidenceBatchRequest) -> ActiveEvidenceBatchContract:
+    return planner.get_active_evidence_batch_contract(req)
+
+
+def submit_evidence_step_artifacts(req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
+    return planner.submit_evidence_step_artifacts(req)
 
 
 def update_investigation_plan(req: UpdateInvestigationPlanRequest) -> InvestigationPlan:

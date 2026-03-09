@@ -19,12 +19,15 @@ from investigation_service.models import (
     CorrelatedChangesResponse,
     EvidenceBatchExecution,
     EvidenceItem,
+    GetActiveEvidenceBatchRequest,
     Finding,
     InvestigationAnalysis,
     InvestigationPlan,
     InvestigationReport,
     InvestigationReportRequest,
     InvestigationTarget,
+    SubmitEvidenceArtifactsRequest,
+    SubmittedEvidenceReconciliationResult,
     StepArtifact,
     StepRouteProvenance,
     TargetRef,
@@ -237,6 +240,215 @@ def test_execute_investigation_step_route_returns_execution(monkeypatch) -> None
     assert body["artifacts"][0]["route_provenance"]["requested_capability"] == "workload_evidence_plane"
     assert body["artifacts"][0]["route_provenance"]["route_satisfaction"] == "unmatched"
     assert body["artifacts"][0]["route_provenance"]["actual_route"]["tool_name"] == "collect_workload_evidence"
+
+
+def test_get_active_evidence_batch_route_returns_execution_contract(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.get_active_evidence_batch_from_request",
+        lambda _req: {
+            "batch_id": "batch-1",
+            "title": "Initial target evidence",
+            "intent": "Collect evidence",
+            "subject": {
+                "source": "manual",
+                "kind": "target",
+                "summary": "Investigate service/api",
+                "requested_target": "service/api",
+                "alertname": None,
+            },
+            "canonical_target": {
+                "source": "manual",
+                "scope": "service",
+                "cluster": "erauner-home",
+                "namespace": "default",
+                "requested_target": "service/api",
+                "target": "service/api",
+                "service_name": "api",
+                "profile": "service",
+                "lookback_minutes": 15,
+                "normalization_notes": [],
+            },
+            "steps": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "title": "Collect service evidence",
+                    "plane": "service",
+                    "artifact_type": "evidence_bundle",
+                    "requested_capability": "service_evidence_plane",
+                    "preferred_mcp_server": "prometheus-mcp-server",
+                    "preferred_tool_names": ["execute_query"],
+                    "fallback_mcp_server": "kubernetes-mcp-server",
+                    "fallback_tool_names": ["resources_get"],
+                    "execution_mode": "external_preferred",
+                    "execution_inputs": {
+                        "request_kind": "target_context",
+                        "cluster": "erauner-home",
+                        "namespace": "default",
+                        "target": "service/api",
+                        "profile": "service",
+                        "service_name": "api",
+                        "node_name": None,
+                        "lookback_minutes": 15,
+                        "labels": {},
+                        "annotations": {},
+                        "anchor_timestamp": None,
+                        "limit": None,
+                        "alertname": None,
+                    },
+                }
+            ],
+        },
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/get_active_evidence_batch",
+        json={
+            "plan": {
+                "mode": "targeted_rca",
+                "objective": "Investigate service/api",
+                "target": {
+                    "source": "manual",
+                    "scope": "service",
+                    "cluster": "erauner-home",
+                    "namespace": "default",
+                    "requested_target": "service/api",
+                    "target": "service/api",
+                    "service_name": "api",
+                    "profile": "service",
+                    "lookback_minutes": 15,
+                    "normalization_notes": [],
+                },
+                "steps": [],
+                "evidence_batches": [],
+                "active_batch_id": "batch-1",
+                "planning_notes": [],
+            },
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["batch_id"] == "batch-1"
+    assert body["subject"]["kind"] == "target"
+    assert body["steps"][0]["execution_mode"] == "external_preferred"
+    assert body["steps"][0]["execution_inputs"]["request_kind"] == "target_context"
+
+
+def test_submit_evidence_step_artifacts_route_returns_execution_and_updated_plan(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.submit_evidence_step_artifacts_from_request",
+        lambda _req: SubmittedEvidenceReconciliationResult(
+            execution=EvidenceBatchExecution(
+                batch_id="batch-1",
+                executed_step_ids=["collect-target-evidence"],
+                artifacts=[],
+                execution_notes=["reconciled externally submitted evidence for batch-1"],
+            ),
+            updated_plan=InvestigationPlan(
+                mode="targeted_rca",
+                objective="Investigate service/api",
+                target=InvestigationTarget(
+                    source="manual",
+                    scope="service",
+                    cluster="erauner-home",
+                    namespace="default",
+                    requested_target="service/api",
+                    target="service/api",
+                    service_name="api",
+                    profile="service",
+                    lookback_minutes=15,
+                    normalization_notes=[],
+                ),
+                steps=[
+                    {
+                        "id": "collect-target-evidence",
+                        "title": "Collect service evidence",
+                        "category": "evidence",
+                        "plane": "service",
+                        "status": "completed",
+                        "rationale": "Collect target evidence",
+                        "suggested_capability": "service_evidence_plane",
+                        "preferred_mcp_server": "prometheus-mcp-server",
+                        "preferred_tool_names": ["execute_query"],
+                        "fallback_mcp_server": "kubernetes-mcp-server",
+                        "fallback_tool_names": ["resources_get"],
+                        "depends_on": [],
+                    }
+                ],
+                evidence_batches=[
+                    {
+                        "id": "batch-1",
+                        "title": "Initial target evidence",
+                        "status": "pending",
+                        "intent": "Collect evidence",
+                        "step_ids": ["collect-target-evidence", "collect-change-candidates"],
+                    }
+                ],
+                active_batch_id="batch-1",
+                planning_notes=["updated plan after executing batch-1"],
+            ),
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/submit_evidence_step_artifacts",
+        json={
+            "plan": {
+                "mode": "targeted_rca",
+                "objective": "Investigate service/api",
+                "target": {
+                    "source": "manual",
+                    "scope": "service",
+                    "cluster": "erauner-home",
+                    "namespace": "default",
+                    "requested_target": "service/api",
+                    "target": "service/api",
+                    "service_name": "api",
+                    "profile": "service",
+                    "lookback_minutes": 15,
+                    "normalization_notes": [],
+                },
+                "steps": [],
+                "evidence_batches": [],
+                "active_batch_id": "batch-1",
+                "planning_notes": [],
+            },
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service"},
+            "submitted_steps": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "evidence_bundle": {
+                        "cluster": "erauner-home",
+                        "target": {"namespace": "default", "kind": "service", "name": "api"},
+                        "object_state": {},
+                        "events": [],
+                        "log_excerpt": "",
+                        "metrics": {},
+                        "findings": [],
+                        "limitations": [],
+                        "enrichment_hints": [],
+                    },
+                    "actual_route": {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "prometheus-mcp-server",
+                        "tool_name": "execute_query",
+                        "tool_path": ["prometheus-mcp-server", "execute_query"],
+                    },
+                    "summary": [],
+                    "limitations": [],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["execution"]["batch_id"] == "batch-1"
+    assert body["execution"]["executed_step_ids"] == ["collect-target-evidence"]
+    assert body["updated_plan"]["active_batch_id"] == "batch-1"
 
 
 def test_update_investigation_plan_route_returns_plan(monkeypatch) -> None:

@@ -1,7 +1,9 @@
 import pytest
 
 from investigation_service.models import (
+    ActualRoute,
     BuildInvestigationPlanRequest,
+    GetActiveEvidenceBatchRequest,
     CorrelatedChangesResponse,
     EvidenceBatch,
     EvidenceBatchExecution,
@@ -12,7 +14,9 @@ from investigation_service.models import (
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
     PlanStep,
+    SubmitEvidenceArtifactsRequest,
     TargetRef,
+    SubmittedStepArtifact,
     UpdateInvestigationPlanRequest,
 )
 from investigation_service.planner import (
@@ -20,7 +24,9 @@ from investigation_service.planner import (
     build_investigation_plan,
     classify_investigation_mode,
     execute_investigation_step,
+    get_active_evidence_batch_contract,
     resolve_primary_target,
+    submit_evidence_step_artifacts,
     update_investigation_plan,
 )
 
@@ -349,6 +355,72 @@ def test_execute_investigation_step_keeps_internal_service_follow_up_unmatched()
     assert execution.artifacts[0].route_provenance.requested_capability == "service_evidence_plane"
     assert execution.artifacts[0].route_provenance.route_satisfaction == "unmatched"
     assert execution.artifacts[0].route_provenance.actual_route.tool_name == "collect_service_evidence"
+
+
+def test_get_active_evidence_batch_contract_exposes_execution_inputs() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        _deps([]),
+    )
+
+    contract = get_active_evidence_batch_contract(
+        GetActiveEvidenceBatchRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        )
+    )
+
+    assert contract.batch_id == "batch-1"
+    assert contract.subject.kind == "target"
+    assert contract.canonical_target is not None
+    assert [step.step_id for step in contract.steps] == [
+        "collect-target-evidence",
+        "collect-change-candidates",
+    ]
+    assert contract.steps[0].execution_mode == "external_preferred"
+    assert contract.steps[0].execution_inputs.request_kind == "target_context"
+    assert contract.steps[0].execution_inputs.target == "deployment/api"
+    assert contract.steps[1].execution_mode == "control_plane_only"
+    assert contract.steps[1].execution_inputs.request_kind == "change_candidates"
+
+
+def test_submit_evidence_step_artifacts_reconciles_partial_batch_without_completing_it() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        _deps([]),
+    )
+
+    result = submit_evidence_step_artifacts(
+        SubmitEvidenceArtifactsRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="kubernetes-mcp-server",
+                        tool_name="resources_get",
+                        tool_path=["kubernetes-mcp-server", "resources_get"],
+                    ),
+                )
+            ],
+        )
+    )
+
+    assert result.execution.batch_id == "batch-1"
+    assert result.execution.executed_step_ids == ["collect-target-evidence"]
+    assert result.execution.artifacts[0].route_provenance is not None
+    assert result.execution.artifacts[0].route_provenance.route_satisfaction == "preferred"
+    updated = result.updated_plan
+    target_step = next(step for step in updated.steps if step.id == "collect-target-evidence")
+    change_step = next(step for step in updated.steps if step.id == "collect-change-candidates")
+    batch = next(batch for batch in updated.evidence_batches if batch.id == "batch-1")
+    assert target_step.status == "completed"
+    assert change_step.status == "pending"
+    assert batch.status == "pending"
+    assert updated.active_batch_id == "batch-1"
 
 
 def test_update_investigation_plan_unlocks_analysis_after_first_batch() -> None:

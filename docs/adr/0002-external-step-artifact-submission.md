@@ -84,6 +84,133 @@ The key shift is:
 
 > Treat peer evidence execution as a first-class submitted artifact flow, not as an implicit backend implementation detail.
 
+This ADR also sets the intended sequencing for a future adapter-facing result envelope:
+
+- first establish external step-artifact submission and reconciliation
+- then introduce a canonical `InvestigationOutcome` wrapper on top of the reconciled planner/state/report path
+
+`InvestigationOutcome` is still desirable, but it is not the next foundational contract. The evidence-step handoff is.
+
+## Role Model
+
+The target architecture should be understood as three cooperating roles.
+
+### 1. Planner/Reconciler
+
+This remains product-owned and lives in `investigation-mcp-server`.
+
+It is responsible for:
+
+- target resolution
+- plan construction
+- exposing one bounded active evidence batch
+- reconciling submitted artifacts
+- updating the plan
+- ranking hypotheses
+- rendering the final report
+
+This role owns investigation semantics and should remain the authoritative source of plan state.
+
+Target resolution should remain product-owned, but its role should become more explicit over time.
+
+It should continue to:
+
+- preserve the requested target or incident subject
+- normalize that subject into a canonical current investigation focus
+- resolve scope such as workload, service, or node
+
+And it should increasingly also provide:
+
+- execution-facing target details for the active evidence batch
+- the concrete target inputs required by the evidence gatherer for a bounded step
+
+This means target resolution should evolve from an internal normalization step into the authoritative bridge between:
+
+- what the user or alert group asked to investigate
+- what the product considers the canonical current investigation focus
+- what an external evidence gatherer needs in order to satisfy one bounded evidence step
+
+This should not assume that every investigation begins with exactly one concrete Kubernetes object.
+
+The future model should support a broader investigation subject such as:
+
+- a single alert
+- a related group of alerts
+- a service symptom
+- an operator-owned convenience object
+- a node or capacity concern
+- another higher-level incident description
+
+From that broader subject, the planner/reconciler can then choose a current canonical target and derive one or more execution-facing targets for bounded evidence gathering.
+
+### 2. Evidence Gatherer
+
+This is the external execution role.
+
+It is responsible for:
+
+- satisfying one bounded evidence step or batch
+- using the preferred evidence plane where possible
+- collecting runtime or metrics evidence from peer MCP servers
+- returning typed artifacts plus route provenance
+
+This role should not own planning semantics or final synthesis.
+
+### 3. Outcome Layer
+
+This is a later adapter-facing wrapper role.
+
+It is responsible for:
+
+- packaging reconciled state for downstream consumers
+- exposing stable completion status
+- summarizing what was investigated and how the investigation terminated
+
+This role should be built only after the planner/reconciler and evidence-gatherer handoff is canonical.
+
+## Subject, Target, And Execution Target
+
+The future design should distinguish between three related but different ideas.
+
+### 1. Investigation Subject
+
+This is the higher-level thing the incident is about.
+
+Examples:
+
+- a single alert
+- a correlated alert group
+- a service symptom
+- an operator-owned resource
+- a vague unhealthy workload report
+
+This is intentionally broader and less resource-specific than the current `target` field.
+
+### 2. Canonical Investigation Target
+
+This is the current planner-selected operational focus for reasoning.
+
+Examples:
+
+- `service/api`
+- `deployment/api`
+- `node/ip-10-0-0-4`
+
+This may change as the investigation progresses.
+
+### 3. Execution Targets
+
+These are the concrete per-step inputs required by the evidence gatherer.
+
+Examples:
+
+- a specific pod to inspect
+- a namespace and workload for event lookup
+- a service identity for metrics queries
+- a node identity for capacity queries
+
+The planner/reconciler should own the transition from subject to canonical target to bounded execution targets.
+
 ## What Stays Product-Owned
 
 The following responsibilities remain inside `investigation-mcp-server`:
@@ -186,6 +313,8 @@ Why not:
 - an outer envelope is less valuable while the execution handoff remains implicit
 - routing truth and artifact submission are the more important missing contracts
 
+`InvestigationOutcome` should follow this ADR's submission/reconciliation work, not precede it.
+
 ## Target Contract Shape
 
 The next iteration should introduce a typed step-artifact submission boundary.
@@ -194,6 +323,7 @@ The exact naming may change, but the required semantics are:
 
 - identify the step being satisfied
 - identify the batch being satisfied
+- identify the canonical target and any execution-facing target details needed for that step
 - describe the artifact type
 - carry the evidence artifact payload
 - carry actual route metadata
@@ -207,14 +337,7 @@ Conceptually, the needed contract looks like:
 3. orchestrator submits a typed artifact
 4. control plane reconciles and updates the plan
 
-This is analogous to how some editing systems separate:
-
-- plan or change intent
-- execution
-- submitted result
-- reconciliation
-
-That is the same pattern we want for investigation evidence collection.
+This keeps planning, execution, and reconciliation as explicit stages rather than hidden continuation inside one component.
 
 ## Transitional Execution Rule
 
@@ -229,6 +352,34 @@ That means:
   - controlled local fallback is explicitly desired
 
 Both paths should converge on the same `StepArtifact` semantics and provenance model.
+
+## Relationship To A Future InvestigationOutcome
+
+This ADR does not reject `InvestigationOutcome`.
+
+It only places it later in the sequence.
+
+Once evidence-plane steps can be satisfied externally and submitted back through a typed reconciliation boundary, a canonical `InvestigationOutcome` becomes much more valuable.
+
+At that point, the outcome envelope can honestly wrap:
+
+- reconciled `InvestigationState`
+- `InvestigationAnalysis`
+- `InvestigationReport`
+- a stable completion status such as:
+  - `completed`
+  - `partial`
+  - `blocked`
+  - `failed`
+- a compact execution summary derived from submitted and fallback artifacts
+
+That future outcome layer should be:
+
+- adapter-facing
+- trigger-agnostic
+- stable across Claude Code, Slack-style triggers, and future UI consumers
+
+But it should not be introduced before the evidence-step handoff contract exists, because otherwise it would wrap a still-transitional execution story and make the system look more finished than it is.
 
 ## Consequences
 
@@ -257,6 +408,24 @@ The next implementation slice should likely do the following:
 4. keep `execute_investigation_step(...)` as bounded fallback execution during transition
 5. ensure final rendering consumes reconciled artifacts identically regardless of whether they were submitted externally or executed internally
 
+The slice after that should likely introduce the adapter-facing `InvestigationOutcome` envelope on top of the now-honest reconciled state.
+
+## Recommended Sequencing
+
+The intended order of implementation is:
+
+1. expose active evidence batches as execution-facing contracts
+2. add typed submitted-step-artifact reconciliation
+3. make external evidence submission the preferred path for workload, service, and node evidence
+4. keep internal helper execution as explicit bounded fallback during transition
+5. introduce the adapter-facing `InvestigationOutcome` envelope only after reconciled execution is canonical
+
+This work should also intentionally evolve target resolution so that active evidence steps carry not only a canonical investigation target, but also the concrete execution-facing target details required by the evidence gatherer.
+
+This order matters.
+
+If the outcome envelope is introduced too early, it will wrap a still-transitional execution story and weaken the value of the planner/evidence split.
+
 ## Non-Goals
 
 This ADR does not propose:
@@ -266,4 +435,3 @@ This ADR does not propose:
 - introducing unbounded autonomous loops
 - splitting the product semantics across multiple custom MCP backends
 - moving normalization, planning, ranking, or rendering out of the product-owned control plane
-
