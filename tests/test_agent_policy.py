@@ -8,6 +8,7 @@ from investigation_service import mcp_server
 ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_INVESTIGATION_AGENT_TOOLS = {
+    "run_orchestrated_investigation",
     "resolve_primary_target",
     "build_investigation_plan",
     "handoff_active_evidence_batch",
@@ -73,23 +74,17 @@ BANNED_PROMPT_PHRASES = (
 )
 
 PLANNER_LED_REQUIRED_PHRASES = (
+    "run_orchestrated_investigation",
     "build_investigation_plan",
     "handoff_active_evidence_batch",
-    "get_active_evidence_batch",
-    "submit_evidence_step_artifacts",
-    "advance_investigation_runtime",
     "execute_investigation_step",
     "update_investigation_plan",
     "fallback/debug primitives",
-    "Advance one active evidence batch at a time",
     "Do not render the final report as the first substantive step.",
     "fine-grained runtime seams",
     "## Recommended next step",
-    "required_external_step_ids",
-    "submitted_steps",
-    "active_batch.steps",
-    "artifact_type",
-    "Do not call handoff_active_evidence_batch again with an empty submitted_steps list after next_action=submit_external_steps.",
+    "default end-to-end runtime path",
+    "external-step materialization",
 )
 
 ALERT_CONTEXT_REQUIRED_PHRASE = (
@@ -173,16 +168,13 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
         "desktop-extension/server/index.js",
     ]
     required_phrases = [
-        "build_investigation_plan",
+        "run_orchestrated_investigation",
         "handoff_active_evidence_batch",
-        "get_active_evidence_batch",
-        "submit_evidence_step_artifacts",
-        "advance_investigation_runtime",
         "execute_investigation_step",
         "update_investigation_plan",
-        "render_investigation_report",
         "fallback/debug primitives",
         "fine-grained runtime seams",
+        "default end-to-end runtime path",
     ]
     banned_phrases = [
         "build_investigation_report",

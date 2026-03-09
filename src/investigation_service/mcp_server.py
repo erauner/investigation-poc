@@ -32,6 +32,7 @@ from .reporting import render_investigation_report as render_investigation_repor
 from .reporting import resolve_primary_target as resolve_primary_target_impl
 from .reporting import submit_evidence_step_artifacts as submit_evidence_step_artifacts_impl
 from .reporting import update_investigation_plan as update_investigation_plan_impl
+from investigation_orchestrator.entrypoint import run_orchestrated_investigation as run_orchestrated_investigation_impl
 from .tools import find_unhealthy_pod as find_unhealthy_pod_impl
 from .tools import find_unhealthy_workloads as find_unhealthy_workloads_impl
 from .tools import normalize_alert_input as normalize_alert_input_impl
@@ -534,6 +535,67 @@ def render_investigation_report(
                 annotations=annotations or {},
                 node_name=node_name,
                 execution_context=execution_context,
+            )
+        ).model_dump(mode="json")
+    )
+
+
+@mcp.tool()
+def run_orchestrated_investigation(
+    target: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    profile: str = "workload",
+    service_name: str | None = None,
+    lookback_minutes: int = 15,
+    include_related_data: bool = True,
+    correlation_window_minutes: int = 60,
+    correlation_limit: int = 10,
+    anchor_timestamp: str | None = None,
+    alertname: str | None = None,
+    labels: dict[str, str] | None = None,
+    annotations: dict[str, str] | None = None,
+    node_name: str | None = None,
+) -> dict:
+    """Run the bounded investigation orchestration loop in product code and return the final report.
+
+    Prefer this for the normal planner-led happy path. It keeps batch selection, external-step
+    materialization, advancement, and final rendering in code instead of prompt choreography.
+    """
+    return run_logged_tool(
+        "run_orchestrated_investigation",
+        {
+            "target": target,
+            "cluster": cluster,
+            "namespace": namespace,
+            "profile": profile,
+            "service_name": service_name,
+            "lookback_minutes": lookback_minutes,
+            "include_related_data": include_related_data,
+            "correlation_window_minutes": correlation_window_minutes,
+            "correlation_limit": correlation_limit,
+            "anchor_timestamp": anchor_timestamp,
+            "alertname": alertname,
+            "labels": labels or {},
+            "annotations": annotations or {},
+            "node_name": node_name,
+        },
+        lambda: run_orchestrated_investigation_impl(
+            InvestigationReportRequest(
+                cluster=cluster,
+                namespace=namespace,
+                target=target,
+                profile=profile,
+                service_name=service_name,
+                lookback_minutes=lookback_minutes,
+                include_related_data=include_related_data,
+                correlation_window_minutes=correlation_window_minutes,
+                correlation_limit=correlation_limit,
+                anchor_timestamp=anchor_timestamp,
+                alertname=alertname,
+                labels=labels or {},
+                annotations=annotations or {},
+                node_name=node_name,
             )
         ).model_dump(mode="json")
     )

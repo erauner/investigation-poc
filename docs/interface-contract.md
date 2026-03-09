@@ -57,11 +57,10 @@ Across clients, `Investigate` should preserve these semantics:
 
 For backend tool surfaces, prefer the planner-led control plane when available:
 
-- generic targeted investigations should prefer `resolve_primary_target`, `build_investigation_plan`, `handoff_active_evidence_batch`, and `render_investigation_report`
-- alert-shaped investigations should preserve alert routing, but still treat `render_investigation_report` as the canonical final report surface
-- `handoff_active_evidence_batch` is the preferred runtime-progress helper after plan creation and should carry forward `execution_context` into any bounded follow-up handoff or final render
-- when `handoff_active_evidence_batch` returns an `active_batch` with externally preferred evidence steps, callers should satisfy those steps with peer evidence-plane tools and call `handoff_active_evidence_batch` again with `submitted_steps`
-- `get_active_evidence_batch`, `submit_evidence_step_artifacts`, and `advance_investigation_runtime` remain available as lower-level fine-grained runtime seams for adapters, debugging, or explicit orchestration
+- generic targeted investigations should prefer `resolve_primary_target` when needed, then `run_orchestrated_investigation` as the default end-to-end runtime path
+- alert-shaped investigations should preserve alert routing and prefer `run_orchestrated_investigation` after alert extraction
+- `run_orchestrated_investigation` keeps batch selection, external-step materialization, advancement, and final rendering in product code
+- `handoff_active_evidence_batch`, `get_active_evidence_batch`, `submit_evidence_step_artifacts`, and `advance_investigation_runtime` remain available as lower-level fine-grained runtime seams for adapters, debugging, or explicit orchestration
 - `execute_investigation_step` and `update_investigation_plan` remain lower-level fallback/debug seams rather than the preferred runtime-progress path
 - direct logs, events, resource inspection, metrics queries, alert queries, and exemplar lookups should be treated as evidence-plane work, not as replacements for planning or final rendering
 

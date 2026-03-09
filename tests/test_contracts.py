@@ -1207,6 +1207,49 @@ def test_handoff_active_evidence_batch_route_returns_actionable_batch_and_contex
     assert response.json()["required_external_step_ids"] == ["collect-target-evidence"]
 
 
+def test_run_orchestrated_investigation_route_returns_typed_report(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.run_orchestrated_investigation",
+        lambda _req: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="pod/crashy-abc123",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=["panic: startup failed"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=["No rollout data was available."],
+            recommended_next_step="Inspect logs and recent deployment changes before taking write actions.",
+            suggested_follow_ups=[],
+            guidelines=[],
+            tool_path_trace=None,
+            normalization_notes=["alertname=PodCrashLooping"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/run_orchestrated_investigation",
+        json={
+            "cluster": "erauner-home",
+            "namespace": "operator-smoke",
+            "target": "pod/crashy",
+            "profile": "workload",
+            "lookback_minutes": 15,
+            "alertname": "PodCrashLooping",
+            "labels": {"pod": "crashy"},
+            "annotations": {"summary": "Pod crashlooping"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["diagnosis"] == "Crash Loop Detected"
+    assert body["target"] == "pod/crashy-abc123"
+
+
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:
     findings = derive_findings(
         "workload",

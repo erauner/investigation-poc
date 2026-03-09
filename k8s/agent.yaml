@@ -41,6 +41,7 @@ spec:
           name: investigation-mcp-server
           kind: RemoteMCPServer
           toolNames:
+            - run_orchestrated_investigation
             - resolve_primary_target
             - build_investigation_plan
             - handoff_active_evidence_batch

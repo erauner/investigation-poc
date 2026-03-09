@@ -14,15 +14,11 @@ Use the `mcp__kagent__invoke_agent` tool.
   `Use the planner-led investigation flow.`
   `If the target is vague or operator-backed, resolve it first with resolve_primary_target.`
   `If the request only says the unhealthy pod in a namespace, use Kubernetes MCP to identify the concrete unhealthy pod first, then continue with the planner-led control-plane path using that target.`
-  `Then build_investigation_plan and prefer handoff_active_evidence_batch as the default runtime-progress helper.`
-  `Call handoff_active_evidence_batch first with incident=<same build request> and no handoff_token.`
-  `If handoff_active_evidence_batch returns next_action=submit_external_steps, use required_external_step_ids to select the matching steps from active_batch.steps.`
-  `For each required external step, build one submitted_steps item with step_id=<the contract step id>, actual_route=<the peer MCP server/tool actually used>, and the payload field named by artifact_type from that same step contract.`
-  `On the follow-up handoff call, send incident=<same build request>, handoff_token=<returned handoff_token>, and submitted_steps=<the non-empty typed artifacts built from the required external steps>.`
-  `Do not call handoff_active_evidence_batch again with an empty submitted_steps list after next_action=submit_external_steps.`
-  `If handoff_active_evidence_batch returns next_action=call_handoff_again, call it once more with handoff_token=<returned handoff_token>.`
-  `Treat get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams, and treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives.`
-  `Use render_investigation_report late as the canonical final report tool for the five-section response.`
+  `After resolving any vague target, prefer run_orchestrated_investigation as the default end-to-end runtime path.`
+  `run_orchestrated_investigation keeps batch selection, external-step materialization, advancement, and final rendering in product code.`
+  `Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams for debugging or explicit adapter choreography.`
+  `Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives.`
+  `Use render_investigation_report only as a secondary low-level render seam when you are explicitly debugging the staged runtime path.`
   `Use exactly these Markdown headings verbatim: ## Diagnosis, ## Evidence, ## Related Data, ## Limitations, ## Recommended next step.`
 - Do not use this command as the primary alert entrypoint. Use `/investigation-tools:investigate-alert` for alert triage.
 - Return the agent's result directly.
