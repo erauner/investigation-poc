@@ -50,6 +50,14 @@ BANNED_PROMPT_PHRASES = (
     "top-level report tool",
 )
 
+PLANNER_LED_REQUIRED_PHRASES = (
+    "build_investigation_plan",
+    "execute_investigation_step",
+    "update_investigation_plan",
+    "one bounded evidence batch at a time",
+    "Do not render the final report as the first substantive step.",
+)
+
 
 def _load_yaml(path: str) -> dict:
     return yaml.safe_load((ROOT / path).read_text())
@@ -96,3 +104,34 @@ def test_skill_configmap_stops_teaching_report_first_or_hidden_tools() -> None:
     assert "build_investigation_plan" in system_message
     for phrase in BANNED_PROMPT_PHRASES:
         assert phrase not in system_message
+    for phrase in PLANNER_LED_REQUIRED_PHRASES:
+        assert phrase in system_message
+
+
+def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
+    wrapper_paths = [
+        ".claude/commands/investigate.md",
+        ".claude/commands/investigate-alert.md",
+        ".claude/skills/investigation-helper/SKILL.md",
+        "claude-code-marketplace/investigation-tools/commands/investigate.md",
+        "claude-code-marketplace/investigation-tools/commands/investigate-alert.md",
+        "desktop-extension/server/index.js",
+    ]
+    required_phrases = [
+        "build_investigation_plan",
+        "execute_investigation_step",
+        "update_investigation_plan",
+        "render_investigation_report",
+    ]
+    banned_phrases = [
+        "build_investigation_report",
+        "build_alert_investigation_report",
+        "find_unhealthy_pod",
+    ]
+
+    for path in wrapper_paths:
+        text = (ROOT / path).read_text()
+        for phrase in required_phrases:
+            assert phrase in text, path
+        for phrase in banned_phrases:
+            assert phrase not in text, path

@@ -53,7 +53,7 @@ This target:
 - installs `kagent` and the local investigation stack
 - deploys the smoke workload
 - runs the standard workload prompt
-- runs the explicit canonical render prompt
+- runs the explicit planner-led prompt
 - verifies the five required sections are present
 - fails if `Limitations` leaks correlated-change notes
 
@@ -131,10 +131,10 @@ make kind-down
 Investigate the unhealthy pod in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
 ```
 
-### Explicit canonical render path
+### Explicit planner-led path
 
 ```text
-Use render_investigation_report as the canonical final report tool. Investigate the unhealthy pod in namespace kagent-smoke and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
+Resolve the target if needed, build a plan, execute one bounded evidence batch, update the plan, and render the final investigation report late. Investigate the unhealthy pod in namespace kagent-smoke and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
 ```
 
 ### Alert-shaped workload prompt

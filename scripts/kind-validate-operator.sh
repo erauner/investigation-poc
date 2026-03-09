@@ -7,7 +7,7 @@ KEEP_SMOKE="${KEEP_SMOKE:-0}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 WORKLOAD_PROMPT="${WORKLOAD_PROMPT:-Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE}. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 DIRECT_TARGET_PROMPT="${DIRECT_TARGET_PROMPT:-Investigate Backend/crashy in namespace ${SMOKE_NAMESPACE}. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
-CANONICAL_REPORT_PROMPT="${CANONICAL_REPORT_PROMPT:-Use render_investigation_report as the canonical final report tool. Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE} and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
+PLANNER_LED_PROMPT="${PLANNER_LED_PROMPT:-Resolve the target if needed, build a plan, execute one bounded evidence batch, update the plan, and render the final investigation report late. Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE} and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
@@ -140,11 +140,11 @@ fi
 
 tmp_dir="$(mktemp -d)"
 standard_output="${tmp_dir}/standard.md"
-canonical_report_output="${tmp_dir}/canonical-report.md"
+planner_led_output="${tmp_dir}/planner-led.md"
 direct_target_output="${tmp_dir}/direct-target.md"
 standard_raw="${tmp_dir}/standard.raw"
 direct_target_raw="${tmp_dir}/direct-target.raw"
-canonical_report_raw="${tmp_dir}/canonical-report.raw"
+planner_led_raw="${tmp_dir}/planner-led.raw"
 
 echo "==> Setting up local kind stack"
 run_make kind-setup
@@ -196,13 +196,13 @@ if ! grep -Eiq 'Backend/crashy|operator-managed workload|homelab-operator' "${di
   exit 1
 fi
 
-echo "==> Running explicit canonical render prompt"
-run_make kagent-smoke-test TASK="${CANONICAL_REPORT_PROMPT}" >"${canonical_report_raw}"
-normalize_agent_output "${canonical_report_raw}" "${canonical_report_output}"
-cat "${canonical_report_output}"
+echo "==> Running explicit planner-led prompt"
+run_make kagent-smoke-test TASK="${PLANNER_LED_PROMPT}" >"${planner_led_raw}"
+normalize_agent_output "${planner_led_raw}" "${planner_led_output}"
+cat "${planner_led_output}"
 
 for heading in "Diagnosis" "Evidence" "Related Data" "Limitations" "Recommended next step"; do
-  require_heading "${heading}" "${canonical_report_output}"
+  require_heading "${heading}" "${planner_led_output}"
 done
 
 echo "==> Operator-backed local kind validation passed"

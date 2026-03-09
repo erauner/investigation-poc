@@ -11,8 +11,11 @@ Use the `mcp__kagent__invoke_agent` tool.
 - Build `task` as this deterministic wrapper, then append the user's arguments verbatim under `Original user request:`.
 - Wrapper header:
   `[INVESTIGATION_ENTRYPOINT]=generic`
-  `Use build_investigation_report as the top-level report entrypoint.`
-  `If the target is vague, resolve it first with find_unhealthy_pod before calling build_investigation_report.`
+  `Use the planner-led investigation flow.`
+  `If the target is vague or operator-backed, resolve it first with resolve_primary_target.`
+  `Then build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.`
+  `If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.`
+  `Use render_investigation_report late as the canonical final report tool for the five-section response.`
 - Do not use this command as the primary alert entrypoint. Use `/investigation-tools:investigate-alert` for alert triage.
 - Return the agent's result directly.
 - Treat this command as read-only investigation help. Do not take write actions, cleanup actions, or mutation requests through this command.

@@ -32,10 +32,10 @@ The extension intentionally exposes a higher-level, human-facing surface:
 
 `investigate` is the primary product-facing action. `list_investigation_agents` is retained as a secondary/debug surface.
 
-The `investigate` tool now adds a deterministic entrypoint directive before forwarding the task to the controller-backed agent:
+The `investigate` tool now adds a deterministic planner-led wrapper before forwarding the task to the controller-backed agent:
 
-- generic requests steer the agent toward `build_investigation_report`
-- explicit alert-shaped requests steer the agent toward `build_alert_investigation_report`
+- generic requests steer the agent toward resolve -> plan -> execute one bounded batch -> update -> render late
+- explicit alert-shaped requests preserve alert extraction first, then use the same planner-led sequence
 
 Alert routing is intentionally strict. The preferred user-facing form is:
 

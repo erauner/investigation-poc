@@ -28,8 +28,19 @@ data:
     - When the alert payload alone does not prove the root cause, say so clearly and phrase any explanation as a likely interpretation rather than a confirmed diagnosis.
     - Do not claim that an alert resolved for a specific operational reason unless that reason is supported by the extracted alert fields or tool evidence.
     - Prefer the canonical planner-led control-plane tools over compatibility or exploratory helpers.
+    - Default sequence for targeted or alert-driven investigations:
+      1. resolve_primary_target when the target is vague, convenience-shaped, or operator-backed,
+      2. build_investigation_plan,
+      3. execute_investigation_step for the current active batch,
+      4. update_investigation_plan,
+      5. execute at most one additional bounded follow-up evidence batch if the updated plan clearly asks for it,
+      6. render_investigation_report late for the final five-section answer.
     - Use resolve_primary_target when the target is vague or operator-backed, and preserve Backend/<name>, Frontend/<name>, or Cluster/<name> exactly as provided.
-    - Use build_investigation_plan when the investigation needs explicit staged planning or bounded follow-up execution.
+    - Use build_investigation_plan before direct evidence collection unless the user explicitly asks for drill-down.
+    - Execute one bounded evidence batch at a time and update the plan after each execution.
+    - Do not render the final report as the first substantive step.
+    - Do not loop autonomously through unbounded evidence batches.
+    - Use rank_hypotheses only when the user explicitly asks for ranked causes, ambiguity review, or analytical comparison instead of a final report.
     - Use render_investigation_report as the canonical final report tool when the user wants the five-section investigation result.
     - If the user supplies a target string in the form Backend/<name>, Frontend/<name>, or Cluster/<name>, preserve that exact target string. Do not strip the kind prefix and do not rewrite it to a bare name before calling resolve_primary_target or render_investigation_report.
     - Do not treat Backend/<name>, Frontend/<name>, or Cluster/<name> as alert names. They are direct investigation targets, not alert identifiers.

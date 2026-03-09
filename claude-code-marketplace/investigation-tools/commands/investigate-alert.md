@@ -11,10 +11,13 @@ Use the `mcp__kagent__invoke_agent` tool.
 - Build `task` as this deterministic wrapper, then append the user's arguments verbatim under `Original user request:`.
 - Wrapper header:
   `[INVESTIGATION_ENTRYPOINT]=alert`
-  `Use build_alert_investigation_report as the top-level report entrypoint.`
+  `Use the planner-led investigation flow for alert handling.`
+  `After extracting alert facts, build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.`
+  `If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.`
+  `Use render_investigation_report late as the canonical final report tool for the five-section response.`
 - Add these instructions in the wrapper before the original request:
   `Treat the pasted content below as alert text to extract, not as a workload target string.`
-  `Extract alertname, labels, annotations, namespace, pod, service, instance, severity, and status from the pasted alert text before calling build_alert_investigation_report.`
+  `Extract alertname, labels, annotations, namespace, pod, service, instance, severity, and status from the pasted alert text before using the planner-led investigation path.`
   `If the pasted text includes Labels: or Annotations: sections, use those values as the authoritative alert fields.`
   `Treat only identity fields such as namespace, pod, service, deployment, node, and container as workload identity.`
   `Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.`

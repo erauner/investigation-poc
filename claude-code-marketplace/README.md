@@ -12,6 +12,7 @@ That plugin is intentionally thin:
 - it defines a slash command for alert investigation
 - it provides plugin-scoped MCP wiring to the `kagent-controller` endpoint
 - it keeps the actual investigation logic in the controller + agent + backend path
+- it steers both commands into the same planner-led resolve -> plan -> bounded execution -> update -> render-late model
 
 ## Local install flow
 

@@ -5,9 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SMOKE_NAMESPACE="${SMOKE_NAMESPACE:-operator-smoke}"
 KEEP_SMOKE="${KEEP_SMOKE:-0}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
-HTTP_PORT="${HTTP_PORT:-18080}"
-HTTP_URL="http://127.0.0.1:${HTTP_PORT}"
-ALERT_K8S_OVERLAY="${ALERT_K8S_OVERLAY:-k8s-overlays/local-kind-alert-http}"
+ALERT_PROMPT="${ALERT_PROMPT:-Investigate alert PodCrashLooping for pod crashy in namespace ${SMOKE_NAMESPACE}. Resolve the target if needed, build a plan, execute one bounded evidence batch, update the plan, and render the final investigation report late. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
@@ -112,37 +110,7 @@ PY
   exit 1
 }
 
-wait_for_http_ready() {
-  local attempts="${1:-30}"
-  local sleep_seconds="${2:-2}"
-
-  for _ in $(seq 1 "${attempts}"); do
-    if python3 - "${HTTP_URL}" <<'PY'
-import sys
-import urllib.request
-
-url = f"{sys.argv[1]}/healthz"
-try:
-    with urllib.request.urlopen(url, timeout=2) as response:
-        sys.exit(0 if response.status == 200 else 1)
-except Exception:
-    sys.exit(1)
-PY
-    then
-      return 0
-    fi
-    sleep "${sleep_seconds}"
-  done
-
-  echo "Timed out waiting for investigation-service HTTP readiness" >&2
-  exit 1
-}
-
 cleanup() {
-  if [[ -n "${http_port_forward_pid:-}" ]]; then
-    kill "${http_port_forward_pid}" >/dev/null 2>&1 || true
-    wait "${http_port_forward_pid}" 2>/dev/null || true
-  fi
   if [[ "${KEEP_SMOKE}" != "1" ]]; then
     run_make operator-smoke-clean >/dev/null 2>&1 || true
   fi
@@ -155,6 +123,7 @@ trap cleanup EXIT
 need_cmd kind
 need_cmd kubectl
 need_cmd helm
+need_cmd kagent
 need_cmd docker
 need_cmd go
 need_cmd python3
@@ -165,8 +134,7 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
 fi
 
 echo "==> Setting up local kind stack"
-run_make kind-up
-K8S_OVERLAY="${ALERT_K8S_OVERLAY}" run_make kind-install-kagent
+run_make kind-setup
 
 echo "==> Installing homelab-operator into the local kind cluster"
 run_make kind-install-operator
@@ -184,46 +152,56 @@ fi
 
 wait_for_crashloop_evidence "${SMOKE_NAMESPACE}" "${crashy_pod}"
 
-echo "==> Port-forwarding investigation-service HTTP API"
-kubectl -n kagent port-forward svc/investigation-service "${HTTP_PORT}:8080" >/tmp/kind-validate-alert-entry-http.log 2>&1 &
-http_port_forward_pid=$!
-wait_for_http_ready
+tmp_dir="$(mktemp -d)"
+alert_raw="${tmp_dir}/alert.raw"
+alert_output="${tmp_dir}/alert.md"
 
-echo "==> Calling explicit alert triage entrypoint"
-python3 - "${HTTP_URL}" "${SMOKE_NAMESPACE}" "${crashy_pod}" <<'PY'
+echo "==> Running planner-led alert prompt through the agent path"
+run_make kagent-smoke-test TASK="${ALERT_PROMPT}" >"${alert_raw}"
+
+python3 - "${alert_raw}" "${alert_output}" "${crashy_pod}" <<'PY'
 import json
 import sys
-import urllib.request
+from pathlib import Path
 
-base_url, namespace, pod_name = sys.argv[1], sys.argv[2], sys.argv[3]
-payload = {
-    "alertname": "PodCrashLooping",
-    "labels": {
-        "namespace": namespace,
-        "pod": pod_name,
-    },
-    "include_related_data": False,
-}
-data = json.dumps(payload).encode("utf-8")
-request = urllib.request.Request(
-    f"{base_url}/tools/build_alert_investigation_report",
-    data=data,
-    headers={"Content-Type": "application/json"},
-    method="POST",
-)
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+pod_name = sys.argv[3]
+raw = src.read_text()
+text = raw.strip()
+if text.startswith("{"):
+    payload = json.loads(raw)
+    for artifact in payload.get("artifacts", []):
+        for part in artifact.get("parts", []):
+            if part.get("kind") == "text" and part.get("text"):
+                dst.write_text(part["text"])
+                break
+        else:
+            continue
+        break
+    else:
+        dst.write_text(raw)
+else:
+    dst.write_text(raw)
 
-with urllib.request.urlopen(request, timeout=30) as response:
-    body = json.loads(response.read().decode("utf-8"))
-
-print(json.dumps(body, indent=2))
-
-assert body["target"] == f"pod/{pod_name}", body
-assert body["diagnosis"] == "Crash Loop Detected", body
-assert body["evidence"], body
-assert any(note == "alertname=PodCrashLooping" for note in body["normalization_notes"]), body
-assert body["related_data"] == [], body
-assert body["related_data_note"] is None, body
-assert any("BackOff" in item or "CrashLoopBackOff" in item for item in body["evidence"]), body
+body = dst.read_text()
+print(body)
+required = [
+    "Diagnosis",
+    "Evidence",
+    "Related Data",
+    "Limitations",
+    "Recommended next step",
+]
+for heading in required:
+    if heading not in body:
+        raise AssertionError(f"missing heading: {heading}")
+if "PodCrashLooping" not in body:
+    raise AssertionError("expected alert context in final output")
+if pod_name not in body:
+    raise AssertionError("expected resolved crashy pod context in final output")
+if "BackOff" not in body and "CrashLoopBackOff" not in body and "crash loop" not in body.lower():
+    raise AssertionError("expected crash-loop evidence in alert output")
 PY
 
-echo "==> Alert entrypoint validation passed"
+echo "==> Planner-led alert validation passed"

@@ -36,7 +36,7 @@ For the first multi-cluster routing validation path, use:
 make kind-validate-multi
 ```
 
-This exercises the local kind stack, deploys the smoke workload, runs the standard investigation prompt, runs the explicit canonical render prompt, and fails if the five-section report contract regresses.
+This exercises the local kind stack, deploys the smoke workload, runs the standard investigation prompt, runs an explicit planner-led prompt, and fails if the five-section report contract regresses.
 
 For the first operator-backed validation path in the same kind cluster, use:
 
@@ -137,7 +137,7 @@ Use [DEMO.md](/Users/erauner/git/side/investigation-poc/DEMO.md) as the repo-loc
 
 - the end-to-end kind demo
 - the single-run local validation entrypoint
-- the five-section investigation prompts
+- the planner-led investigation prompts
 - expected output semantics for Evidence, Related Data, and Limitations
 
 This repo should be sufficient for local validation. The production GitOps rollout still happens from `homelab-k8s`, but the fast feedback loop should stay here.

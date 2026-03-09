@@ -58,10 +58,10 @@ Expected call path:
 
 `investigate` is the primary user-facing action. `list_investigation_agents` is a secondary/debug surface.
 
-`investigate` now applies deterministic entrypoint routing before it calls the controller-backed agent:
+`investigate` now applies deterministic planner-led routing before it calls the controller-backed agent:
 
-- generic requests steer toward `build_investigation_report`
-- explicit alert-shaped requests steer toward `build_alert_investigation_report`
+- generic requests steer toward resolve -> plan -> execute one bounded batch -> update -> render late
+- explicit alert-shaped requests preserve alert extraction first, then use the same planner-led sequence
 
 Alert routing is only selected when the request includes an explicit alert form such as `Investigate alert PodCrashLooping ...`, or when the caller passes structured `mode=alert` plus `alertname`. The raw `alertname=...` text forms remain available as a secondary debug fallback.
 

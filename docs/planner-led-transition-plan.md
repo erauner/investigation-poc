@@ -267,26 +267,36 @@ Validation gate:
 
 ### Slice 6: Transition the kagent Skill Config from Report-First to Planner-Led
 
-Status: Planned
+Status: Completed
 
-Only after the previous slices are real.
+Delivered:
 
-Prompt behavior should become:
+- rewrote the local kagent skill ConfigMap to teach an explicit planner-led sequence:
+  - resolve when needed
+  - build plan
+  - execute one bounded evidence batch
+  - update plan
+  - optionally execute one bounded follow-up batch
+  - render late
+- rewrote local Claude command wrappers, plugin command wrappers, and the Claude skill wrapper to use the same planner-led sequence instead of report-first directives
+- updated the desktop extension wrapper generator and bundled metadata to describe the planner-led path instead of `build_*report` entrypoints
+- updated local docs and demo text so agent-facing examples no longer teach report-first behavior
+- reworked the alert validation lane so it exercises the agent path with an alert-shaped planner-led prompt instead of directly calling a compatibility HTTP route
+- strengthened policy coverage so planner-led sequencing language is asserted across the local skill prompt and wrapper surfaces
+
+Prompt behavior now is:
 
 - plan first
 - gather bounded evidence batches
 - update plan
 - synthesize late
-
-Legacy facades may remain briefly, but they should stop being taught as the primary behavior model. This slice should also decide whether `normalize_alert_input` and `normalize_incident_input` remain exposed as debug-oriented helpers or are removed from the intentional agent surface entirely.
+- use `rank_hypotheses` only when explicit ranked-cause analysis is needed rather than as a mandatory pre-render step
 
 Validation gate:
 
-- kind e2e validating planner-led investigations
-- alert e2e
-- targeted workload e2e
-- operator-backed target e2e
-- factual/capacity question e2e
+- policy tests asserting planner-led prompt and wrapper language
+- syntax checks for updated validation lanes and desktop wrapper generator
+- full local test suite
 
 ### Slice 7: Remove Transitional Report-First And Context Surfaces
 
@@ -313,13 +323,13 @@ Validation gate:
 
 The next implementation move should be:
 
-### Implement Slice 6
+### Implement Slice 7
 
 Why:
 
-- the agent-visible catalog is now intentionally narrow
-- the next meaningful gain is teaching the agent to use that catalog in a genuinely planner-led sequence
-- the remaining work is now primarily prompt/config behavior and end-to-end validation rather than backend surface cleanup
+- the planner-led mental model is now taught across the local agent and wrapper surfaces
+- the remaining duplicated legacy surface is primarily in transitional backend endpoints and context-shaped helpers
+- the next meaningful gain is deleting code and routes that no longer earn their keep
 
 What not to do yet:
 

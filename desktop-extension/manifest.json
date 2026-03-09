@@ -3,8 +3,8 @@
   "name": "homelab-investigation-remote",
   "display_name": "Homelab Investigation Remote",
   "version": "0.1.6",
-  "description": "Thin Claude Desktop extension that proxies investigation tools to a remote streamable HTTP MCP server with deterministic alert-vs-generic routing.",
-  "long_description": "Claude Desktop extension for the homelab investigation stack. This bundle runs a local Node MCP server over stdio and forwards high-level investigation requests to the kagent controller MCP endpoint. The proxy adds a deterministic entrypoint directive so alert-shaped requests prefer the alert-specific backend path while generic investigations keep using the generic path through the same agent.",
+  "description": "Thin Claude Desktop extension that proxies planner-led investigation requests to a remote streamable HTTP MCP server with deterministic alert-vs-generic routing.",
+  "long_description": "Claude Desktop extension for the homelab investigation stack. This bundle runs a local Node MCP server over stdio and forwards high-level investigation requests to the kagent controller MCP endpoint. The proxy adds a deterministic planner-led wrapper so alert-shaped requests preserve alert extraction while generic investigations follow the same resolve, plan, bounded execution, update, and late-render path through the same agent.",
   "author": {
     "name": "Evan Rauner",
     "email": "raunerevan@gmail.com",

@@ -150,15 +150,23 @@ function buildInvestigationTask(args) {
   const lines = [
     `${ENTRYPOINT_PREFIX}${selectedMode}`,
     selectedMode === "alert"
-      ? "Use build_alert_investigation_report as the top-level report entrypoint."
-      : "Use build_investigation_report as the top-level report entrypoint.",
+      ? "Use the planner-led investigation flow for alert handling."
+      : "Use the planner-led investigation flow.",
   ];
 
   if (selectedMode === "generic") {
     lines.push(
-      "If the target is vague, resolve it first with find_unhealthy_pod before calling build_investigation_report."
+      "If the target is vague or operator-backed, resolve it first with resolve_primary_target.",
+      "Then build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.",
+      "If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.",
+      "Use render_investigation_report late as the canonical final report tool for the five-section response."
     );
   } else {
+    lines.push(
+      "After extracting alert facts, build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.",
+      "If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.",
+      "Use render_investigation_report late as the canonical final report tool for the five-section response."
+    );
     lines.push(`alertname: ${inferredAlertname}`);
     const labels = serializeKeyValueMap(args.labels);
     if (labels) {

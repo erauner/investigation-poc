@@ -15,7 +15,10 @@ Use the `mcp__kagent__invoke_agent` tool.
 - Build `task` as a deterministic entrypoint wrapper, then append the user's arguments verbatim under `Original user request:`.
 - If the user supplied an explicit alert phrase such as `Investigate alert PodCrashLooping ...`, set the wrapper header to:
   `[INVESTIGATION_ENTRYPOINT]=alert`
-  `Use build_alert_investigation_report as the top-level report entrypoint.`
+  `Use the planner-led investigation flow for alert handling.`
+  `After extracting alert facts, build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.`
+  `If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.`
+  `Use render_investigation_report late as the canonical final report tool.`
   `Treat only identity fields such as namespace, pod, service, deployment, node, and container as workload identity.`
   `Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.`
   `Never derive a workload namespace from source or monitoring metadata.`
@@ -26,8 +29,11 @@ Use the `mcp__kagent__invoke_agent` tool.
 - Do not treat `Backend/<name>`, `Frontend/<name>`, or `Cluster/<name>` as alert names.
 - Otherwise set the wrapper header to:
   `[INVESTIGATION_ENTRYPOINT]=generic`
-  `Use build_investigation_report as the top-level report entrypoint.`
-  `If the target is vague, resolve it first with find_unhealthy_pod before calling build_investigation_report.`
+  `Use the planner-led investigation flow.`
+  `If the target is vague or operator-backed, resolve it first with resolve_primary_target.`
+  `Then build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.`
+  `If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.`
+  `Use render_investigation_report late as the canonical final report tool.`
 - Return the agent's result directly.
 - Treat this skill as read-only investigation help for follow-up clarification. Do not take write actions, cleanup actions, or mutation requests through this skill.
 - If no arguments were supplied, ask the user what they want investigated.
