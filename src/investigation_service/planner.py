@@ -21,7 +21,6 @@ from .models import (
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
     PlanStep,
-    TargetRef,
     StepArtifact,
     UpdateInvestigationPlanRequest,
 )
@@ -96,40 +95,6 @@ def investigation_target_from_normalized(
         profile=normalized.profile,
         lookback_minutes=normalized.lookback_minutes,
         normalization_notes=list(normalized.normalization_notes),
-    )
-
-
-def normalized_request_from_target(target: InvestigationTarget) -> NormalizedInvestigationRequest:
-    return NormalizedInvestigationRequest(
-        source=target.source,
-        scope=target.scope,
-        cluster=target.cluster,
-        namespace=target.namespace,
-        target=target.target,
-        node_name=target.node_name,
-        service_name=target.service_name,
-        profile=target.profile,
-        lookback_minutes=target.lookback_minutes,
-        normalization_notes=list(target.normalization_notes),
-    )
-
-
-def investigation_target_from_context_request(req: CollectContextRequest) -> InvestigationTarget:
-    scope = req.target.split("/", 1)[0] if "/" in req.target else req.profile
-    node_name = req.target.split("/", 1)[1] if scope == "node" and "/" in req.target else None
-    service_name = req.service_name or (req.target.split("/", 1)[1] if scope == "service" and "/" in req.target else None)
-    return InvestigationTarget(
-        source="manual",
-        scope=scope,
-        cluster=req.cluster,
-        namespace=req.namespace,
-        requested_target=req.target,
-        target=req.target,
-        node_name=node_name,
-        service_name=service_name,
-        profile=req.profile,
-        lookback_minutes=req.lookback_minutes,
-        normalization_notes=[],
     )
 
 
@@ -381,74 +346,6 @@ def resolve_cluster_convenience_target(
             "profile": profile,
             "service_name": service_name,
             "target": resolved_target,
-            "normalization_notes": notes,
-        }
-    )
-
-
-def collect_context_for_normalized_request(
-    normalized: NormalizedInvestigationRequest,
-    deps: PlannerDeps,
-):
-    if normalized.scope == "node":
-        return deps.collect_node_context(
-            CollectNodeContextRequest(
-                cluster=normalized.cluster,
-                node_name=normalized.node_name or normalized.target.split("/", 1)[1],
-                lookback_minutes=normalized.lookback_minutes,
-            )
-        )
-    if normalized.scope == "service":
-        if not normalized.namespace:
-            raise ValueError("namespace is required for service investigations")
-        service_name = normalized.service_name or normalized.target.split("/", 1)[1]
-        return deps.collect_service_context(
-            CollectServiceContextRequest(
-                cluster=normalized.cluster,
-                namespace=normalized.namespace,
-                service_name=service_name,
-                target=normalized.target,
-                lookback_minutes=normalized.lookback_minutes,
-            )
-        )
-    return deps.collect_workload_context(
-        CollectContextRequest(
-            cluster=normalized.cluster,
-            namespace=normalized.namespace,
-            target=normalized.target,
-            profile=normalized.profile,
-            service_name=normalized.service_name,
-            lookback_minutes=normalized.lookback_minutes,
-        )
-    )
-
-
-def align_normalized_request_with_context(
-    normalized: NormalizedInvestigationRequest,
-    context,
-) -> NormalizedInvestigationRequest:
-    target_ref = getattr(context, "target", None)
-    target_kind = getattr(target_ref, "kind", None)
-    if target_kind == "pod" and normalized.target.startswith("pod/") and normalized.target != f"pod/{target_ref.name}":
-        notes = list(normalized.normalization_notes)
-        notes.append(f"resolved pod target to {target_ref.name}")
-        return normalized.model_copy(
-            update={
-                "target": f"pod/{target_ref.name}",
-                "normalization_notes": notes,
-            }
-        )
-    if target_kind != "service" or normalized.scope == "service":
-        return normalized
-
-    notes = list(normalized.normalization_notes)
-    notes.append(f"profile promoted to service after resolving target kind={target_kind}")
-    return normalized.model_copy(
-        update={
-            "scope": "service",
-            "profile": "service",
-            "target": f"service/{target_ref.name}",
-            "service_name": normalized.service_name or target_ref.name,
             "normalization_notes": notes,
         }
     )

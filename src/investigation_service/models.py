@@ -399,6 +399,16 @@ class CorrelatedChangesResponse(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class InvestigationState(BaseModel):
+    incident: BuildInvestigationPlanRequest
+    target: InvestigationTarget | None = None
+    plan: InvestigationPlan
+    executions: list[EvidenceBatchExecution] = Field(default_factory=list)
+    artifacts: list[StepArtifact] = Field(default_factory=list)
+    primary_evidence: EvidenceBundle | None = None
+    change_candidates: CorrelatedChangesResponse | None = None
+
+
 class InvestigationReport(BaseModel):
     cluster: str = "current-context"
     scope: ScopeType

@@ -145,13 +145,13 @@ def test_build_investigation_report_prefers_plan_target_fields(monkeypatch) -> N
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
     monkeypatch.setattr(
         reporting,
-        "collect_correlated_changes",
-        lambda req: (
-            correlation_request.setdefault("req", req),
+        "collect_correlated_changes_for_target",
+        lambda target, **kwargs: (
+            correlation_request.setdefault("target", target),
             CorrelatedChangesResponse(
-                cluster=req.cluster or "artifact-cluster",
-                scope=req.profile,
-                target=req.target,
+                cluster=target.cluster or "artifact-cluster",
+                scope=target.profile,
+                target=target.target,
                 changes=[],
                 limitations=[],
             ),
@@ -166,9 +166,9 @@ def test_build_investigation_report_prefers_plan_target_fields(monkeypatch) -> N
         "artifact-note",
         "cluster resolved from collected context: artifact-cluster",
     ]
-    assert correlation_request["req"].cluster == "artifact-cluster"
-    assert correlation_request["req"].namespace == "artifact-ns"
-    assert correlation_request["req"].target == "service/api-resolved"
+    assert correlation_request["target"].cluster == "artifact-cluster"
+    assert correlation_request["target"].namespace == "artifact-ns"
+    assert correlation_request["target"].target == "service/api-resolved"
 
 
 def test_build_investigation_report_uses_execution_artifacts_by_default(monkeypatch) -> None:
@@ -181,7 +181,7 @@ def test_build_investigation_report_uses_execution_artifacts_by_default(monkeypa
     )
     monkeypatch.setattr(
         reporting,
-        "_analyze_state",
+        "rank_hypotheses_from_state",
         lambda _state: InvestigationAnalysis(
             cluster="artifact-cluster",
             scope="service",
@@ -202,11 +202,6 @@ def test_build_investigation_report_uses_execution_artifacts_by_default(monkeypa
             recommended_next_step="artifact next step",
             suggested_follow_ups=["artifact follow-up"],
         ),
-    )
-    monkeypatch.setattr(
-        reporting,
-        "_synthesize_root_cause",
-        lambda state: (_ for _ in ()).throw(AssertionError("root-cause path should not be used")),
     )
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
@@ -230,8 +225,8 @@ def test_build_investigation_report_reuses_executed_change_artifacts(monkeypatch
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
     monkeypatch.setattr(
         reporting,
-        "collect_correlated_changes",
-        lambda req: (_ for _ in ()).throw(AssertionError("executed changes should be reused")),
+        "collect_correlated_changes_for_target",
+        lambda target, **kwargs: (_ for _ in ()).throw(AssertionError("executed changes should be reused")),
     )
 
     report = reporting.build_investigation_report(
@@ -251,7 +246,7 @@ def test_build_investigation_report_softens_confidence_when_hypotheses_are_close
     )
     monkeypatch.setattr(
         reporting,
-        "_analyze_state",
+        "rank_hypotheses_from_state",
         lambda _state: InvestigationAnalysis(
             cluster="artifact-cluster",
             scope="service",

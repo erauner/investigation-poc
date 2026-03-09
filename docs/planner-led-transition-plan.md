@@ -53,8 +53,6 @@ What is now true:
 
 What is still missing:
 
-- a canonical `InvestigationState` or equivalent state artifact
-- ranking and rendering that operate on state rather than request-time recollection wrappers
 - a real alert-plane artifact instead of alert-shaped runtime indirection
 - a tighter public tool surface with redundant facades and context-shaped duplicates removed or demoted
 - agent/runtime behavior that intentionally prefers the planner-led path
@@ -131,29 +129,30 @@ Validation delivered:
 
 ### Slice 3: Make Investigation State Canonical
 
-Status: Next
+Status: Completed
 
-The next semantic seam should be explicit investigation state, not a broader executor.
+Delivered:
 
-Goals:
+- `InvestigationState` added as the canonical post-execution artifact
+- state assembly moved into a dedicated `state.py` module
+- execution-time target alignment moved out of `planner.py`
+- `rank_hypotheses` now delegates to `rank_hypotheses_from_state(...)`
+- `render_investigation_report` now delegates to `render_investigation_report_from_state(...)`
+- request-based reporting entrypoints remain as thin facades over the canonical state path
+- the internal legacy root-cause bridge was removed from canonical reporting
+- compatibility helpers now sit on top of state-native ranking/rendering rather than carrying unique reasoning logic
 
-- introduce a canonical state artifact for collected investigation progress
-- make `rank_hypotheses` consume state, not just request wrappers
-- make `render_investigation_report` consume state, not just request wrappers
-- move execution-time state assembly out of `planner.py` so planning remains purely control-plane
-- make externally gathered evidence composable into the control plane later
+Validation delivered:
 
-Likely changes:
+- service tests proving ranking/rendering consume canonical state
+- planner tests still proving plan creation is pure and execution remains bounded
+- reporting tests proving executed change artifacts still flow through the canonical state path
 
-- add `InvestigationState` or equivalent
-- add narrow collected-artifact/state payloads
-- keep request-based report wrappers only as thin facades
-- make state the canonical input to analysis and rendering
+What is still missing after Slice 3:
 
-Validation gate:
-
-- service tests proving ranking/rendering consume state rather than request-time recollection
-- tests proving collected change and alert artifacts can affect reasoning before final render
+- a real alert-plane artifact rather than alert-shaped runtime indirection
+- broader public-surface cleanup of redundant transition endpoints and tool names
+- agent/runtime transition to intentionally planner-led behavior
 
 ### Slice 4: Narrow and Clean the Public Surface
 
@@ -239,19 +238,18 @@ Validation gate:
 
 The next implementation move should be:
 
-### Implement Slice 3
+### Implement Slice 4
 
 Why:
 
-- Slice 2 made execution bounded and explicit
-- the next missing seam is canonical investigation state
-- state-first ranking and rendering are required before broader external evidence composition makes sense
+- Slice 3 made state canonical, so redundant transition surfaces can now be cleaned up without blocking the core engine
+- the next source of architectural drag is overlapping public naming and compatibility aliases that still look more important than they are
 
 What not to do yet:
 
 - do not switch the kagent prompt/config yet
 - do not expose a large raw evidence-plane surface yet
-- do not expand the executor into a generic raw-tool orchestrator
+- do not introduce a generic raw-tool orchestration layer
 - do not split MCP deployments
 
 ## End-State E2E Expectations

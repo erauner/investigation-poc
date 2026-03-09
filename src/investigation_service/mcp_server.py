@@ -58,7 +58,7 @@ def collect_workload_context(
     service_name: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Collect structured workload context (state, events, logs, metrics, findings) for drill-down after the top-level report."""
+    """Collect structured workload context for exploratory drill-down. This is not part of the canonical planner-led control plane."""
     response = collect_workload_context_impl(
         CollectContextRequest(
             cluster=cluster,
@@ -85,7 +85,7 @@ def collect_alert_context(
     service_name: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Collect structured context for an alert-shaped input by inferring the investigation target. Prefer build_investigation_report first for normal investigations."""
+    """Collect structured context for an alert-shaped input by inferring the investigation target. Exploratory only; not a canonical control-plane step."""
     response = collect_alert_context_impl(
         CollectAlertContextRequest(
             alertname=alertname,
@@ -262,7 +262,7 @@ def update_investigation_plan(plan: dict, execution: dict) -> dict:
 
 @mcp.tool()
 def collect_node_context(node_name: str, lookback_minutes: int = 15, cluster: str | None = None) -> dict:
-    """Collect structured context for a cluster node target as a lower-level follow-up tool."""
+    """Collect structured context for a cluster node target as a lower-level exploratory follow-up tool."""
     response = collect_node_context_impl(
         CollectNodeContextRequest(cluster=cluster, node_name=node_name, lookback_minutes=lookback_minutes)
     )
@@ -331,7 +331,7 @@ def collect_service_context(
     target: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Collect structured context for a namespaced service target as a lower-level follow-up tool."""
+    """Collect structured context for a namespaced service target as a lower-level exploratory follow-up tool."""
     response = collect_service_context_impl(
         CollectServiceContextRequest(
             cluster=cluster,
@@ -399,7 +399,7 @@ def build_root_cause_report(
     service_name: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Collect context for a normalized target and return a typed root-cause report. Prefer build_investigation_report for the default user-facing flow."""
+    """Compatibility alias over the canonical render path with related data disabled. Do not treat this as the primary planner-led surface."""
     response = build_root_cause_report_impl(
         BuildRootCauseReportRequest(
             cluster=cluster,
@@ -488,7 +488,7 @@ def build_investigation_report(
     annotations: dict[str, str] | None = None,
     node_name: str | None = None,
 ) -> dict:
-    """Build the final typed investigation report for normal investigations. Use this first when namespace and target are already known, including Backend/<name>, Frontend/<name>, and Cluster/<name> convenience targets, because backend routing resolves them to the correct deployment or service target automatically."""
+    """Compatibility facade over the canonical render path for request-shaped callers. Prefer the explicit planner-led control-plane flow for intentional investigations."""
     response = build_investigation_report_impl(
         InvestigationReportRequest(
             cluster=cluster,
@@ -566,7 +566,7 @@ def build_alert_investigation_report(
     correlation_limit: int = 10,
     anchor_timestamp: str | None = None,
 ) -> dict:
-    """Build the final typed investigation report for alert-shaped input. Prefer this explicit alert triage entrypoint over the generic report tool when alertname, labels, or annotations are the primary input."""
+    """Compatibility facade over the canonical render path for alert-shaped callers. Keep this as a wrapper, not as a distinct reasoning surface."""
     response = build_alert_investigation_report_impl(
         AlertInvestigationReportRequest(
             alertname=alertname,
@@ -599,7 +599,7 @@ def collect_correlated_changes(
     anchor_timestamp: str | None = None,
     limit: int = 10,
 ) -> dict:
-    """Collect bounded, ranked correlated changes for a normalized target as follow-up after the top-level report when deeper inspection is needed."""
+    """Deprecated compatibility alias for change collection. Prefer collect_change_candidates for the canonical staged change-review surface."""
     response = collect_correlated_changes_impl(
         CollectCorrelatedChangesRequest(
             cluster=cluster,

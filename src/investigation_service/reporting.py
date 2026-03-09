@@ -1,13 +1,3 @@
-from dataclasses import dataclass
-
-from .correlation import collect_change_candidates, collect_correlated_changes, collect_correlated_changes_for_target
-from .event_fingerprints import canonicalize_event_fingerprint
-from .guidelines import (
-    guideline_context_from_analysis,
-    load_guideline_rules,
-    resolve_guidelines,
-    resolve_guidelines_for_context,
-)
 from .analysis import (
     adjusted_confidence_from_hypotheses,
     ambiguity_limitations_from_hypotheses,
@@ -16,35 +6,31 @@ from .analysis import (
     primary_hypothesis,
     rendered_evidence_from_hypothesis,
 )
+from .cluster_registry import resolve_cluster
+from .correlation import collect_change_candidates, collect_correlated_changes_for_target
+from .event_fingerprints import canonicalize_event_fingerprint
+from .guidelines import guideline_context_from_analysis, load_guideline_rules, resolve_guidelines_for_context
+from .k8s_adapter import get_backend_cr, get_cluster_cr, get_frontend_cr
 from .models import (
     AlertInvestigationReportRequest,
     BuildInvestigationPlanRequest,
     BuildRootCauseReportRequest,
-    CollectCorrelatedChangesRequest,
     CorrelatedChange,
-    CorrelatedChangesResponse,
-    EvidenceBundle,
     EvidenceBatchExecution,
     ExecuteInvestigationStepRequest,
-    Hypothesis,
     InvestigationAnalysis,
     InvestigationPlan,
-    InvestigationTarget,
     InvestigationReport,
     InvestigationReportRequest,
-    NormalizedInvestigationRequest,
+    InvestigationState,
+    InvestigationTarget,
     ResolvedGuideline,
     RootCauseReport,
-    TargetRef,
     UpdateInvestigationPlanRequest,
 )
-from .cluster_registry import resolve_cluster
-from .k8s_adapter import get_backend_cr, get_cluster_cr, get_frontend_cr
 from .planner import PlannerDeps
-from . import planner
 from .routing import canonical_target, scope_from_target
-from .synthesis import build_root_cause_report as build_root_cause_report_impl
-from .synthesis import synthesize_root_cause as synthesize_root_cause_impl
+from .state import build_investigation_state as build_investigation_state_artifact
 from .tools import (
     collect_alert_context,
     collect_node_context,
@@ -53,24 +39,11 @@ from .tools import (
     evidence_bundle_from_context,
     find_unhealthy_pod,
     normalize_alert_input,
-    render_collected_context,
 )
+from . import planner
 
 _EMPTY_CORRELATION_LIMITATION = "no correlated changes found in the requested time window"
 _EMPTY_RELATED_DATA_NOTE = "no meaningful correlated changes found in the requested time window"
-_LEGACY_BUILD_ROOT_CAUSE_IMPL = build_root_cause_report_impl
-
-
-@dataclass(frozen=True)
-class CollectedInvestigationState:
-    plan: InvestigationPlan
-    updated_plan: InvestigationPlan
-    target: InvestigationTarget
-    normalized: NormalizedInvestigationRequest
-    context: object
-    evidence: EvidenceBundle
-    execution: EvidenceBatchExecution
-    changes: CorrelatedChangesResponse | None
 
 
 def _is_empty_correlation_limitation(value: str) -> bool:
@@ -99,8 +72,15 @@ def _planner_deps() -> PlannerDeps:
     )
 
 
-def _filter_related_data(report: RootCauseReport, changes: list[CorrelatedChange]) -> tuple[list[CorrelatedChange], str | None]:
-    return _filter_related_data_from_evidence(report.evidence_items, changes)
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def _filter_related_data_from_evidence(primary_evidence_items, changes: list[CorrelatedChange]) -> tuple[list[CorrelatedChange], str | None]:
@@ -123,95 +103,8 @@ def _filter_related_data_from_evidence(primary_evidence_items, changes: list[Cor
     return [], _EMPTY_RELATED_DATA_NOTE
 
 
-def _dedupe_preserving_order(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        result.append(value)
-    return result
-
-
-def _base_investigation_report(root_cause: RootCauseReport) -> InvestigationReport:
-    return InvestigationReport(
-        cluster=root_cause.cluster,
-        scope=root_cause.scope,
-        target=root_cause.target,
-        diagnosis=root_cause.diagnosis,
-        likely_cause=root_cause.likely_cause,
-        confidence=root_cause.confidence,
-        evidence=root_cause.evidence,
-        evidence_items=root_cause.evidence_items,
-        related_data=[],
-        related_data_note=None,
-        limitations=root_cause.limitations,
-        recommended_next_step=root_cause.recommended_next_step,
-        suggested_follow_ups=root_cause.suggested_follow_ups,
-        guidelines=[],
-        normalization_notes=[],
-    )
-
-
-def _analysis_from_root_cause(root_cause: RootCauseReport) -> InvestigationAnalysis:
-    return InvestigationAnalysis(
-        cluster=root_cause.cluster,
-        scope=root_cause.scope,
-        target=root_cause.target,
-        profile=root_cause.scope,
-        hypotheses=[
-            Hypothesis(
-                key="legacy-root-cause",
-                diagnosis=root_cause.diagnosis,
-                likely_cause=root_cause.likely_cause,
-                confidence=root_cause.confidence,
-                score=0,
-                supporting_findings=[],
-                evidence_items=root_cause.evidence_items,
-            )
-        ],
-        limitations=list(root_cause.limitations),
-        recommended_next_step=root_cause.recommended_next_step,
-        suggested_follow_ups=list(root_cause.suggested_follow_ups),
-    )
-
-
-def _base_investigation_report_from_analysis(analysis: InvestigationAnalysis) -> InvestigationReport:
-    lead = primary_hypothesis(analysis)
-    return InvestigationReport(
-        cluster=analysis.cluster,
-        scope=analysis.scope,
-        target=analysis.target,
-        diagnosis=lead.diagnosis,
-        likely_cause=lead.likely_cause,
-        confidence=lead.confidence,
-        evidence=rendered_evidence_from_hypothesis(lead),
-        evidence_items=lead.evidence_items,
-        related_data=[],
-        related_data_note=None,
-        limitations=list(analysis.limitations),
-        recommended_next_step=analysis.recommended_next_step,
-        suggested_follow_ups=list(analysis.suggested_follow_ups),
-        guidelines=[],
-        normalization_notes=[],
-    )
-
-
-def _build_correlation_request(
-    req: InvestigationReportRequest,
-    target: InvestigationTarget,
-) -> CollectCorrelatedChangesRequest:
-    return CollectCorrelatedChangesRequest(
-        cluster=target.cluster,
-        namespace=target.namespace,
-        target=target.target,
-        profile=target.profile,
-        service_name=target.service_name,
-        lookback_minutes=req.correlation_window_minutes,
-        anchor_timestamp=req.anchor_timestamp,
-        limit=req.correlation_limit,
-    )
+def _filter_related_data(report: RootCauseReport, changes: list[CorrelatedChange]) -> tuple[list[CorrelatedChange], str | None]:
+    return _filter_related_data_from_evidence(report.evidence_items, changes)
 
 
 def _report_request_to_plan_request(req: InvestigationReportRequest) -> BuildInvestigationPlanRequest:
@@ -242,57 +135,74 @@ def update_investigation_plan(req: UpdateInvestigationPlanRequest) -> Investigat
     return planner.update_investigation_plan(req)
 
 
-def _primary_evidence_from_execution(execution: EvidenceBatchExecution) -> EvidenceBundle:
-    artifact = next((item for item in execution.artifacts if item.step_id == "collect-target-evidence"), None)
-    if artifact is None:
-        artifact = next((item for item in execution.artifacts if item.evidence_bundle is not None), None)
-    if artifact is None or artifact.evidence_bundle is None:
-        raise ValueError("execution batch did not produce a primary evidence bundle")
-    return artifact.evidence_bundle
-
-
-def _changes_from_execution(execution: EvidenceBatchExecution) -> CorrelatedChangesResponse | None:
-    artifact = next((item for item in execution.artifacts if item.change_candidates is not None), None)
-    return None if artifact is None else artifact.change_candidates
-
-
-def _collect_analysis_state(req: InvestigationReportRequest) -> CollectedInvestigationState:
-    plan = build_investigation_plan(_report_request_to_plan_request(req))
+def build_investigation_state(req: InvestigationReportRequest) -> InvestigationState:
+    incident = _report_request_to_plan_request(req)
+    plan = build_investigation_plan(incident)
     if plan.mode == "factual_analysis":
-        raise ValueError("rendering an investigation report is not supported for factual_analysis plans")
+        raise ValueError("state-backed RCA analysis is not supported for factual_analysis plans")
     if plan.target is None:
         raise ValueError("investigation plan did not produce a primary target")
-
-    normalized = planner.normalized_request_from_target(plan.target)
     execution = execute_investigation_step(
         ExecuteInvestigationStepRequest(
             plan=plan,
-            incident=_report_request_to_plan_request(req),
+            incident=incident,
         )
     )
     updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=plan, execution=execution))
-    evidence = _primary_evidence_from_execution(execution)
-    context = render_collected_context(evidence)
-    normalized = planner.align_normalized_request_with_context(normalized, context)
-    if context.cluster and not any(note.startswith("cluster resolved") for note in normalized.normalization_notes):
-        notes = list(normalized.normalization_notes)
-        notes.append(f"cluster resolved from collected context: {context.cluster}")
-        normalized = normalized.model_copy(update={"cluster": context.cluster, "normalization_notes": notes})
-    target = planner.investigation_target_from_normalized(
-        normalized,
-        requested_target=plan.target.requested_target,
+    return build_investigation_state_artifact(
+        incident=incident,
+        initial_plan=plan,
+        updated_plan=updated_plan,
+        executions=[execution],
     )
 
-    return CollectedInvestigationState(
-        plan=plan,
-        updated_plan=updated_plan,
-        target=target,
-        normalized=normalized,
-        context=context,
-        evidence=evidence,
-        execution=execution,
-        changes=_changes_from_execution(execution),
+
+def rank_hypotheses_from_state(state: InvestigationState) -> InvestigationAnalysis:
+    if state.target is None or state.primary_evidence is None:
+        raise ValueError("investigation state does not have enough evidence to rank hypotheses")
+
+    analysis = build_investigation_analysis(state.primary_evidence, state.target)
+    extra_limitations: list[str] = []
+    for artifact in state.artifacts:
+        if artifact.evidence_bundle is None or artifact.evidence_bundle == state.primary_evidence:
+            continue
+        extra_limitations.extend(artifact.limitations)
+
+    suggested_follow_ups = list(analysis.suggested_follow_ups)
+    if state.change_candidates is not None and state.change_candidates.changes:
+        suggested_follow_ups.append("Validate recent changes against the leading hypothesis before taking write actions.")
+
+    return analysis.model_copy(
+        update={
+            "limitations": _dedupe_preserving_order([*analysis.limitations, *extra_limitations]),
+            "suggested_follow_ups": _dedupe_preserving_order(suggested_follow_ups),
+        }
     )
+
+
+def _apply_guidelines(
+    analysis: InvestigationAnalysis,
+    *,
+    target: InvestigationTarget,
+    alertname: str | None,
+) -> tuple[str, list[str], list[ResolvedGuideline], list[str]]:
+    rules, load_limitations = load_guideline_rules()
+    context = guideline_context_from_analysis(analysis, target, alertname=alertname)
+    resolved = resolve_guidelines_for_context(rules, context)
+    if not resolved:
+        return analysis.recommended_next_step, list(analysis.suggested_follow_ups), [], load_limitations
+
+    recommended_next_step = next(
+        (item.text for item in resolved if item.category == "next_step"),
+        analysis.recommended_next_step,
+    )
+    suggested_follow_ups = list(analysis.suggested_follow_ups)
+    for item in resolved:
+        if item.category == "next_step" and item.text == recommended_next_step:
+            continue
+        suggested_follow_ups.append(item.text)
+
+    return recommended_next_step, _dedupe_preserving_order(suggested_follow_ups), resolved, load_limitations
 
 
 def _render_investigation_report_from_analysis(
@@ -327,48 +237,63 @@ def _render_investigation_report_from_analysis(
     )
 
 
-def _synthesize_root_cause(state: CollectedInvestigationState) -> RootCauseReport:
-    if build_root_cause_report_impl is not _LEGACY_BUILD_ROOT_CAUSE_IMPL:
-        return build_root_cause_report_impl(state.context, state.normalized)
-    return synthesize_root_cause_impl(state.evidence, state.target)
-
-
-def _analyze_state(state: CollectedInvestigationState) -> InvestigationAnalysis:
-    if build_root_cause_report_impl is not _LEGACY_BUILD_ROOT_CAUSE_IMPL:
-        return _analysis_from_root_cause(_synthesize_root_cause(state))
-    return build_investigation_analysis(state.evidence, state.target)
-
-
-def _apply_guidelines(
-    analysis: InvestigationAnalysis,
+def render_investigation_report_from_state(
+    state: InvestigationState,
     *,
-    target: InvestigationTarget,
-    alertname: str | None,
-) -> tuple[str, list[str], list[ResolvedGuideline], list[str]]:
-    rules, load_limitations = load_guideline_rules()
-    context = guideline_context_from_analysis(
+    include_related_data: bool = True,
+    correlation_window_minutes: int = 60,
+    correlation_limit: int = 10,
+    anchor_timestamp: str | None = None,
+    alertname: str | None = None,
+) -> InvestigationReport:
+    if state.target is None:
+        raise ValueError("investigation state does not have a resolved target")
+
+    analysis = rank_hypotheses_from_state(state)
+    related_data: list[CorrelatedChange] = []
+    related_data_note: str | None = None
+    limitations = list(analysis.limitations)
+    limitations.extend(ambiguity_limitations_from_hypotheses(analysis))
+    recommended_next_step, suggested_follow_ups, guidelines, guideline_limitations = _apply_guidelines(
         analysis,
-        target,
+        target=state.target,
         alertname=alertname,
     )
-    resolved = resolve_guidelines_for_context(
-        rules,
-        context,
-    )
-    if not resolved:
-        return analysis.recommended_next_step, list(analysis.suggested_follow_ups), [], load_limitations
+    suggested_follow_ups.extend(follow_ups_from_hypotheses(analysis))
+    limitations.extend(guideline_limitations)
 
-    recommended_next_step = next(
-        (item.text for item in resolved if item.category == "next_step"),
-        analysis.recommended_next_step,
-    )
-    suggested_follow_ups = list(analysis.suggested_follow_ups)
-    for item in resolved:
-        if item.category == "next_step" and item.text == recommended_next_step:
-            continue
-        suggested_follow_ups.append(item.text)
+    if include_related_data:
+        correlated = state.change_candidates
+        if correlated is None:
+            correlated = collect_correlated_changes_for_target(
+                state.target,
+                lookback_minutes=correlation_window_minutes,
+                anchor_timestamp=anchor_timestamp,
+                limit=correlation_limit,
+            )
+        related_data, related_data_note = _filter_related_data_from_evidence(
+            primary_hypothesis(analysis).evidence_items,
+            correlated.changes,
+        )
+        correlation_limitations = list(correlated.limitations)
+        if not related_data and related_data_note:
+            correlation_limitations = [
+                item for item in correlation_limitations if not _is_empty_correlation_limitation(item)
+            ]
+        limitations.extend(correlation_limitations)
+        if related_data:
+            suggested_follow_ups.append("Inspect the related changes timeline before taking write actions.")
 
-    return recommended_next_step, _dedupe_preserving_order(suggested_follow_ups), resolved, load_limitations
+    return _render_investigation_report_from_analysis(
+        analysis,
+        normalization_notes=list(state.target.normalization_notes),
+        related_data=related_data,
+        related_data_note=related_data_note,
+        limitations=limitations,
+        recommended_next_step=recommended_next_step,
+        suggested_follow_ups=suggested_follow_ups,
+        guidelines=guidelines,
+    )
 
 
 def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
@@ -411,59 +336,17 @@ def resolve_primary_target(req: InvestigationReportRequest) -> InvestigationTarg
 
 
 def rank_hypotheses(req: InvestigationReportRequest) -> InvestigationAnalysis:
-    return _analyze_state(_collect_analysis_state(req))
+    return rank_hypotheses_from_state(build_investigation_state(req))
 
 
 def render_investigation_report(req: InvestigationReportRequest) -> InvestigationReport:
-    state = _collect_analysis_state(req)
-    analysis = _analyze_state(state)
-
-    related_data: list[CorrelatedChange] = []
-    related_data_note: str | None = None
-    limitations = list(analysis.limitations)
-    limitations.extend(ambiguity_limitations_from_hypotheses(analysis))
-    recommended_next_step, suggested_follow_ups, guidelines, guideline_limitations = _apply_guidelines(
-        analysis,
-        target=state.target,
+    return render_investigation_report_from_state(
+        build_investigation_state(req),
+        include_related_data=req.include_related_data,
+        correlation_window_minutes=req.correlation_window_minutes,
+        correlation_limit=req.correlation_limit,
+        anchor_timestamp=req.anchor_timestamp,
         alertname=req.alertname,
-    )
-    suggested_follow_ups.extend(follow_ups_from_hypotheses(analysis))
-    limitations.extend(guideline_limitations)
-
-    if req.include_related_data:
-        if state.changes is not None:
-            correlated = state.changes
-        elif collect_correlated_changes.__module__ != "investigation_service.correlation":
-            correlated = collect_correlated_changes(_build_correlation_request(req, state.target))
-        else:
-            correlated = collect_correlated_changes_for_target(
-                state.target,
-                lookback_minutes=req.correlation_window_minutes,
-                anchor_timestamp=req.anchor_timestamp,
-                limit=req.correlation_limit,
-            )
-        related_data, related_data_note = _filter_related_data_from_evidence(
-            primary_hypothesis(analysis).evidence_items,
-            correlated.changes,
-        )
-        correlation_limitations = list(correlated.limitations)
-        if not related_data and related_data_note:
-            correlation_limitations = [
-                item for item in correlation_limitations if not _is_empty_correlation_limitation(item)
-            ]
-        limitations.extend(correlation_limitations)
-        if related_data:
-            suggested_follow_ups.append("Inspect the related changes timeline before taking write actions.")
-
-    return _render_investigation_report_from_analysis(
-        analysis,
-        normalization_notes=state.target.normalization_notes,
-        related_data=related_data,
-        related_data_note=related_data_note,
-        limitations=limitations,
-        recommended_next_step=recommended_next_step,
-        suggested_follow_ups=suggested_follow_ups,
-        guidelines=guidelines,
     )
 
 

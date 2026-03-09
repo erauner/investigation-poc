@@ -13,7 +13,6 @@ from investigation_service.models import (
     InvestigationTarget,
     InvestigationReport,
     InvestigationReportRequest,
-    RootCauseReport,
 )
 from investigation_service import reporting
 
@@ -183,27 +182,6 @@ def test_resolve_guidelines_for_context_matches_legacy_resolution() -> None:
 
 
 def test_build_investigation_report_applies_guidelines_without_mutating_diagnosis(monkeypatch) -> None:
-    root_cause = RootCauseReport(
-        scope="service",
-        target="service/kagent-controller",
-        diagnosis="Service Returning 5xx Responses",
-        likely_cause="Backend dependency is failing under live traffic.",
-        confidence="medium",
-        evidence=["prometheus: Service Returning 5xx Responses - 5xx ratio above threshold"],
-        evidence_items=[
-            EvidenceItem(
-                fingerprint="finding|service|5xx",
-                source="prometheus",
-                kind="finding",
-                severity="critical",
-                summary="prometheus: Service Returning 5xx Responses",
-                detail="5xx ratio above threshold",
-            )
-        ],
-        limitations=["metrics partial"],
-        recommended_next_step="Inspect service dashboards, recent deploys, and upstream or downstream dependencies before changing traffic handling.",
-        suggested_follow_ups=["Check whether a recent rollout lines up with the degradation."],
-    )
     rules = [
         GuidelineRule.model_validate(
             {
@@ -231,8 +209,45 @@ def test_build_investigation_report_applies_guidelines_without_mutating_diagnosi
 
     monkeypatch.setattr(
         reporting,
-        "execute_investigation_step",
-        lambda _req: reporting.EvidenceBatchExecution(
+        "build_investigation_state",
+        lambda _req: reporting.InvestigationState(
+            incident=reporting.BuildInvestigationPlanRequest(
+                namespace="kagent",
+                target="service/kagent-controller",
+                profile="service",
+            ),
+            target=InvestigationTarget(
+                source="manual",
+                scope="service",
+                cluster="current-context",
+                namespace="kagent",
+                requested_target="service/kagent-controller",
+                target="service/kagent-controller",
+                service_name="kagent-controller",
+                profile="service",
+                lookback_minutes=15,
+                normalization_notes=[],
+            ),
+            plan=reporting.InvestigationPlan(
+                mode="targeted_rca",
+                objective="Investigate service/kagent-controller",
+                target=InvestigationTarget(
+                    source="manual",
+                    scope="service",
+                    cluster="current-context",
+                    namespace="kagent",
+                    requested_target="service/kagent-controller",
+                    target="service/kagent-controller",
+                    service_name="kagent-controller",
+                    profile="service",
+                    lookback_minutes=15,
+                    normalization_notes=[],
+                ),
+                steps=[],
+                evidence_batches=[],
+            ),
+            executions=[
+                reporting.EvidenceBatchExecution(
             batch_id="batch-1",
             executed_step_ids=["collect-target-evidence"],
             artifacts=[
@@ -256,14 +271,46 @@ def test_build_investigation_report_applies_guidelines_without_mutating_diagnosi
                 }
             ],
             execution_notes=[],
+                )
+            ],
+            artifacts=[],
+            primary_evidence=None,
+            change_candidates=None,
         ),
     )
     monkeypatch.setattr(
         reporting,
-        "update_investigation_plan",
-        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
+        "rank_hypotheses_from_state",
+        lambda _state: InvestigationAnalysis(
+            cluster="current-context",
+            scope="service",
+            target="service/kagent-controller",
+            profile="service",
+            hypotheses=[
+                Hypothesis(
+                    key="service-5xx",
+                    diagnosis="Service Returning 5xx Responses",
+                    likely_cause="Backend dependency is failing under live traffic.",
+                    confidence="medium",
+                    score=1,
+                    supporting_findings=[],
+                    evidence_items=[
+                        EvidenceItem(
+                            fingerprint="finding|service|5xx",
+                            source="prometheus",
+                            kind="finding",
+                            severity="critical",
+                            summary="prometheus: Service Returning 5xx Responses",
+                            detail="5xx ratio above threshold",
+                        )
+                    ],
+                )
+            ],
+            limitations=["metrics partial"],
+            recommended_next_step="Inspect service dashboards, recent deploys, and upstream or downstream dependencies before changing traffic handling.",
+            suggested_follow_ups=["Check whether a recent rollout lines up with the degradation."],
+        ),
     )
-    monkeypatch.setattr(reporting, "build_root_cause_report_impl", lambda context, normalized: root_cause)
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: (rules, []))
 
     report = reporting.build_investigation_report(
@@ -275,8 +322,8 @@ def test_build_investigation_report_applies_guidelines_without_mutating_diagnosi
         )
     )
 
-    assert report.diagnosis == root_cause.diagnosis
-    assert report.evidence == root_cause.evidence
+    assert report.diagnosis == "Service Returning 5xx Responses"
+    assert report.evidence == ["prometheus: Service Returning 5xx Responses - 5xx ratio above threshold"]
     assert report.recommended_next_step == (
         "Inspect recent rollout and upstream dependency health before reading workload logs."
     )
