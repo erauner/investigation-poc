@@ -28,17 +28,17 @@ spec:
           name: investigation-mcp-server
           kind: RemoteMCPServer
           toolNames:
-            - build_alert_investigation_report
-            - build_investigation_report
-            - normalize_alert_input
-            - find_unhealthy_pod
-            - find_unhealthy_workloads
-            - collect_node_context
-            - collect_service_context
-            - collect_workload_context
-            - collect_alert_context
-            - build_root_cause_report
-            - collect_correlated_changes
+            - normalize_incident_input
+            - resolve_primary_target
+            - build_investigation_plan
+            - execute_investigation_step
+            - update_investigation_plan
+            - rank_hypotheses
+            - render_investigation_report
+            - collect_workload_evidence
+            - collect_service_evidence
+            - collect_node_evidence
+            - collect_change_candidates
     a2aConfig:
       skills:
         - id: investigate-workload

@@ -302,7 +302,7 @@ def collect_alert_evidence(
     service_name: str | None = None,
     lookback_minutes: int = 15,
 ) -> dict:
-    """Collect alert evidence as an artifact bundle after normalizing the alert input."""
+    """Collect alert-scoped evidence after normalizing alert input. This remains a planner-owned helper and is not the intentional first-step agent surface."""
     response = collect_alert_evidence_impl(
         CollectAlertContextRequest(
             alertname=alertname,
@@ -373,7 +373,7 @@ def collect_service_evidence(
 
 @mcp.tool()
 def find_unhealthy_workloads(namespace: str, limit: int = 5, cluster: str | None = None) -> dict:
-    """List concrete unhealthy pod targets in a namespace for vague workload requests when the user did not name a target."""
+    """List concrete unhealthy pod targets in a namespace for debugging or exploratory routing inspection. Prefer resolve_primary_target for the planner-led path."""
     response = find_unhealthy_workloads_impl(
         FindUnhealthyWorkloadsRequest(cluster=cluster, namespace=namespace, limit=limit)
     )
@@ -382,7 +382,7 @@ def find_unhealthy_workloads(namespace: str, limit: int = 5, cluster: str | None
 
 @mcp.tool()
 def find_unhealthy_pod(namespace: str, cluster: str | None = None) -> dict:
-    """Find the single best unhealthy pod candidate in a namespace for vague workload requests."""
+    """Find the single best unhealthy pod candidate in a namespace for debugging or exploratory routing inspection. Prefer resolve_primary_target for the planner-led path."""
     response = find_unhealthy_pod_impl(FindUnhealthyPodRequest(cluster=cluster, namespace=namespace))
     return response.model_dump(mode="json")
 
@@ -462,7 +462,7 @@ def build_investigation_report(
     annotations: dict[str, str] | None = None,
     node_name: str | None = None,
 ) -> dict:
-    """Compatibility facade over the canonical render path for request-shaped callers. Prefer the explicit planner-led control-plane flow for intentional investigations."""
+    """Compatibility facade over the canonical render path for request-shaped callers. Do not treat this as the intentional agent-facing entrypoint in the planner-led model."""
     response = build_investigation_report_impl(
         InvestigationReportRequest(
             cluster=cluster,
@@ -540,7 +540,7 @@ def build_alert_investigation_report(
     correlation_limit: int = 10,
     anchor_timestamp: str | None = None,
 ) -> dict:
-    """Compatibility facade over the canonical render path for alert-shaped callers. Keep this as a wrapper, not as a distinct reasoning surface."""
+    """Compatibility facade over the canonical render path for alert-shaped callers. Keep this as a wrapper, not as an intentional planner-led entrypoint."""
     response = build_alert_investigation_report_impl(
         AlertInvestigationReportRequest(
             alertname=alertname,

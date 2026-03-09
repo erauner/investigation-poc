@@ -53,7 +53,7 @@ This target:
 - installs `kagent` and the local investigation stack
 - deploys the smoke workload
 - runs the standard workload prompt
-- runs the explicit `build_investigation_report` prompt
+- runs the explicit canonical render prompt
 - verifies the five required sections are present
 - fails if `Limitations` leaks correlated-change notes
 
@@ -131,10 +131,10 @@ make kind-down
 Investigate the unhealthy pod in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
 ```
 
-### Explicit top-level report path
+### Explicit canonical render path
 
 ```text
-Use build_investigation_report for the investigation. Investigate the unhealthy pod in namespace kagent-smoke and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
+Use render_investigation_report as the canonical final report tool. Investigate the unhealthy pod in namespace kagent-smoke and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
 ```
 
 ### Alert-shaped workload prompt
@@ -143,7 +143,7 @@ Use build_investigation_report for the investigation. Investigate the unhealthy 
 /investigate-alert Investigate PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
 ```
 
-For Claude Code, the alert command is now the preferred user-facing way to steer toward the alert-specific top-level backend entrypoint instead of the generic one.
+For Claude Code, the alert command is the preferred user-facing way to preserve alert-shaped routing without teaching report-first tool usage.
 
 ### Service-style prompt
 

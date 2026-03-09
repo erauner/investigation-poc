@@ -9,6 +9,7 @@ resources:
   - cluster-registry-configmap.yaml
   - guidelines-configmap.yaml
   - investigation-skill-configmap.yaml
+  - agent.yaml
   - investigation-remotemcpserver.yaml
   - mcp-deployment.yaml
   - mcp-service.yaml

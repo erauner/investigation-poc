@@ -36,7 +36,7 @@ For the first multi-cluster routing validation path, use:
 make kind-validate-multi
 ```
 
-This exercises the local kind stack, deploys the smoke workload, runs the standard investigation prompt, runs the explicit `build_investigation_report` prompt, and fails if the five-section report contract regresses.
+This exercises the local kind stack, deploys the smoke workload, runs the standard investigation prompt, runs the explicit canonical render prompt, and fails if the five-section report contract regresses.
 
 For the first operator-backed validation path in the same kind cluster, use:
 
@@ -78,6 +78,7 @@ The default `local-kind` overlay now also includes an in-cluster Prometheus plus
 There are two different MCP surfaces in this setup, and they serve different roles:
 
 - `investigation-mcp-server`: the repo-local tool server defined in `k8s/`. It exposes the low-level investigation tools that the custom agent uses behind the scenes.
+  The intentional agent-visible subset is now planner-led: canonical control-plane tools plus a narrow owned evidence-plane set.
 - `kagent-controller`: the higher-level controller MCP endpoint. It exposes agent-oriented tools such as `list_agents` and `invoke_agent`.
 
 That distinction matters for clients:
@@ -206,6 +207,7 @@ The included plugin is intentionally thin:
 - MCP path: `kagent-controller`
 - agent path: `kagent/incident-triage`
 - explicit alert command routes through the alert-specific top-level backend path
+  The planner-led agent path now treats `render_investigation_report` as the canonical final report surface rather than teaching report-first compatibility wrappers.
 
 Local test flow:
 

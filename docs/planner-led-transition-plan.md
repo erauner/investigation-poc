@@ -57,6 +57,45 @@ What is still missing:
 - further cleanup of exploratory context surfaces from the intentional agent-visible catalog
 - agent/runtime behavior that intentionally prefers the planner-led path
 
+## Planned Surface Retirement
+
+The transition plan should explicitly track which surfaces are being carried temporarily and which ones are intended to disappear.
+
+### Remove From The Agent-Visible Surface
+
+These should stop being part of the intentional kagent tool vocabulary as Slice 5 and Slice 6 land:
+
+- `build_investigation_report`
+- `build_alert_investigation_report`
+- `collect_workload_context`
+- `collect_service_context`
+- `collect_node_context`
+- `collect_alert_context`
+- likely `normalize_alert_input`
+- likely `normalize_incident_input`
+
+These may remain reachable at the MCP or HTTP layer briefly during transition, but they should not be taught as canonical tools once the planner-led path is the intended runtime model.
+
+### Remove From The Backend Entirely
+
+These should be scheduled for full removal once the kagent config has switched and no remaining tests, routes, or callers depend on them:
+
+- `build_investigation_report`
+- `build_alert_investigation_report`
+- `collect_workload_context`
+- `collect_service_context`
+- `collect_node_context`
+- `collect_alert_context`
+
+These removals are not optional cleanup. They are part of finishing the planner-led transition and avoiding indefinite maintenance of two parallel mental models.
+
+### Already Retired From The Public Surface
+
+These have already been removed from the public FastAPI and MCP surface and should stay retired as first-class entrypoints:
+
+- `build_root_cause_report`
+- `collect_correlated_changes`
+
 ## Completed Slices
 
 ### Slice 1: Add Explicit Planning Artifacts
@@ -181,11 +220,20 @@ Validation gate:
 
 ### Slice 5: Introduce a Narrow Evidence-Plane Policy for the Agent
 
-Status: Planned
+Status: Completed
 
-Do not expose every evidence tool at once.
+Delivered:
 
-First allow the agent to use a small intentional set:
+- narrowed the kagent-visible `investigation-mcp-server` tool catalog in `k8s/agent.yaml`
+- removed stale references to already-retired public tools from the agent allowlist
+- added `agent.yaml` to the `k8s/` kustomization so the agent manifest is deployed from the same manifest set
+- updated the kagent skill ConfigMap so it no longer teaches report-first wrappers or hidden exploratory tools as the default path
+- kept compatibility and exploratory tools exported in MCP/HTTP for transition and debugging, but removed them from the intentional agent-visible catalog
+- tightened MCP tool descriptions so compatibility and exploratory surfaces are called out more explicitly
+- updated local agent-facing wrappers, docs, and validation scripts to stop teaching `build_*report` as the default agent path
+- added policy tests to lock the agent allowlist, prompt guidance, and manifest-to-MCP consistency in place
+
+The intentional kagent-visible set is now:
 
 - control-plane:
   - `normalize_incident_input`
@@ -211,6 +259,11 @@ Validation gate:
 
 - agent routing tests for prompt/tool-choice behavior
 - assertions on first tool and follow-up tool sequences
+- kagent-visible tool catalog excludes:
+  - `build_investigation_report`
+  - `build_alert_investigation_report`
+  - `collect_*_context`
+  - retired aliases that no longer represent the planner-led model
 
 ### Slice 6: Transition the kagent Skill Config from Report-First to Planner-Led
 
@@ -225,7 +278,7 @@ Prompt behavior should become:
 - update plan
 - synthesize late
 
-Legacy facades may remain briefly, but they should stop being taught as the primary behavior model.
+Legacy facades may remain briefly, but they should stop being taught as the primary behavior model. This slice should also decide whether `normalize_alert_input` and `normalize_incident_input` remain exposed as debug-oriented helpers or are removed from the intentional agent surface entirely.
 
 Validation gate:
 
@@ -235,21 +288,41 @@ Validation gate:
 - operator-backed target e2e
 - factual/capacity question e2e
 
+### Slice 7: Remove Transitional Report-First And Context Surfaces
+
+Status: Planned
+
+Once the planner-led kagent config is live and validated, remove the remaining transitional surfaces that no longer earn their keep:
+
+- remove `build_investigation_report`
+- remove `build_alert_investigation_report`
+- remove `collect_workload_context`
+- remove `collect_service_context`
+- remove `collect_node_context`
+- remove `collect_alert_context`
+
+This slice should only proceed after the planner-led tool sequence is stable in e2e coverage. The goal is to stop carrying dual report-first and artifact-first entrypoints in the backend.
+
+Validation gate:
+
+- route and MCP tests proving the removed surfaces are gone
+- service tests proving no canonical flow depends on the deleted entrypoints
+- kagent config and prompt no longer reference the removed tools anywhere
+
 ## Immediate Recommendation
 
 The next implementation move should be:
 
-### Implement Slice 5
+### Implement Slice 6
 
 Why:
 
-- the core engine and public control-plane surface are now cleaner
-- the next meaningful gain is constraining what the agent is actually taught to use
-- the remaining overlap is now mostly about intentional tool policy rather than deep architectural seams
+- the agent-visible catalog is now intentionally narrow
+- the next meaningful gain is teaching the agent to use that catalog in a genuinely planner-led sequence
+- the remaining work is now primarily prompt/config behavior and end-to-end validation rather than backend surface cleanup
 
 What not to do yet:
 
-- do not switch the kagent prompt/config yet
 - do not expose a large raw evidence-plane surface yet
 - do not introduce a generic raw-tool orchestration layer
 - do not split MCP deployments

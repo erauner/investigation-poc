@@ -6,7 +6,7 @@ SMOKE_NAMESPACE="${SMOKE_NAMESPACE:-kagent-smoke}"
 KEEP_SMOKE="${KEEP_SMOKE:-0}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 WORKLOAD_PROMPT="${WORKLOAD_PROMPT:-Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE}. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
-TOP_LEVEL_PROMPT="${TOP_LEVEL_PROMPT:-Use build_investigation_report for the investigation. Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE} and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
+CANONICAL_REPORT_PROMPT="${CANONICAL_REPORT_PROMPT:-Use render_investigation_report as the canonical final report tool. Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE} and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
@@ -137,9 +137,9 @@ fi
 
 tmp_dir="$(mktemp -d)"
 standard_output="${tmp_dir}/standard.md"
-top_level_output="${tmp_dir}/top-level.md"
+canonical_report_output="${tmp_dir}/canonical-report.md"
 standard_raw="${tmp_dir}/standard.raw"
-top_level_raw="${tmp_dir}/top-level.raw"
+canonical_report_raw="${tmp_dir}/canonical-report.raw"
 
 echo "==> Setting up local kind stack"
 run_make kind-setup
@@ -174,13 +174,13 @@ if grep -Eiq "correlated changes|related data available" <<<"${limitations_secti
   exit 1
 fi
 
-echo "==> Running explicit top-level report prompt"
-run_make kagent-smoke-test TASK="${TOP_LEVEL_PROMPT}" >"${top_level_raw}"
-normalize_agent_output "${top_level_raw}" "${top_level_output}"
-cat "${top_level_output}"
+echo "==> Running explicit canonical render prompt"
+run_make kagent-smoke-test TASK="${CANONICAL_REPORT_PROMPT}" >"${canonical_report_raw}"
+normalize_agent_output "${canonical_report_raw}" "${canonical_report_output}"
+cat "${canonical_report_output}"
 
 for heading in "Diagnosis" "Evidence" "Related Data" "Limitations" "Recommended next step"; do
-  require_heading "${heading}" "${top_level_output}"
+  require_heading "${heading}" "${canonical_report_output}"
 done
 
 echo "==> Local kind validation passed"
