@@ -43,6 +43,7 @@ spec:
           toolNames:
             - resolve_primary_target
             - build_investigation_plan
+            - advance_investigation_runtime
             - execute_investigation_step
             - update_investigation_plan
             - rank_hypotheses

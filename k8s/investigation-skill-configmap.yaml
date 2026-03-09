@@ -32,13 +32,13 @@ data:
     - Default sequence for targeted or alert-driven investigations:
       1. resolve_primary_target when the target is vague, convenience-shaped, or operator-backed,
       2. build_investigation_plan,
-      3. execute_investigation_step for the current active batch,
-      4. update_investigation_plan,
-      5. execute at most one additional bounded follow-up evidence batch if the updated plan clearly asks for it,
+      3. seed execution_context from the built plan and prefer advance_investigation_runtime for exactly one active evidence batch,
+      4. call advance_investigation_runtime at most one additional time only if it returns a next_active_batch that clearly warrants one bounded follow-up batch,
+      5. treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path,
       6. render_investigation_report late for the final five-section answer.
     - Use resolve_primary_target when the target is vague or operator-backed, and preserve Backend/<name>, Frontend/<name>, or Cluster/<name> exactly as provided.
     - Use build_investigation_plan before direct evidence collection unless the user explicitly asks for drill-down or the request is an explicit fast-path metrics investigation.
-    - Execute one bounded evidence batch at a time and update the plan after each execution.
+    - Advance one active evidence batch at a time and carry forward the returned execution_context into the next advance or the final render.
     - Do not render the final report as the first substantive step.
     - Do not loop autonomously through unbounded evidence batches.
     - Use rank_hypotheses only when the user explicitly asks for ranked causes, ambiguity review, or analytical comparison instead of a final report.

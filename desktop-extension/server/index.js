@@ -157,14 +157,16 @@ function buildInvestigationTask(args) {
   if (selectedMode === "generic") {
     lines.push(
       "If the target is vague or operator-backed, resolve it first with resolve_primary_target.",
-      "Then build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.",
-      "If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.",
+      "Then build_investigation_plan, seed execution_context from the built plan, and prefer advance_investigation_runtime for exactly one active evidence batch.",
+      "If advance_investigation_runtime returns a next_active_batch that clearly asks for one more bounded follow-up evidence batch, advance it once more.",
+      "Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path.",
       "Use render_investigation_report late as the canonical final report tool for the five-section response."
     );
   } else {
     lines.push(
-      "After extracting alert facts, build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.",
-      "If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.",
+      "After extracting alert facts, build_investigation_plan, seed execution_context from the built plan, and prefer advance_investigation_runtime for exactly one active evidence batch.",
+      "If advance_investigation_runtime returns a next_active_batch that clearly asks for one more bounded follow-up evidence batch, advance it once more.",
+      "Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path.",
       "Preserve the original alert name and the resolved operational target name explicitly in the final five-section answer when they are present in the request or report evidence.",
       "Use render_investigation_report late as the canonical final report tool for the five-section response."
     );

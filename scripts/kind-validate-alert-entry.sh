@@ -7,7 +7,7 @@ KEEP_SMOKE="${KEEP_SMOKE:-0}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-investigation}"
 KIND_CONTEXT="${KIND_CONTEXT:-kind-${KIND_CLUSTER_NAME}}"
-ALERT_PROMPT="${ALERT_PROMPT:-Investigate alert PodCrashLooping for pod crashy in namespace ${SMOKE_NAMESPACE}. Resolve the target if needed, build a plan, execute one bounded evidence batch, update the plan, and render the final investigation report late. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
+ALERT_PROMPT="${ALERT_PROMPT:-Investigate alert PodCrashLooping for pod crashy in namespace ${SMOKE_NAMESPACE}. Resolve the target if needed, build a plan, seed execution_context from the built plan, use advance_investigation_runtime for exactly one active evidence batch, advance once more only if a next_active_batch is returned, and render the final investigation report late. Treat execute_investigation_step and update_investigation_plan as fallback/debug only. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 CLUSTER_PREEXISTED=0
 
 need_cmd() {

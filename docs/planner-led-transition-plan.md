@@ -415,6 +415,7 @@ Delivered so far:
 Still open in this slice:
 
 - the normal orchestrated runtime still needs to prefer the submission path intentionally rather than treating fallback execution as the easiest default
+- the agent-visible allowlist, prompts, wrappers, and validation lanes still need to teach `advance_investigation_runtime` as the preferred runtime-progress surface
 - report/rank flows should grow stronger end-to-end coverage for externally submitted plus planner-owned mixed batches
 - target resolution still needs to grow a more explicit subject-to-target-to-execution-target contract rather than relying on the current transitional target model alone
 
@@ -557,21 +558,22 @@ Validation gate:
 
 The next implementation move should be:
 
-### Continue Slice 8, Then Start Slice 9
+### Continue Slice 8, Then Finish Slice 9 Adoption
 
 Why:
 
 - the deletion pass is complete, so the remaining risk is behavior quality rather than surface sprawl
 - real-cluster diagnosis quality has already improved, but the slice is not complete yet
 - observability now shows that peer tool usage is part of the runtime story and still needs better attribution
-- once Slice 8 observability is good enough, the next highest-leverage move is explicit external evidence handoff and reconciliation
+- once Slice 8 observability is good enough, the next highest-leverage move is explicit external evidence handoff, reconciliation, and runtime adoption of `advance_investigation_runtime`
 
 Implementation order after current Slice 8 work:
 
 1. expose active evidence batches as execution-facing contracts
 2. add typed submitted-step-artifact reconciliation
-3. keep `execute_investigation_step(...)` as bounded fallback during transition
-4. add `InvestigationOutcome` only after reconciled execution becomes canonical
+3. add the canonical runtime-progress helper and keep `execute_investigation_step(...)` as bounded fallback during transition
+4. update the agent-visible contract, wrappers, and validation prompts so `advance_investigation_runtime` is the taught default
+5. add `InvestigationOutcome` only after reconciled execution becomes canonical
 
 As part of Slice 9, make target resolution intentionally feed execution-facing target details into the active evidence batch contract rather than remaining only an internal normalization step.
 

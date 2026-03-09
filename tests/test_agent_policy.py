@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_INVESTIGATION_AGENT_TOOLS = {
     "resolve_primary_target",
     "build_investigation_plan",
+    "advance_investigation_runtime",
     "execute_investigation_step",
     "update_investigation_plan",
     "rank_hypotheses",
@@ -70,9 +71,11 @@ BANNED_PROMPT_PHRASES = (
 
 PLANNER_LED_REQUIRED_PHRASES = (
     "build_investigation_plan",
+    "advance_investigation_runtime",
     "execute_investigation_step",
     "update_investigation_plan",
-    "one bounded evidence batch at a time",
+    "fallback/debug primitives",
+    "Advance one active evidence batch at a time",
     "Do not render the final report as the first substantive step.",
 )
 
@@ -154,9 +157,11 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
     ]
     required_phrases = [
         "build_investigation_plan",
+        "advance_investigation_runtime",
         "execute_investigation_step",
         "update_investigation_plan",
         "render_investigation_report",
+        "fallback/debug primitives",
     ]
     banned_phrases = [
         "build_investigation_report",

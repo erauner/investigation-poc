@@ -9,7 +9,7 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-investigation}"
 KIND_CONTEXT="${KIND_CONTEXT:-kind-${KIND_CLUSTER_NAME}}"
 WORKLOAD_PROMPT="${WORKLOAD_PROMPT:-Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE}. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 DIRECT_TARGET_PROMPT="${DIRECT_TARGET_PROMPT:-Investigate Backend/crashy in namespace ${SMOKE_NAMESPACE}. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
-PLANNER_LED_PROMPT="${PLANNER_LED_PROMPT:-Resolve the target if needed, build a plan, execute one bounded evidence batch, update the plan, and render the final investigation report late. Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE} and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
+PLANNER_LED_PROMPT="${PLANNER_LED_PROMPT:-Resolve the target if needed, build a plan, seed execution_context from the built plan, use advance_investigation_runtime for exactly one active evidence batch, advance once more only if a next_active_batch is returned, and render the final investigation report late. Treat execute_investigation_step and update_investigation_plan as fallback/debug only. Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE} and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 CLUSTER_PREEXISTED=0
 
 need_cmd() {

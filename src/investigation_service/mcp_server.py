@@ -118,7 +118,7 @@ def build_investigation_plan(
     objective: str = "auto",
     question: str | None = None,
 ) -> dict:
-    """Build an explicit investigation plan without collecting evidence. Use this to start planner-led investigations before gathering evidence by plane."""
+    """Build an explicit investigation plan without collecting evidence. Typically call this once before advance_investigation_runtime."""
     response = build_investigation_plan_impl(
         BuildInvestigationPlanRequest(
             cluster=cluster,
@@ -144,7 +144,7 @@ def execute_investigation_step(
     incident: dict,
     batch_id: str | None = None,
 ) -> dict:
-    """Execute the remaining pending steps in one bounded evidence batch. Use this for planner-owned steps or bounded fallback execution."""
+    """Execute the remaining pending steps in one bounded evidence batch. This is a lower-level bounded fallback/debug primitive; prefer advance_investigation_runtime for normal orchestration."""
     response = execute_investigation_step_impl(
         ExecuteInvestigationStepRequest(
             plan=plan,
@@ -157,7 +157,7 @@ def execute_investigation_step(
 
 @mcp.tool()
 def get_active_evidence_batch(plan: dict, incident: dict, batch_id: str | None = None) -> dict:
-    """Expose the current bounded evidence batch as an execution-facing contract for the remaining pending steps."""
+    """Expose the current bounded evidence batch as an execution-facing contract for the remaining pending steps. Useful for lower-level orchestration or debugging."""
     response = get_active_evidence_batch_impl(
         GetActiveEvidenceBatchRequest(
             plan=plan,
@@ -175,7 +175,7 @@ def submit_evidence_step_artifacts(
     submitted_steps: list[dict],
     batch_id: str | None = None,
 ) -> dict:
-    """Submit externally gathered artifacts for externally satisfiable pending steps and reconcile them into the planner-owned control plane."""
+    """Submit externally gathered artifacts for externally satisfiable pending steps and reconcile them into the planner-owned control plane. Prefer advance_investigation_runtime when you want the canonical same-batch progress step."""
     response = submit_evidence_step_artifacts_impl(
         SubmitEvidenceArtifactsRequest(
             plan=plan,
@@ -194,7 +194,7 @@ def advance_investigation_runtime(
     submitted_steps: list[dict] | None = None,
     batch_id: str | None = None,
 ) -> dict:
-    """Advance exactly one active evidence batch by reconciling submitted external evidence first, then auto-running only the remaining planner-owned same-batch steps."""
+    """Advance exactly one active evidence batch. This is the preferred runtime-progress surface after build_investigation_plan: reconcile submitted external evidence first, auto-run only remaining same-batch planner-owned steps, and return execution_context for the next advance or final render."""
     response = advance_investigation_runtime_impl(
         AdvanceInvestigationRuntimeRequest(
             incident=incident,
@@ -208,7 +208,7 @@ def advance_investigation_runtime(
 
 @mcp.tool()
 def update_investigation_plan(plan: dict, execution: dict) -> dict:
-    """Update plan state after one executed evidence batch. Use this before ranking hypotheses or rendering a report."""
+    """Update plan state after one executed evidence batch. This is a lower-level fallback/debug primitive; prefer advance_investigation_runtime for normal orchestration."""
     response = update_investigation_plan_impl(
         UpdateInvestigationPlanRequest(
             plan=plan,
@@ -312,7 +312,7 @@ def render_investigation_report(
     node_name: str | None = None,
     execution_context: dict | None = None,
 ) -> dict:
-    """Render the final investigation report from the staged artifact-oriented pipeline."""
+    """Render the final investigation report from the staged artifact-oriented pipeline. Prefer passing execution_context from advance_investigation_runtime when available."""
     response = render_investigation_report_impl(
         InvestigationReportingRequest(
             cluster=cluster,

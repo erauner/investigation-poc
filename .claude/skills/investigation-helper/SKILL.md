@@ -16,8 +16,9 @@ Use the `mcp__kagent__invoke_agent` tool.
 - If the user supplied an explicit alert phrase such as `Investigate alert PodCrashLooping ...`, set the wrapper header to:
   `[INVESTIGATION_ENTRYPOINT]=alert`
   `Use the planner-led investigation flow for alert handling.`
-  `After extracting alert facts, build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.`
-  `If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.`
+  `After extracting alert facts, build_investigation_plan, seed execution_context from the built plan, and prefer advance_investigation_runtime for exactly one active evidence batch.`
+  `If advance_investigation_runtime returns a next_active_batch that clearly asks for one more bounded follow-up evidence batch, advance it once more.`
+  `Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path.`
   `Use render_investigation_report late as the canonical final report tool.`
   `Treat only identity fields such as namespace, pod, service, deployment, node, and container as workload identity.`
   `Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.`
@@ -32,8 +33,9 @@ Use the `mcp__kagent__invoke_agent` tool.
   `[INVESTIGATION_ENTRYPOINT]=generic`
   `Use the planner-led investigation flow.`
   `If the target is vague or operator-backed, resolve it first with resolve_primary_target.`
-  `Then build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.`
-  `If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.`
+  `Then build_investigation_plan, seed execution_context from the built plan, and prefer advance_investigation_runtime for exactly one active evidence batch.`
+  `If advance_investigation_runtime returns a next_active_batch that clearly asks for one more bounded follow-up evidence batch, advance it once more.`
+  `Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path.`
   `Use render_investigation_report late as the canonical final report tool.`
   `Treat Kubernetes MCP and Prometheus MCP as first-class evidence planes when they are the most direct bounded source of evidence.`
 - Return the agent's result directly.
