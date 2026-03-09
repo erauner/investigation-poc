@@ -1,0 +1,8 @@
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: prometheus-mcp-server
+  namespace: kagent
+spec:
+  description: Prometheus MCP server for metrics evidence gathering and alert inspection.
+  url: http://prometheus-mcp-server.kagent:8080/mcp

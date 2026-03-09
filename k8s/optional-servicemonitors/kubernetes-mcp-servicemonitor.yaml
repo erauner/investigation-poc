@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kubernetes-mcp-server
+  namespace: kagent
+  labels:
+    app.kubernetes.io/name: kubernetes-mcp-server
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubernetes-mcp-server
+  namespaceSelector:
+    matchNames:
+      - kagent
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

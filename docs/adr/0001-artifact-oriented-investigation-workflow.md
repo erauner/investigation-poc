@@ -280,14 +280,15 @@ These should be more directly available to the agent because they support iterat
 - bounded log retrieval
 - raw Kubernetes object inspection when needed
 - connectivity checks where useful
-- bounded target-scoped evidence helpers such as:
-  - `collect_alert_evidence(...)`
-  - `collect_workload_evidence(...)`
-  - `collect_service_evidence(...)`
-  - `collect_node_evidence(...)`
+- peer evidence-plane MCP servers such as:
+  - read-only Kubernetes MCP for runtime inspection, events, and logs
+  - Prometheus MCP for targeted queries, alerts, rules, and exemplars
+- bounded target-scoped product helpers such as:
   - `collect_change_candidates(...)`
 
 The intent is not to expose every possible raw tool. The intent is to expose evidence planes clearly enough that the agent can iterate based on what it has learned.
+
+During the transition, planner-owned helpers such as `collect_alert_evidence(...)`, `collect_workload_evidence(...)`, `collect_service_evidence(...)`, and `collect_node_evidence(...)` may remain as internal execution seams. Once equivalent peer evidence planes are available and stable, they are no longer the desired agent-visible contract.
 
 These evidence-plane tools do not all need to be implemented by `investigation-poc`.
 
@@ -354,7 +355,7 @@ We do not need to reimplement every evidence plane ourselves just because the in
 The user-facing agent should be able to combine:
 
 - our product-owned control-plane tools
-- our bounded evidence helpers where helpful
+- our bounded product-owned evidence helpers where helpful during transition
 - other MCP-provided evidence tools that we do not own
 
 That combination is intentional. The goal is not to hide all evidence gathering behind our custom service. The goal is to let the agent gather evidence flexibly while keeping the investigation semantics coherent.

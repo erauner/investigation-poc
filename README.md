@@ -93,6 +93,7 @@ This applies the MCP server path used by the agent (`RemoteMCPServer -> investig
 The legacy HTTP debug API manifests are isolated in `k8s/optional-http/`.
 For `make kind-install-kagent`, `make kind-validate`, and `make kind-validate-operator`, the local kind flow now builds `investigation-poc:local` from the current checkout, loads it into kind, and rewrites the local overlay to use that image instead of `ghcr.io/erauner/investigation-poc:latest`.
 The default `local-kind` overlay now also includes an in-cluster Prometheus plus kube-state-metrics bundle. If you want the older host-backed path instead, use `K8S_OVERLAY=k8s-overlays/local-kind-host-prometheus`.
+If you are running with the Prometheus Operator CRD available and want homelab-style `ServiceMonitor` scraping for the peer MCP servers, use `K8S_OVERLAY=k8s-overlays/local-kind-servicemonitors`.
 
 ## MCP topology
 

@@ -7,18 +7,32 @@ from investigation_service import mcp_server
 
 ROOT = Path(__file__).resolve().parents[1]
 
-EXPECTED_AGENT_TOOLS = {
-    "normalize_incident_input",
+EXPECTED_INVESTIGATION_AGENT_TOOLS = {
     "resolve_primary_target",
     "build_investigation_plan",
     "execute_investigation_step",
     "update_investigation_plan",
     "rank_hypotheses",
     "render_investigation_report",
-    "collect_workload_evidence",
-    "collect_service_evidence",
-    "collect_node_evidence",
     "collect_change_candidates",
+}
+
+EXPECTED_KUBERNETES_MCP_TOOLS = {
+    "resources_list",
+    "resources_get",
+    "pods_list_in_namespace",
+    "pods_log",
+    "events_list",
+    "namespaces_list",
+}
+
+EXPECTED_PROMETHEUS_MCP_TOOLS = {
+    "execute_query",
+    "execute_range_query",
+    "get_targets",
+    "get_rules",
+    "get_alerts",
+    "query_exemplars",
 }
 
 BANNED_AGENT_TOOLS = {
@@ -27,6 +41,10 @@ BANNED_AGENT_TOOLS = {
     "normalize_alert_input",
     "find_unhealthy_pod",
     "find_unhealthy_workloads",
+    "normalize_incident_input",
+    "collect_workload_evidence",
+    "collect_service_evidence",
+    "collect_node_evidence",
     "collect_workload_context",
     "collect_service_context",
     "collect_node_context",
@@ -81,8 +99,20 @@ def test_agent_manifest_uses_narrow_planner_led_tool_catalog() -> None:
         for item in tools
         if item["type"] == "McpServer" and item["mcpServer"]["name"] == "investigation-mcp-server"
     )
+    kubernetes_tools = next(
+        item["mcpServer"]["toolNames"]
+        for item in tools
+        if item["type"] == "McpServer" and item["mcpServer"]["name"] == "kubernetes-mcp-server"
+    )
+    prometheus_tools = next(
+        item["mcpServer"]["toolNames"]
+        for item in tools
+        if item["type"] == "McpServer" and item["mcpServer"]["name"] == "prometheus-mcp-server"
+    )
 
-    assert set(investigation_tools) == EXPECTED_AGENT_TOOLS
+    assert set(investigation_tools) == EXPECTED_INVESTIGATION_AGENT_TOOLS
+    assert set(kubernetes_tools) == EXPECTED_KUBERNETES_MCP_TOOLS
+    assert set(prometheus_tools) == EXPECTED_PROMETHEUS_MCP_TOOLS
     assert not (set(investigation_tools) & BANNED_AGENT_TOOLS)
 
 

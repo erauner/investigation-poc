@@ -1,0 +1,8 @@
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: kubernetes-mcp-server
+  namespace: kagent
+spec:
+  description: Read-only Kubernetes MCP server for direct runtime evidence gathering.
+  url: http://kubernetes-mcp-server.kagent:8080/mcp

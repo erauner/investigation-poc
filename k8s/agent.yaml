@@ -16,28 +16,37 @@ spec:
     tools:
       - type: McpServer
         mcpServer:
-          name: kagent-tool-server
+          name: kubernetes-mcp-server
           kind: RemoteMCPServer
           toolNames:
-            - k8s_get_resources
-            - k8s_describe_resource
-            - k8s_get_pod_logs
-            - k8s_get_available_api_resources
+            - resources_list
+            - resources_get
+            - pods_list_in_namespace
+            - pods_log
+            - events_list
+            - namespaces_list
+      - type: McpServer
+        mcpServer:
+          name: prometheus-mcp-server
+          kind: RemoteMCPServer
+          toolNames:
+            - execute_query
+            - execute_range_query
+            - get_targets
+            - get_rules
+            - get_alerts
+            - query_exemplars
       - type: McpServer
         mcpServer:
           name: investigation-mcp-server
           kind: RemoteMCPServer
           toolNames:
-            - normalize_incident_input
             - resolve_primary_target
             - build_investigation_plan
             - execute_investigation_step
             - update_investigation_plan
             - rank_hypotheses
             - render_investigation_report
-            - collect_workload_evidence
-            - collect_service_evidence
-            - collect_node_evidence
             - collect_change_candidates
     a2aConfig:
       skills:

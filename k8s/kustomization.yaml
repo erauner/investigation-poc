@@ -11,5 +11,15 @@ resources:
   - investigation-skill-configmap.yaml
   - agent.yaml
   - investigation-remotemcpserver.yaml
+  - kubernetes-remotemcpserver.yaml
+  - prometheus-remotemcpserver.yaml
+  - kubernetes-mcp-serviceaccount.yaml
+  - kubernetes-mcp-clusterrole.yaml
+  - kubernetes-mcp-clusterrolebinding.yaml
+  - kubernetes-mcp-deployment.yaml
+  - kubernetes-mcp-service.yaml
+  - prometheus-mcp-serviceaccount.yaml
+  - prometheus-mcp-deployment.yaml
+  - prometheus-mcp-service.yaml
   - mcp-deployment.yaml
   - mcp-service.yaml

@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-mcp-server
+  namespace: kagent
+  labels:
+    app.kubernetes.io/name: prometheus-mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus-mcp-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus-mcp-server
+    spec:
+      serviceAccountName: prometheus-mcp-server
+      initContainers:
+        - name: fetch-binary
+          image: curlimages/curl:8.12.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              case "$(uname -m)" in
+                x86_64|amd64) asset="mcp-prometheus_linux_amd64" ;;
+                aarch64|arm64) asset="mcp-prometheus_linux_arm64" ;;
+                *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;
+              esac
+              curl -fsSL -o /work/mcp-prometheus \
+                "https://github.com/giantswarm/mcp-prometheus/releases/download/v0.0.33/${asset}"
+              chmod 0555 /work/mcp-prometheus
+          volumeMounts:
+            - name: app
+              mountPath: /work
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 65532
+      containers:
+        - name: mcp
+          image: debian:bookworm-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - /opt/mcp/mcp-prometheus
+          args:
+            - serve
+            - --transport
+            - streamable-http
+            - --http-addr
+            - :8080
+            - --http-endpoint
+            - /mcp
+            - --metrics-addr
+            - :9091
+          env:
+            - name: PROMETHEUS_URL
+              value: http://prometheus.kagent.svc.cluster.local:9090
+            - name: OTEL_SERVICE_NAME
+              value: prometheus-mcp-server
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: service.name=prometheus-mcp-server,service.namespace=kagent,mcp_server=prometheus-mcp-server
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9091
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: app
+              mountPath: /opt/mcp
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 65532
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: app
+          emptyDir: {}

@@ -250,24 +250,34 @@ Delivered:
 The intentional kagent-visible set is now:
 
 - control-plane:
-  - `normalize_incident_input`
   - `resolve_primary_target`
   - `build_investigation_plan`
   - `execute_investigation_step`
   - `update_investigation_plan`
   - `rank_hypotheses`
   - `render_investigation_report`
-- owned evidence-plane:
-  - `collect_workload_evidence`
-  - `collect_service_evidence`
-  - `collect_node_evidence`
+- product-owned evidence-plane:
   - `collect_change_candidates`
-- selected non-owned evidence tools:
-  - alert/rule context
-  - metrics breakdowns
-  - bounded logs
-  - bounded change history
-  - raw Kubernetes follow-up where needed
+- peer evidence-plane MCP servers:
+  - read-only Kubernetes MCP for direct runtime inspection:
+    - resource lookup
+    - pod logs
+    - events
+    - namespace-scoped runtime evidence
+  - Prometheus MCP for metrics and alert evidence:
+    - targeted PromQL
+    - alert lookup
+    - rules
+    - targets
+    - exemplars
+
+Transitional internals that may remain behind the backend for now, but are no longer the intentional agent-visible contract:
+
+- `normalize_incident_input`
+- `collect_alert_evidence`
+- `collect_workload_evidence`
+- `collect_service_evidence`
+- `collect_node_evidence`
 
 Validation gate:
 
@@ -335,35 +345,96 @@ Validation delivered:
 
 ### Slice 8: Real-Cluster Correctness And Planner-Path Preference
 
-Status: Planned
+Status: In Progress
 
-Now that the transitional surfaces are gone, the next slice should focus on what homelab validation actually exposed:
+Delivered so far:
 
-- tighten diagnosis quality for real workload states such as init-container dependency blocks
-- strengthen alert-path correctness and preserve alert-derived context more explicitly
-- make tool-path choice observable enough to tell when `incident-triage` used:
-  - `investigation-mcp-server`
-  - `kagent-tools`
-  - other peer evidence tools
-- decide where the planner-led path should be preferred versus where peer evidence tools are acceptable first responders
+- corrected a real homelab workload diagnosis gap for init-blocked pods:
+  - init-container state is now collected and analyzed explicitly
+  - `PodInitializing` init-block cases are no longer mislabeled as generic restart failures
+  - the validated homelab `toolbridge-api-migrate-j5wwf` case now returns `Init Container Dependency Blocked`
+- strengthened alert-path correctness:
+  - alert normalization no longer promotes workload alerts to `service` simply because a service label is present
+  - alert summaries now preserve both the original alert-derived target and the resolved runtime target
+- added a minimal backend-owned planner trace to the canonical state/report path
+- extended local and homelab validation so planner-led real-cluster behavior is being checked against actual runtime cases, not only kind fixtures
+
+What homelab validation now proves:
+
+- the planner-led path is working against a real cluster
+- the local/default in-cluster fallback fix is working
+- the init-container dependency-block case is materially improved
+- peer tool-server usage is part of the runtime story and can influence which surface actually satisfies an investigation
+
+What is still open in Slice 8:
+
+- exact per-tool observability is still incomplete:
+  - we can now distinguish controller activity, `kagent-tools` activity, and `investigation-mcp-server` activity
+  - we still do not have a clean tool-name ledger for every peer tool call
+- some real-cluster cases still stop at a correct high-level diagnosis instead of following dependencies as far as they could
+- planner-path preference still needs to be judged intentionally rather than assumed:
+  - some runs use peer built-in tools instead of the planner/control-plane path
+  - the remaining question is when that is acceptable and when the planner-led path should be preferred
+- the local `k8s/` bundle still needs to mirror the newer peer evidence-plane shape from homelab:
+  - explicit Kubernetes MCP server
+  - explicit Prometheus MCP server
+  - narrower `investigation-mcp-server` allowlist
+- public MCP and HTTP surfaces still export some planner-owned evidence helpers that are no longer part of the intended agent vocabulary
+- local wrappers and policy tests still need to encode the new peer evidence-plane contract more explicitly
+
+### Next Cleanup After Peer Evidence-Plane Adoption
+
+Once the peer evidence-plane servers are the normal path, the next cleanup should intentionally remove or demote the remaining transitional public surfaces that overlap with them.
+
+Remove from the intentional public/agent contract:
+
+- `normalize_incident_input`
+- `collect_workload_evidence`
+- `collect_service_evidence`
+- `collect_node_evidence`
+- `collect_alert_evidence`
+
+Planned replacements:
+
+- Kubernetes MCP replaces direct runtime inspection helpers:
+  - logs
+  - events
+  - pod and workload inspection
+  - namespace-scoped Kubernetes lookup
+- Prometheus MCP replaces direct metrics and alert evidence helpers:
+  - targeted PromQL
+  - alert and rule lookup
+  - targets
+  - exemplars
+- planner-led prompt and control-plane tools remain responsible for:
+  - target resolution
+  - plan construction
+  - bounded execution sequencing
+  - hypothesis ranking
+  - final report rendering
+
+This keeps the product semantics in `investigation-poc` while removing duplicated public evidence helpers once equivalent peer evidence planes are available and stable.
 
 Validation gate:
 
 - homelab investigations for real pods and services
-- visible proof of which peer tool surfaces were invoked during a run
 - corrected diagnosis for known real-cluster cases that previously returned misleading interpretations
+- visible enough proof of peer tool-surface usage to distinguish:
+  - `investigation-mcp-server`
+  - `kagent-tools`
+  - controller-only agent invocation
 
 ## Immediate Recommendation
 
 The next implementation move should be:
 
-### Implement Slice 8
+### Continue Slice 8
 
 Why:
 
 - the deletion pass is complete, so the remaining risk is behavior quality rather than surface sprawl
-- homelab validation exposed real diagnosis gaps that kind-only tests would not catch
-- observability now shows that peer tool usage is part of the runtime story and needs to be measured intentionally
+- real-cluster diagnosis quality has already improved, but the slice is not complete yet
+- observability now shows that peer tool usage is part of the runtime story and still needs better attribution
 
 What not to do yet:
 
