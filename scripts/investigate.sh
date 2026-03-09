@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NAMESPACE="${1:-default}"
-TARGET="${2:-pod/example}"
-URL="${INVESTIGATE_URL:-http://localhost:8080}"
+NAMESPACE="${1:-kagent}"
+shift || true
+TASK="${*:-Investigate the unhealthy pod in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 
-curl -s "${URL}/investigate" \
-  -H 'content-type: application/json' \
-  -d "{\"namespace\":\"${NAMESPACE}\",\"target\":\"${TARGET}\"}"
+NAMESPACE="${NAMESPACE}" ./scripts/invoke-local.sh "${TASK}"

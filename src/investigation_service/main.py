@@ -4,11 +4,7 @@ from .models import (
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
-    CollectContextRequest,
-    CollectNodeContextRequest,
-    CollectServiceContextRequest,
     CorrelatedChangesResponse,
-    EvidenceBundle,
     EvidenceBatchExecution,
     ExecuteInvestigationStepRequest,
     FindUnhealthyPodRequest,
@@ -18,8 +14,6 @@ from .models import (
     InvestigationReport,
     InvestigationReportRequest,
     InvestigationTarget,
-    InvestigateRequest,
-    InvestigationResponse,
     UpdateInvestigationPlanRequest,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
@@ -28,17 +22,12 @@ from .correlation import collect_change_candidates
 from .reporting import (
     build_investigation_plan as build_investigation_plan_from_request,
     execute_investigation_step as execute_investigation_step_from_request,
-    normalize_incident_input as normalize_incident_input_from_request,
     rank_hypotheses as rank_hypotheses_from_request,
     render_investigation_report,
     resolve_primary_target as resolve_primary_target_from_request,
     update_investigation_plan as update_investigation_plan_from_request,
 )
 from .tools import (
-    collect_alert_evidence,
-    collect_node_evidence,
-    collect_service_evidence,
-    collect_workload_evidence,
     find_unhealthy_pod,
     find_unhealthy_workloads,
     normalize_alert_input,
@@ -55,11 +44,6 @@ def healthz() -> dict:
 @app.post("/tools/normalize_alert_input")
 def normalize_alert(req: CollectAlertContextRequest) -> dict:
     return normalize_alert_input(req).model_dump(mode="json")
-
-
-@app.post("/tools/normalize_incident_input", response_model=InvestigationTarget)
-def normalize_incident(req: InvestigationReportRequest) -> InvestigationTarget:
-    return normalize_incident_input_from_request(req)
 
 
 @app.post("/tools/resolve_primary_target", response_model=InvestigationTarget)
@@ -80,26 +64,6 @@ def execute_plan_step(req: ExecuteInvestigationStepRequest) -> EvidenceBatchExec
 @app.post("/tools/update_investigation_plan", response_model=InvestigationPlan)
 def update_plan(req: UpdateInvestigationPlanRequest) -> InvestigationPlan:
     return update_investigation_plan_from_request(req)
-
-
-@app.post("/tools/collect_workload_evidence", response_model=EvidenceBundle)
-def collect_workload_bundle(req: CollectContextRequest) -> EvidenceBundle:
-    return collect_workload_evidence(req)
-
-
-@app.post("/tools/collect_alert_evidence", response_model=EvidenceBundle)
-def collect_alert_bundle(req: CollectAlertContextRequest) -> EvidenceBundle:
-    return collect_alert_evidence(req)
-
-
-@app.post("/tools/collect_node_evidence", response_model=EvidenceBundle)
-def collect_node_bundle(req: CollectNodeContextRequest) -> EvidenceBundle:
-    return collect_node_evidence(req)
-
-
-@app.post("/tools/collect_service_evidence", response_model=EvidenceBundle)
-def collect_service_bundle(req: CollectServiceContextRequest) -> EvidenceBundle:
-    return collect_service_evidence(req)
 
 
 @app.post("/tools/find_unhealthy_workloads", response_model=UnhealthyWorkloadsResponse)
@@ -125,29 +89,3 @@ def render_report(req: InvestigationReportRequest) -> InvestigationReport:
 @app.post("/tools/collect_change_candidates", response_model=CorrelatedChangesResponse)
 def collect_change_candidates_route(req: CollectCorrelatedChangesRequest) -> CorrelatedChangesResponse:
     return collect_change_candidates(req)
-
-
-@app.post("/investigate", response_model=InvestigationResponse)
-def investigate(req: InvestigateRequest) -> InvestigationResponse:
-    report = render_investigation_report(
-        InvestigationReportRequest(
-            cluster=req.cluster,
-            namespace=req.namespace,
-            target=req.target,
-            profile=req.profile,
-            service_name=req.service_name,
-            lookback_minutes=req.lookback_minutes,
-        )
-    )
-    evidence = [
-        f"Cluster: {report.cluster}",
-        f"Target: {report.target}",
-        f"Profile: {req.profile}",
-        *report.evidence,
-        f"Limitations: {report.limitations}",
-    ]
-    return InvestigationResponse(
-        diagnosis=report.diagnosis,
-        evidence=evidence,
-        recommendation=report.recommended_next_step,
-    )

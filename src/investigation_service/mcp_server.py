@@ -18,15 +18,10 @@ from .models import (
 from .correlation import collect_change_candidates as collect_change_candidates_impl
 from .reporting import build_investigation_plan as build_investigation_plan_impl
 from .reporting import execute_investigation_step as execute_investigation_step_impl
-from .reporting import normalize_incident_input as normalize_incident_input_impl
 from .reporting import rank_hypotheses as rank_hypotheses_impl
 from .reporting import render_investigation_report as render_investigation_report_impl
 from .reporting import resolve_primary_target as resolve_primary_target_impl
 from .reporting import update_investigation_plan as update_investigation_plan_impl
-from .tools import collect_alert_evidence as collect_alert_evidence_impl
-from .tools import collect_node_evidence as collect_node_evidence_impl
-from .tools import collect_service_evidence as collect_service_evidence_impl
-from .tools import collect_workload_evidence as collect_workload_evidence_impl
 from .tools import find_unhealthy_pod as find_unhealthy_pod_impl
 from .tools import find_unhealthy_workloads as find_unhealthy_workloads_impl
 from .tools import normalize_alert_input as normalize_alert_input_impl
@@ -65,37 +60,6 @@ def normalize_alert_input(
             profile=profile,
             service_name=service_name,
             lookback_minutes=lookback_minutes,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
-def normalize_incident_input(
-    target: str | None = None,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 15,
-    alertname: str | None = None,
-    labels: dict[str, str] | None = None,
-    annotations: dict[str, str] | None = None,
-    node_name: str | None = None,
-) -> dict:
-    """Normalize a manual or alert-shaped request into an investigation target artifact without resolving convenience targets or collecting evidence."""
-    response = normalize_incident_input_impl(
-        InvestigationReportRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            node_name=node_name,
         )
     )
     return response.model_dump(mode="json")
@@ -191,90 +155,6 @@ def update_investigation_plan(plan: dict, execution: dict) -> dict:
         UpdateInvestigationPlanRequest(
             plan=plan,
             execution=execution,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
-def collect_workload_evidence(
-    namespace: str,
-    target: str,
-    cluster: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 15,
-) -> dict:
-    """Collect workload evidence as an artifact bundle for planner-led investigations."""
-    response = collect_workload_evidence_impl(
-        CollectContextRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
-def collect_alert_evidence(
-    alertname: str,
-    labels: dict[str, str] | None = None,
-    annotations: dict[str, str] | None = None,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    node_name: str | None = None,
-    target: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 15,
-) -> dict:
-    """Collect alert-scoped evidence after normalizing alert input. This remains a planner-owned helper and is not the intentional first-step agent surface."""
-    response = collect_alert_evidence_impl(
-        CollectAlertContextRequest(
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            cluster=cluster,
-            namespace=namespace,
-            node_name=node_name,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
-def collect_node_evidence(node_name: str, lookback_minutes: int = 15, cluster: str | None = None) -> dict:
-    """Collect node evidence as an artifact bundle for planner-led investigations."""
-    response = collect_node_evidence_impl(
-        CollectNodeContextRequest(cluster=cluster, node_name=node_name, lookback_minutes=lookback_minutes)
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
-def collect_service_evidence(
-    namespace: str,
-    service_name: str,
-    cluster: str | None = None,
-    target: str | None = None,
-    lookback_minutes: int = 15,
-) -> dict:
-    """Collect service evidence as an artifact bundle for planner-led investigations."""
-    response = collect_service_evidence_impl(
-        CollectServiceContextRequest(
-            cluster=cluster,
-            namespace=namespace,
-            service_name=service_name,
-            target=target,
-            lookback_minutes=lookback_minutes,
         )
     )
     return response.model_dump(mode="json")

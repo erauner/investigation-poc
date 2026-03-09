@@ -70,15 +70,7 @@ This reuses the existing investigation stack, builds and installs `homelab-opera
 ## Example investigate request
 
 ```bash
-curl -s localhost:8080/investigate \
-  -H 'content-type: application/json' \
-  -d '{
-    "namespace":"default",
-    "target":"deployment/api",
-    "profile":"service",
-    "service_name":"api",
-    "lookback_minutes":15
-  }' | jq
+./scripts/investigate.sh kagent "Investigate deployment/api in namespace default for service symptoms. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step."
 ```
 
 ## Kubernetes deployment (MCP default)
@@ -99,8 +91,8 @@ If you are running with the Prometheus Operator CRD available and want homelab-s
 
 There are two different MCP surfaces in this setup, and they serve different roles:
 
-- `investigation-mcp-server`: the repo-local tool server defined in `k8s/`. It exposes the low-level investigation tools that the custom agent uses behind the scenes.
-  The intentional agent-visible subset is now planner-led: canonical control-plane tools plus a narrow owned evidence-plane set.
+- `investigation-mcp-server`: the repo-local tool server defined in `k8s/`. It exposes the product-owned planner/control-plane tools that the custom agent uses behind the scenes.
+  The intentional agent-visible subset is now planner-led: canonical control-plane tools plus `collect_change_candidates`, while direct runtime and metrics evidence are expected to come from peer MCP servers.
 - `kagent-controller`: the higher-level controller MCP endpoint. It exposes agent-oriented tools such as `list_agents` and `invoke_agent`.
 
 That distinction matters for clients:

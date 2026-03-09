@@ -16,7 +16,6 @@ from investigation_service.models import (
     CollectCorrelatedChangesRequest,
     CollectedContextResponse,
     CorrelatedChangesResponse,
-    EvidenceBundle,
     EvidenceBatchExecution,
     EvidenceItem,
     Finding,
@@ -104,6 +103,28 @@ def test_collect_workload_context_route_is_removed_from_public_surface() -> None
     ],
 )
 def test_removed_slice7_routes_are_not_public(path: str, payload: dict) -> None:
+    client = TestClient(app)
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/tools/normalize_incident_input", {"namespace": "kagent-smoke", "target": "Backend/crashy"}),
+        ("/tools/collect_workload_evidence", {"namespace": "kagent-smoke", "target": "pod/crashy-abc123"}),
+        (
+            "/tools/collect_alert_evidence",
+            {"alertname": "PodCrashLooping", "labels": {"namespace": "kagent-smoke", "pod": "crashy-abc123"}},
+        ),
+        ("/tools/collect_node_evidence", {"node_name": "worker3"}),
+        ("/tools/collect_service_evidence", {"namespace": "kagent", "service_name": "kagent-controller"}),
+        ("/investigate", {"namespace": "default", "target": "deployment/api"}),
+    ],
+)
+def test_removed_peer_replaced_routes_are_not_public(path: str, payload: dict) -> None:
     client = TestClient(app)
 
     response = client.post(path, json=payload)
@@ -258,25 +279,7 @@ def test_update_investigation_plan_route_returns_plan(monkeypatch) -> None:
     assert body["planning_notes"] == ["updated"]
 
 
-def test_investigate_includes_limitations(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.render_investigation_report",
-        lambda _req: InvestigationReport(
-            scope="service",
-            target="deployment/api",
-            diagnosis="High Service Latency",
-            likely_cause="The service is responding slowly, which suggests downstream dependency latency or overloaded request handling.",
-            confidence="medium",
-            evidence=["prometheus: High Service Latency - p95 latency is 1.234s"],
-            evidence_items=[],
-            related_data=[],
-            related_data_note="no meaningful correlated changes found in the requested time window",
-            limitations=["prometheus unavailable or returned no usable results"],
-            recommended_next_step="Inspect service dashboards, recent deploys, and upstream or downstream dependencies before changing traffic handling.",
-            suggested_follow_ups=[],
-            normalization_notes=[],
-        ),
-    )
+def test_investigate_route_is_removed_from_public_surface() -> None:
     client = TestClient(app)
 
     response = client.post(
@@ -289,9 +292,7 @@ def test_investigate_includes_limitations(monkeypatch) -> None:
         },
     )
 
-    assert response.status_code == 200
-    evidence = response.json()["evidence"]
-    assert any("Limitations:" in item for item in evidence)
+    assert response.status_code == 404
 
 
 def test_normalize_alert_input_infers_workload_target() -> None:
@@ -443,33 +444,6 @@ def test_normalize_alert_route_returns_normalized_request(monkeypatch) -> None:
     assert body["target"] == "node/worker3"
 
 
-def test_normalize_incident_input_route_returns_target_artifact(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.normalize_incident_input_from_request",
-        lambda _req: InvestigationTarget(
-            source="manual",
-            scope="workload",
-            cluster="current-context",
-            namespace="kagent-smoke",
-            requested_target="Backend/crashy",
-            target="deployment/crashy",
-            service_name="crashy",
-            normalization_notes=["resolved Backend/crashy to deployment/crashy"],
-        ),
-    )
-    client = TestClient(app)
-
-    response = client.post(
-        "/tools/normalize_incident_input",
-        json={"namespace": "kagent-smoke", "target": "Backend/crashy"},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["requested_target"] == "Backend/crashy"
-    assert body["target"] == "deployment/crashy"
-
-
 def test_resolve_primary_target_route_returns_target_artifact(monkeypatch) -> None:
     monkeypatch.setattr(
         "investigation_service.main.resolve_primary_target_from_request",
@@ -494,61 +468,6 @@ def test_resolve_primary_target_route_returns_target_artifact(monkeypatch) -> No
     body = response.json()
     assert body["requested_target"] == "pod"
     assert body["target"] == "pod/crashy-abc123"
-
-
-def test_collect_workload_evidence_route_returns_bundle(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.collect_workload_evidence",
-        lambda _req: EvidenceBundle(
-            cluster="current-context",
-            target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-abc123"),
-            object_state={"kind": "pod", "name": "crashy-abc123"},
-            events=["BackOff restarting failed container"],
-            log_excerpt="starting",
-            metrics={"prometheus_available": True},
-            findings=[],
-            limitations=[],
-            enrichment_hints=[],
-        ),
-    )
-    client = TestClient(app)
-
-    response = client.post(
-        "/tools/collect_workload_evidence",
-        json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["target"]["name"] == "crashy-abc123"
-
-
-def test_collect_alert_evidence_route_returns_bundle(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.collect_alert_evidence",
-        lambda _req: EvidenceBundle(
-            cluster="current-context",
-            target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-abc123"),
-            object_state={"kind": "pod", "name": "crashy-abc123"},
-            events=["BackOff restarting failed container"],
-            log_excerpt="starting",
-            metrics={"prometheus_available": True},
-            findings=[],
-            limitations=["alertname: PodCrashLooping"],
-            enrichment_hints=["normalization completed before collection"],
-        ),
-    )
-    client = TestClient(app)
-
-    response = client.post(
-        "/tools/collect_alert_evidence",
-        json={"alertname": "PodCrashLooping", "labels": {"namespace": "kagent-smoke", "pod": "crashy-abc123"}},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["target"]["name"] == "crashy-abc123"
-    assert "alertname: PodCrashLooping" in body["limitations"]
 
 
 def test_find_unhealthy_workloads_route_returns_candidates(monkeypatch) -> None:
