@@ -132,6 +132,66 @@ def _execution(include_changes: bool = False) -> EvidenceBatchExecution:
     )
 
 
+def _alert_execution() -> EvidenceBatchExecution:
+    return EvidenceBatchExecution(
+        batch_id="batch-1",
+        executed_step_ids=["collect-alert-evidence", "collect-target-evidence"],
+        artifacts=[
+            StepArtifact(
+                step_id="collect-alert-evidence",
+                plane="alert",
+                artifact_type="evidence_bundle",
+                summary=["Alert PodCrashLooping targeted pod/crashy-abc123", "Alert fired"],
+                limitations=[],
+                evidence_bundle=EvidenceBundle(
+                    cluster="artifact-cluster",
+                    target=TargetRef(namespace="artifact-ns", kind="pod", name="crashy-abc123"),
+                    object_state={"kind": "pod", "name": "crashy-abc123"},
+                    events=[],
+                    log_excerpt="",
+                    metrics={},
+                    findings=[
+                        Finding(
+                            severity="warning",
+                            source="events",
+                            title="Alert fired",
+                            evidence="Alert PodCrashLooping fired for pod/crashy-abc123",
+                        )
+                    ],
+                    limitations=[],
+                    enrichment_hints=[],
+                ),
+            ),
+            StepArtifact(
+                step_id="collect-target-evidence",
+                plane="workload",
+                artifact_type="evidence_bundle",
+                summary=["Crash Loop Detected"],
+                limitations=[],
+                evidence_bundle=EvidenceBundle(
+                    cluster="artifact-cluster",
+                    target=TargetRef(namespace="artifact-ns", kind="pod", name="crashy-abc123"),
+                    object_state={"kind": "pod", "name": "crashy-abc123"},
+                    events=[],
+                    log_excerpt="",
+                    metrics={},
+                    findings=[
+                        Finding(
+                            severity="critical",
+                            source="events",
+                            title="Crash Loop Detected",
+                            evidence="BackOff restarting failed container",
+                        )
+                    ],
+                    limitations=[],
+                    enrichment_hints=[],
+                ),
+            ),
+        ],
+        execution_notes=["executed batch-1"],
+    )
+
+
 def test_build_investigation_report_prefers_plan_target_fields(monkeypatch) -> None:
     correlation_request = {}
 
@@ -319,3 +379,41 @@ def test_build_root_cause_report_is_alias_over_render(monkeypatch) -> None:
     )
 
     assert report.diagnosis == "Artifact analysis"
+
+
+def test_build_investigation_report_preserves_alert_artifact_evidence(monkeypatch) -> None:
+    alert_target = InvestigationTarget(
+        source="alert",
+        scope="workload",
+        cluster="artifact-cluster",
+        namespace="artifact-ns",
+        requested_target="pod/crashy-abc123",
+        target="pod/crashy-abc123",
+        profile="workload",
+        lookback_minutes=15,
+        normalization_notes=["alertname=PodCrashLooping"],
+    )
+    alert_plan = InvestigationPlan(
+        mode="alert_rca",
+        objective="Investigate alert PodCrashLooping",
+        target=alert_target,
+        steps=[],
+        evidence_batches=[],
+        active_batch_id=None,
+        planning_notes=["alertname=PodCrashLooping"],
+    )
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda req: alert_plan)
+    monkeypatch.setattr(reporting, "execute_investigation_step", lambda req: _alert_execution())
+    monkeypatch.setattr(reporting, "update_investigation_plan", lambda req: alert_plan)
+    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
+
+    report = reporting.build_investigation_report(
+        InvestigationReportRequest(
+            alertname="PodCrashLooping",
+            labels={"namespace": "artifact-ns", "pod": "crashy-abc123"},
+            include_related_data=False,
+        )
+    )
+
+    assert any("PodCrashLooping" in item for item in report.evidence)
+    assert any("crashy-abc123" in item for item in report.evidence)

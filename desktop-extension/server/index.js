@@ -165,6 +165,7 @@ function buildInvestigationTask(args) {
     lines.push(
       "After extracting alert facts, build_investigation_plan, execute one bounded evidence batch with execute_investigation_step, and update the plan with update_investigation_plan.",
       "If the updated plan clearly asks for one more bounded follow-up evidence batch, execute it once and update the plan again.",
+      "Preserve the original alert name and the resolved operational target name explicitly in the final five-section answer when they are present in the request or report evidence.",
       "Use render_investigation_report late as the canonical final report tool for the five-section response."
     );
     lines.push(`alertname: ${inferredAlertname}`);

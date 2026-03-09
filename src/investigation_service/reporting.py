@@ -83,6 +83,14 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
     return result
 
 
+def _supplemental_evidence_from_state(state: InvestigationState) -> list[str]:
+    supplemental: list[str] = []
+    for artifact in state.artifacts:
+        if artifact.step_id == "collect-alert-evidence":
+            supplemental.extend(artifact.summary)
+    return _dedupe_preserving_order(supplemental)
+
+
 def _filter_related_data_from_evidence(primary_evidence_items, changes: list[CorrelatedChange]) -> tuple[list[CorrelatedChange], str | None]:
     def dedupe_key(value: str) -> str:
         canonical = canonicalize_event_fingerprint(value)
@@ -209,6 +217,7 @@ def _render_investigation_report_from_analysis(
     analysis: InvestigationAnalysis,
     *,
     normalization_notes: list[str],
+    supplemental_evidence: list[str],
     related_data: list[CorrelatedChange],
     related_data_note: str | None,
     limitations: list[str],
@@ -225,7 +234,7 @@ def _render_investigation_report_from_analysis(
         diagnosis=lead.diagnosis,
         likely_cause=lead.likely_cause,
         confidence=effective_confidence,
-        evidence=rendered_evidence_from_hypothesis(lead),
+        evidence=_dedupe_preserving_order([*supplemental_evidence, *rendered_evidence_from_hypothesis(lead)]),
         evidence_items=lead.evidence_items,
         related_data=related_data,
         related_data_note=related_data_note,
@@ -287,6 +296,7 @@ def render_investigation_report_from_state(
     return _render_investigation_report_from_analysis(
         analysis,
         normalization_notes=list(state.target.normalization_notes),
+        supplemental_evidence=_supplemental_evidence_from_state(state),
         related_data=related_data,
         related_data_note=related_data_note,
         limitations=limitations,

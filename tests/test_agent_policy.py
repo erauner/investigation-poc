@@ -58,6 +58,10 @@ PLANNER_LED_REQUIRED_PHRASES = (
     "Do not render the final report as the first substantive step.",
 )
 
+ALERT_CONTEXT_REQUIRED_PHRASE = (
+    "preserve the original alert name and the resolved operational target name explicitly"
+)
+
 
 def _load_yaml(path: str) -> dict:
     return yaml.safe_load((ROOT / path).read_text())
@@ -106,6 +110,7 @@ def test_skill_configmap_stops_teaching_report_first_or_hidden_tools() -> None:
         assert phrase not in system_message
     for phrase in PLANNER_LED_REQUIRED_PHRASES:
         assert phrase in system_message
+    assert ALERT_CONTEXT_REQUIRED_PHRASE in system_message.lower()
 
 
 def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
@@ -133,5 +138,7 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
         text = (ROOT / path).read_text()
         for phrase in required_phrases:
             assert phrase in text, path
+        if "alert" in path.lower():
+            assert ALERT_CONTEXT_REQUIRED_PHRASE in text.lower(), path
         for phrase in banned_phrases:
             assert phrase not in text, path

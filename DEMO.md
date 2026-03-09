@@ -47,6 +47,27 @@ If you want the highest-signal local check without manually stepping through the
 OPENAI_API_KEY=sk-... make kind-validate
 ```
 
+Before a fresh validation run, you can clear stale repo-related kind clusters with:
+
+```bash
+make kind-preflight-clean
+```
+
+Validation scripts now reuse an existing ready `kind-investigation` stack automatically when one is already running, and only tear the cluster down when the script created it itself.
+
+If you want to keep a newly created cluster alive after a validation run:
+
+```bash
+OPENAI_API_KEY=sk-... KEEP_CLUSTER=1 make kind-validate
+```
+
+The same warm-cluster behavior applies to:
+
+```bash
+OPENAI_API_KEY=sk-... make kind-validate-operator
+OPENAI_API_KEY=sk-... make kind-validate-alert-entry
+```
+
 This target:
 
 - creates or reuses the local kind cluster

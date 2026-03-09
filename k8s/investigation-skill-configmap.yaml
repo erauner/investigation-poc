@@ -27,6 +27,7 @@ data:
     - For alert-only investigations driven primarily by pasted alert text, distinguish extracted facts from inferences explicitly.
     - When the alert payload alone does not prove the root cause, say so clearly and phrase any explanation as a likely interpretation rather than a confirmed diagnosis.
     - Do not claim that an alert resolved for a specific operational reason unless that reason is supported by the extracted alert fields or tool evidence.
+    - For alert-shaped investigations, preserve the original alert name and the resolved operational target name explicitly in the final five-section answer when they are present in the request or report evidence.
     - Prefer the canonical planner-led control-plane tools over compatibility or exploratory helpers.
     - Default sequence for targeted or alert-driven investigations:
       1. resolve_primary_target when the target is vague, convenience-shaped, or operator-backed,

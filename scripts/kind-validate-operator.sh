@@ -5,9 +5,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SMOKE_NAMESPACE="${SMOKE_NAMESPACE:-operator-smoke}"
 KEEP_SMOKE="${KEEP_SMOKE:-0}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
+KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-investigation}"
+KIND_CONTEXT="${KIND_CONTEXT:-kind-${KIND_CLUSTER_NAME}}"
 WORKLOAD_PROMPT="${WORKLOAD_PROMPT:-Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE}. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 DIRECT_TARGET_PROMPT="${DIRECT_TARGET_PROMPT:-Investigate Backend/crashy in namespace ${SMOKE_NAMESPACE}. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 PLANNER_LED_PROMPT="${PLANNER_LED_PROMPT:-Resolve the target if needed, build a plan, execute one bounded evidence batch, update the plan, and render the final investigation report late. Investigate the unhealthy pod in namespace ${SMOKE_NAMESPACE} and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
+CLUSTER_PREEXISTED=0
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
@@ -15,6 +18,44 @@ need_cmd() {
 
 run_make() {
   make -C "${ROOT_DIR}" "$@"
+}
+
+kind_stack_is_reusable() {
+  kind get clusters | grep -qx "${KIND_CLUSTER_NAME}" || return 1
+  kubectl config get-contexts "${KIND_CONTEXT}" >/dev/null 2>&1 || return 1
+  kubectl --context "${KIND_CONTEXT}" -n kagent get deploy/investigation-mcp-server >/dev/null 2>&1 || return 1
+  kubectl --context "${KIND_CONTEXT}" -n kagent get agent/investigation-agent >/dev/null 2>&1 || return 1
+}
+
+operator_stack_is_reusable() {
+  kubectl --context "${KIND_CONTEXT}" -n homelab-operator-system \
+    get deploy/homelab-operator-controller-manager >/dev/null 2>&1
+}
+
+ensure_kind_stack() {
+  if kind get clusters | grep -qx "${KIND_CLUSTER_NAME}"; then
+    CLUSTER_PREEXISTED=1
+  fi
+
+  if kind_stack_is_reusable; then
+    echo "==> Reusing existing kind stack"
+    kubectl config use-context "${KIND_CONTEXT}" >/dev/null
+    kubectl get nodes
+    return 0
+  fi
+
+  echo "==> Setting up local kind stack"
+  run_make kind-setup
+}
+
+ensure_operator_stack() {
+  if operator_stack_is_reusable; then
+    echo "==> Reusing installed homelab-operator"
+    return 0
+  fi
+
+  echo "==> Installing homelab-operator into the local kind cluster"
+  run_make kind-install-operator
 }
 
 normalize_agent_output() {
@@ -58,6 +99,29 @@ wait_for_unhealthy_pod() {
 
   echo "Timed out waiting for an unhealthy pod in namespace ${namespace}" >&2
   kubectl -n "${namespace}" get pods >&2 || true
+  exit 1
+}
+
+wait_for_namespace_ready() {
+  local namespace="$1"
+  local attempts="${2:-36}"
+  local sleep_seconds="${3:-5}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    if ! kubectl get namespace "${namespace}" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    phase="$(kubectl get namespace "${namespace}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    if [[ "${phase}" != "Terminating" ]]; then
+      return 0
+    fi
+
+    sleep "${sleep_seconds}"
+  done
+
+  echo "Timed out waiting for namespace ${namespace} to leave Terminating state" >&2
+  kubectl get namespace "${namespace}" -o yaml >&2 || true
   exit 1
 }
 
@@ -120,7 +184,7 @@ cleanup() {
   if [[ "${KEEP_SMOKE}" != "1" ]]; then
     run_make operator-smoke-clean >/dev/null 2>&1 || true
   fi
-  if [[ "${KEEP_CLUSTER}" == "0" ]]; then
+  if [[ "${KEEP_CLUSTER}" == "0" && "${CLUSTER_PREEXISTED}" == "0" ]]; then
     run_make kind-down >/dev/null 2>&1 || true
   fi
 }
@@ -146,11 +210,9 @@ standard_raw="${tmp_dir}/standard.raw"
 direct_target_raw="${tmp_dir}/direct-target.raw"
 planner_led_raw="${tmp_dir}/planner-led.raw"
 
-echo "==> Setting up local kind stack"
-run_make kind-setup
-
-echo "==> Installing homelab-operator into the local kind cluster"
-run_make kind-install-operator
+ensure_kind_stack
+ensure_operator_stack
+wait_for_namespace_ready "${SMOKE_NAMESPACE}"
 
 echo "==> Applying operator smoke workload"
 run_make operator-smoke-apply
