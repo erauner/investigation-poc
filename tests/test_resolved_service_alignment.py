@@ -1,20 +1,50 @@
-from investigation_service.models import CollectedContextResponse, EvidenceItem, InvestigationReportRequest, RootCauseReport, TargetRef
+from investigation_service.models import (
+    CollectedContextResponse,
+    EvidenceBatchExecution,
+    EvidenceItem,
+    InvestigationReportRequest,
+    RootCauseReport,
+    TargetRef,
+)
 from investigation_service.reporting import build_investigation_report
 
 
 def test_build_investigation_report_promotes_resolved_service_to_service_scope(monkeypatch) -> None:
     monkeypatch.setattr(
-        "investigation_service.reporting._collect_context_for_normalized_request",
-        lambda normalized: CollectedContextResponse(
-            target=TargetRef(namespace="observability", kind="service", name="giraffe-kube-prometheus-st-prometheus"),
-            object_state={"kind": "service", "name": "giraffe-kube-prometheus-st-prometheus"},
-            events=["Warning PolicyViolation service label mismatch"],
-            log_excerpt="",
-            metrics={"profile": "service", "prometheus_available": False},
-            findings=[],
-            limitations=["metric unavailable: service_latency_p95_seconds"],
-            enrichment_hints=[],
+        "investigation_service.reporting.execute_investigation_step",
+        lambda _req: EvidenceBatchExecution(
+            batch_id="batch-1",
+            executed_step_ids=["collect-target-evidence"],
+            artifacts=[
+                {
+                    "step_id": "collect-target-evidence",
+                    "plane": "service",
+                    "artifact_type": "evidence_bundle",
+                    "summary": [],
+                    "limitations": ["metric unavailable: service_latency_p95_seconds"],
+                    "evidence_bundle": {
+                        "cluster": "current-context",
+                        "target": {
+                            "namespace": "observability",
+                            "kind": "service",
+                            "name": "giraffe-kube-prometheus-st-prometheus",
+                        },
+                        "object_state": {"kind": "service", "name": "giraffe-kube-prometheus-st-prometheus"},
+                        "events": ["Warning PolicyViolation service label mismatch"],
+                        "log_excerpt": "",
+                        "metrics": {"profile": "service", "prometheus_available": False},
+                        "findings": [],
+                        "limitations": ["metric unavailable: service_latency_p95_seconds"],
+                        "enrichment_hints": [],
+                    },
+                }
+            ],
+            execution_notes=[],
         ),
+    )
+    monkeypatch.setattr(
+        "investigation_service.reporting.update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
     )
 
     captured = {}

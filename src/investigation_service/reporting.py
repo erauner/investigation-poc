@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from .correlation import collect_correlated_changes, collect_correlated_changes_for_target
+from .correlation import collect_change_candidates, collect_correlated_changes, collect_correlated_changes_for_target
 from .event_fingerprints import canonicalize_event_fingerprint
 from .guidelines import (
     guideline_context_from_analysis,
@@ -22,7 +22,10 @@ from .models import (
     BuildRootCauseReportRequest,
     CollectCorrelatedChangesRequest,
     CorrelatedChange,
+    CorrelatedChangesResponse,
     EvidenceBundle,
+    EvidenceBatchExecution,
+    ExecuteInvestigationStepRequest,
     Hypothesis,
     InvestigationAnalysis,
     InvestigationPlan,
@@ -33,6 +36,7 @@ from .models import (
     ResolvedGuideline,
     RootCauseReport,
     TargetRef,
+    UpdateInvestigationPlanRequest,
 )
 from .cluster_registry import resolve_cluster
 from .k8s_adapter import get_backend_cr, get_cluster_cr, get_frontend_cr
@@ -42,12 +46,14 @@ from .routing import canonical_target, scope_from_target
 from .synthesis import build_root_cause_report as build_root_cause_report_impl
 from .synthesis import synthesize_root_cause as synthesize_root_cause_impl
 from .tools import (
+    collect_alert_context,
     collect_node_context,
     collect_service_context,
     collect_workload_context,
     evidence_bundle_from_context,
     find_unhealthy_pod,
     normalize_alert_input,
+    render_collected_context,
 )
 
 _EMPTY_CORRELATION_LIMITATION = "no correlated changes found in the requested time window"
@@ -58,10 +64,13 @@ _LEGACY_BUILD_ROOT_CAUSE_IMPL = build_root_cause_report_impl
 @dataclass(frozen=True)
 class CollectedInvestigationState:
     plan: InvestigationPlan
+    updated_plan: InvestigationPlan
     target: InvestigationTarget
     normalized: NormalizedInvestigationRequest
     context: object
-    evidence: object
+    evidence: EvidenceBundle
+    execution: EvidenceBatchExecution
+    changes: CorrelatedChangesResponse | None
 
 
 def _is_empty_correlation_limitation(value: str) -> bool:
@@ -82,17 +91,12 @@ def _planner_deps() -> PlannerDeps:
         collect_node_context=collect_node_context,
         collect_service_context=collect_service_context,
         collect_workload_context=collect_workload_context,
+        collect_alert_evidence=lambda req: evidence_bundle_from_context(collect_alert_context(req)),
+        collect_node_evidence=lambda req: evidence_bundle_from_context(collect_node_context(req)),
+        collect_service_evidence=lambda req: evidence_bundle_from_context(collect_service_context(req)),
+        collect_workload_evidence=lambda req: evidence_bundle_from_context(collect_workload_context(req)),
+        collect_change_candidates=collect_change_candidates,
     )
-
-
-def _collect_context_for_normalized_request(normalized: NormalizedInvestigationRequest):
-    return planner.collect_context_for_normalized_request(normalized, _planner_deps())
-
-
-def _align_normalized_request_with_context(
-    normalized: NormalizedInvestigationRequest, context
-) -> NormalizedInvestigationRequest:
-    return planner.align_normalized_request_with_context(normalized, context)
 
 
 def _filter_related_data(report: RootCauseReport, changes: list[CorrelatedChange]) -> tuple[list[CorrelatedChange], str | None]:
@@ -230,6 +234,28 @@ def build_investigation_plan(req: BuildInvestigationPlanRequest) -> Investigatio
     return planner.build_investigation_plan(req, _planner_deps())
 
 
+def execute_investigation_step(req: ExecuteInvestigationStepRequest) -> EvidenceBatchExecution:
+    return planner.execute_investigation_step(req, _planner_deps())
+
+
+def update_investigation_plan(req: UpdateInvestigationPlanRequest) -> InvestigationPlan:
+    return planner.update_investigation_plan(req)
+
+
+def _primary_evidence_from_execution(execution: EvidenceBatchExecution) -> EvidenceBundle:
+    artifact = next((item for item in execution.artifacts if item.step_id == "collect-target-evidence"), None)
+    if artifact is None:
+        artifact = next((item for item in execution.artifacts if item.evidence_bundle is not None), None)
+    if artifact is None or artifact.evidence_bundle is None:
+        raise ValueError("execution batch did not produce a primary evidence bundle")
+    return artifact.evidence_bundle
+
+
+def _changes_from_execution(execution: EvidenceBatchExecution) -> CorrelatedChangesResponse | None:
+    artifact = next((item for item in execution.artifacts if item.change_candidates is not None), None)
+    return None if artifact is None else artifact.change_candidates
+
+
 def _collect_analysis_state(req: InvestigationReportRequest) -> CollectedInvestigationState:
     plan = build_investigation_plan(_report_request_to_plan_request(req))
     if plan.mode == "factual_analysis":
@@ -238,43 +264,34 @@ def _collect_analysis_state(req: InvestigationReportRequest) -> CollectedInvesti
         raise ValueError("investigation plan did not produce a primary target")
 
     normalized = planner.normalized_request_from_target(plan.target)
-    context = _collect_context_for_normalized_request(normalized)
-    normalized = _align_normalized_request_with_context(normalized, context)
-    context_cluster = getattr(context, "cluster", None)
-    if context_cluster and not any(note.startswith("cluster resolved") for note in normalized.normalization_notes):
+    execution = execute_investigation_step(
+        ExecuteInvestigationStepRequest(
+            plan=plan,
+            incident=_report_request_to_plan_request(req),
+        )
+    )
+    updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=plan, execution=execution))
+    evidence = _primary_evidence_from_execution(execution)
+    context = render_collected_context(evidence)
+    normalized = planner.align_normalized_request_with_context(normalized, context)
+    if context.cluster and not any(note.startswith("cluster resolved") for note in normalized.normalization_notes):
         notes = list(normalized.normalization_notes)
-        notes.append(f"cluster resolved from collected context: {context_cluster}")
-        normalized = normalized.model_copy(update={"cluster": context_cluster, "normalization_notes": notes})
+        notes.append(f"cluster resolved from collected context: {context.cluster}")
+        normalized = normalized.model_copy(update={"cluster": context.cluster, "normalization_notes": notes})
     target = planner.investigation_target_from_normalized(
         normalized,
         requested_target=plan.target.requested_target,
     )
-    try:
-        evidence = evidence_bundle_from_context(context)
-    except AttributeError:
-        evidence = EvidenceBundle(
-            cluster=getattr(context, "cluster", normalized.cluster or "current-context"),
-            target=getattr(context, "target", None)
-            or TargetRef(
-                namespace=normalized.namespace,
-                kind="service" if normalized.scope == "service" else ("node" if normalized.scope == "node" else "pod"),
-                name=(normalized.target.split("/", 1)[1] if "/" in normalized.target else normalized.target),
-            ),
-            object_state=getattr(context, "object_state", {}),
-            events=getattr(context, "events", []),
-            log_excerpt=getattr(context, "log_excerpt", ""),
-            metrics=getattr(context, "metrics", {}),
-            findings=getattr(context, "findings", []),
-            limitations=getattr(context, "limitations", []),
-            enrichment_hints=getattr(context, "enrichment_hints", []),
-        )
 
     return CollectedInvestigationState(
         plan=plan,
+        updated_plan=updated_plan,
         target=target,
         normalized=normalized,
         context=context,
         evidence=evidence,
+        execution=execution,
+        changes=_changes_from_execution(execution),
     )
 
 
@@ -414,7 +431,9 @@ def render_investigation_report(req: InvestigationReportRequest) -> Investigatio
     limitations.extend(guideline_limitations)
 
     if req.include_related_data:
-        if collect_correlated_changes.__module__ != "investigation_service.correlation":
+        if state.changes is not None:
+            correlated = state.changes
+        elif collect_correlated_changes.__module__ != "investigation_service.correlation":
             correlated = collect_correlated_changes(_build_correlation_request(req, state.target))
         else:
             correlated = collect_correlated_changes_for_target(

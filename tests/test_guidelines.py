@@ -229,7 +229,40 @@ def test_build_investigation_report_applies_guidelines_without_mutating_diagnosi
         )
     ]
 
-    monkeypatch.setattr(reporting, "_collect_context_for_normalized_request", lambda normalized: object())
+    monkeypatch.setattr(
+        reporting,
+        "execute_investigation_step",
+        lambda _req: reporting.EvidenceBatchExecution(
+            batch_id="batch-1",
+            executed_step_ids=["collect-target-evidence"],
+            artifacts=[
+                {
+                    "step_id": "collect-target-evidence",
+                    "plane": "service",
+                    "artifact_type": "evidence_bundle",
+                    "summary": [],
+                    "limitations": [],
+                    "evidence_bundle": {
+                        "cluster": "current-context",
+                        "target": {"namespace": "kagent", "kind": "service", "name": "kagent-controller"},
+                        "object_state": {"kind": "service", "name": "kagent-controller"},
+                        "events": [],
+                        "log_excerpt": "",
+                        "metrics": {},
+                        "findings": [],
+                        "limitations": [],
+                        "enrichment_hints": [],
+                    },
+                }
+            ],
+            execution_notes=[],
+        ),
+    )
+    monkeypatch.setattr(
+        reporting,
+        "update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
+    )
     monkeypatch.setattr(reporting, "build_root_cause_report_impl", lambda context, normalized: root_cause)
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: (rules, []))
 

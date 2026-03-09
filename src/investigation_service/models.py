@@ -121,7 +121,36 @@ class InvestigationPlan(BaseModel):
     target: InvestigationTarget | None = None
     steps: list[PlanStep] = Field(default_factory=list)
     evidence_batches: list[EvidenceBatch] = Field(default_factory=list)
+    active_batch_id: str | None = None
     planning_notes: list[str] = Field(default_factory=list)
+
+
+class StepArtifact(BaseModel):
+    step_id: str
+    plane: str
+    artifact_type: Literal["evidence_bundle", "change_candidates"]
+    summary: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    evidence_bundle: "EvidenceBundle | None" = None
+    change_candidates: "CorrelatedChangesResponse | None" = None
+
+
+class EvidenceBatchExecution(BaseModel):
+    batch_id: str
+    executed_step_ids: list[str] = Field(default_factory=list)
+    artifacts: list[StepArtifact] = Field(default_factory=list)
+    execution_notes: list[str] = Field(default_factory=list)
+
+
+class ExecuteInvestigationStepRequest(BaseModel):
+    plan: InvestigationPlan
+    incident: BuildInvestigationPlanRequest
+    batch_id: str | None = None
+
+
+class UpdateInvestigationPlanRequest(BaseModel):
+    plan: InvestigationPlan
+    execution: EvidenceBatchExecution
 
 
 class CollectNodeContextRequest(BaseModel):

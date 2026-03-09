@@ -1,7 +1,8 @@
 from investigation_service.models import (
     BuildInvestigationPlanRequest,
-    CollectedContextResponse,
+    CorrelatedChange,
     CorrelatedChangesResponse,
+    EvidenceBatchExecution,
     EvidenceBundle,
     Finding,
     Hypothesis,
@@ -11,6 +12,7 @@ from investigation_service.models import (
     InvestigationTarget,
     PlanStep,
     RootCauseReport,
+    StepArtifact,
     TargetRef,
 )
 from investigation_service import reporting
@@ -45,15 +47,24 @@ def _plan() -> InvestigationPlan:
                 plane="service",
                 rationale="Collect target evidence",
                 suggested_tool="collect_service_evidence",
-            )
+            ),
+            PlanStep(
+                id="collect-change-candidates",
+                title="Collect change candidates",
+                category="evidence",
+                plane="changes",
+                rationale="Collect change candidates",
+                suggested_tool="collect_change_candidates",
+            ),
         ],
         evidence_batches=[],
+        active_batch_id="batch-1",
         planning_notes=["artifact-note"],
     )
 
 
-def _context() -> CollectedContextResponse:
-    return CollectedContextResponse(
+def _bundle() -> EvidenceBundle:
+    return EvidenceBundle(
         cluster="artifact-cluster",
         target=TargetRef(namespace="artifact-ns", kind="service", name="api-resolved"),
         object_state={"kind": "service", "name": "api-resolved"},
@@ -73,17 +84,51 @@ def _context() -> CollectedContextResponse:
     )
 
 
-def _bundle() -> EvidenceBundle:
-    return EvidenceBundle(
-        cluster="artifact-cluster",
-        target=TargetRef(namespace="artifact-ns", kind="service", name="api-resolved"),
-        object_state={"kind": "service", "name": "api-resolved"},
-        events=[],
-        log_excerpt="",
-        metrics={},
-        findings=[],
-        limitations=[],
-        enrichment_hints=[],
+def _execution(include_changes: bool = False) -> EvidenceBatchExecution:
+    artifacts = [
+        StepArtifact(
+            step_id="collect-target-evidence",
+            plane="service",
+            artifact_type="evidence_bundle",
+            summary=["Service instability"],
+            limitations=[],
+            evidence_bundle=_bundle(),
+        )
+    ]
+    if include_changes:
+        artifacts.append(
+            StepArtifact(
+                step_id="collect-change-candidates",
+                plane="changes",
+                artifact_type="change_candidates",
+                summary=["Deployment rollout"],
+                limitations=[],
+                change_candidates=CorrelatedChangesResponse(
+                    cluster="artifact-cluster",
+                    scope="service",
+                    target="service/api-resolved",
+                    changes=[
+                        CorrelatedChange(
+                            fingerprint="rollout|deployment|artifact-ns|api",
+                            timestamp="2026-03-08T10:00:00Z",
+                            source="rollout",
+                            resource_kind="Deployment",
+                            namespace="artifact-ns",
+                            name="api",
+                            relation="same_service",
+                            summary="Deployment rollout",
+                            confidence="medium",
+                        )
+                    ],
+                    limitations=[],
+                ),
+            )
+        )
+    return EvidenceBatchExecution(
+        batch_id="batch-1",
+        executed_step_ids=[artifact.step_id for artifact in artifacts],
+        artifacts=artifacts,
+        execution_notes=["executed batch-1"],
     )
 
 
@@ -91,8 +136,12 @@ def test_build_investigation_report_prefers_plan_target_fields(monkeypatch) -> N
     correlation_request = {}
 
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda req: _plan())
-    monkeypatch.setattr(reporting, "_collect_context_for_normalized_request", lambda normalized: _context())
-    monkeypatch.setattr(reporting, "evidence_bundle_from_context", lambda context: _bundle())
+    monkeypatch.setattr(reporting, "execute_investigation_step", lambda req: _execution())
+    monkeypatch.setattr(
+        reporting,
+        "update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
+    )
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
     monkeypatch.setattr(
         reporting,
@@ -122,10 +171,14 @@ def test_build_investigation_report_prefers_plan_target_fields(monkeypatch) -> N
     assert correlation_request["req"].target == "service/api-resolved"
 
 
-def test_build_investigation_report_uses_analysis_path_by_default(monkeypatch) -> None:
+def test_build_investigation_report_uses_execution_artifacts_by_default(monkeypatch) -> None:
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda req: _plan())
-    monkeypatch.setattr(reporting, "_collect_context_for_normalized_request", lambda normalized: _context())
-    monkeypatch.setattr(reporting, "evidence_bundle_from_context", lambda context: _bundle())
+    monkeypatch.setattr(reporting, "execute_investigation_step", lambda req: _execution())
+    monkeypatch.setattr(
+        reporting,
+        "update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
+    )
     monkeypatch.setattr(
         reporting,
         "_analyze_state",
@@ -166,10 +219,36 @@ def test_build_investigation_report_uses_analysis_path_by_default(monkeypatch) -
     assert report.recommended_next_step == "artifact next step"
 
 
+def test_build_investigation_report_reuses_executed_change_artifacts(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda req: _plan())
+    monkeypatch.setattr(reporting, "execute_investigation_step", lambda req: _execution(include_changes=True))
+    monkeypatch.setattr(
+        reporting,
+        "update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
+    )
+    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
+    monkeypatch.setattr(
+        reporting,
+        "collect_correlated_changes",
+        lambda req: (_ for _ in ()).throw(AssertionError("executed changes should be reused")),
+    )
+
+    report = reporting.build_investigation_report(
+        InvestigationReportRequest(target="service/api", profile="service", include_related_data=True)
+    )
+
+    assert report.related_data[0].summary == "Deployment rollout"
+
+
 def test_build_investigation_report_softens_confidence_when_hypotheses_are_close(monkeypatch) -> None:
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda req: _plan())
-    monkeypatch.setattr(reporting, "_collect_context_for_normalized_request", lambda normalized: _context())
-    monkeypatch.setattr(reporting, "evidence_bundle_from_context", lambda context: _bundle())
+    monkeypatch.setattr(reporting, "execute_investigation_step", lambda req: _execution())
+    monkeypatch.setattr(
+        reporting,
+        "update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
+    )
     monkeypatch.setattr(
         reporting,
         "_analyze_state",

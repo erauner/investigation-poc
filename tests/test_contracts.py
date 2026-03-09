@@ -19,6 +19,7 @@ from investigation_service.models import (
     CollectedContextResponse,
     CorrelatedChangesResponse,
     EvidenceBundle,
+    EvidenceBatchExecution,
     EvidenceItem,
     Finding,
     InvestigationAnalysis,
@@ -118,6 +119,7 @@ def test_build_investigation_plan_route_returns_plan(monkeypatch) -> None:
             ),
             steps=[],
             evidence_batches=[],
+            active_batch_id="batch-1",
             planning_notes=["normalized"],
         ),
     )
@@ -132,7 +134,117 @@ def test_build_investigation_plan_route_returns_plan(monkeypatch) -> None:
     body = response.json()
     assert body["mode"] == "targeted_rca"
     assert body["target"]["target"] == "service/api"
+    assert body["active_batch_id"] == "batch-1"
     assert body["planning_notes"] == ["normalized"]
+
+
+def test_execute_investigation_step_route_returns_execution(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.execute_investigation_step_from_request",
+        lambda _req: EvidenceBatchExecution(
+            batch_id="batch-1",
+            executed_step_ids=["collect-target-evidence"],
+            artifacts=[],
+            execution_notes=["executed batch-1"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/execute_investigation_step",
+        json={
+            "plan": {
+                "mode": "targeted_rca",
+                "objective": "Investigate service/api",
+                "target": {
+                    "source": "manual",
+                    "scope": "service",
+                    "cluster": "erauner-home",
+                    "namespace": "default",
+                    "requested_target": "service/api",
+                    "target": "service/api",
+                    "service_name": "api",
+                    "profile": "service",
+                    "lookback_minutes": 15,
+                    "normalization_notes": [],
+                },
+                "steps": [],
+                "evidence_batches": [],
+                "active_batch_id": "batch-1",
+                "planning_notes": [],
+            },
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["batch_id"] == "batch-1"
+    assert body["executed_step_ids"] == ["collect-target-evidence"]
+
+
+def test_update_investigation_plan_route_returns_plan(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_service.main.update_investigation_plan_from_request",
+        lambda _req: InvestigationPlan(
+            mode="targeted_rca",
+            objective="Investigate service/api",
+            target=InvestigationTarget(
+                source="manual",
+                scope="service",
+                cluster="erauner-home",
+                namespace="default",
+                requested_target="service/api",
+                target="service/api",
+                service_name="api",
+                profile="service",
+                lookback_minutes=15,
+                normalization_notes=["normalized"],
+            ),
+            steps=[],
+            evidence_batches=[],
+            active_batch_id=None,
+            planning_notes=["updated"],
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/update_investigation_plan",
+        json={
+            "plan": {
+                "mode": "targeted_rca",
+                "objective": "Investigate service/api",
+                "target": {
+                    "source": "manual",
+                    "scope": "service",
+                    "cluster": "erauner-home",
+                    "namespace": "default",
+                    "requested_target": "service/api",
+                    "target": "service/api",
+                    "service_name": "api",
+                    "profile": "service",
+                    "lookback_minutes": 15,
+                    "normalization_notes": [],
+                },
+                "steps": [],
+                "evidence_batches": [],
+                "active_batch_id": "batch-1",
+                "planning_notes": [],
+            },
+            "execution": {
+                "batch_id": "batch-1",
+                "executed_step_ids": ["collect-target-evidence"],
+                "artifacts": [],
+                "execution_notes": [],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["active_batch_id"] is None
+    assert body["planning_notes"] == ["updated"]
 
 
 def test_investigate_includes_limitations(monkeypatch) -> None:
@@ -983,25 +1095,45 @@ def test_build_root_cause_report_prefers_direct_restart_evidence() -> None:
 
 
 def test_build_root_cause_report_from_request_collects_node_context(monkeypatch) -> None:
+    monkeypatch.setattr("investigation_service.reporting.load_guideline_rules", lambda: ([], []))
     monkeypatch.setattr(
-        "investigation_service.reporting.collect_node_context",
-        lambda _req: CollectedContextResponse(
-            target=TargetRef(namespace=None, kind="node", name="worker3"),
-            object_state={"kind": "node", "conditions": [{"type": "Ready", "status": "False"}]},
-            events=["NodeNotReady"],
-            log_excerpt="",
-            metrics={"prometheus_available": True},
-            findings=[
-                Finding(
-                    severity="critical",
-                    source="k8s",
-                    title="Node Not Ready",
-                    evidence="Node condition Ready=False",
-                )
+        "investigation_service.reporting.execute_investigation_step",
+        lambda _req: EvidenceBatchExecution(
+            batch_id="batch-1",
+            executed_step_ids=["collect-target-evidence"],
+            artifacts=[
+                {
+                    "step_id": "collect-target-evidence",
+                    "plane": "node",
+                    "artifact_type": "evidence_bundle",
+                    "summary": ["Node Not Ready"],
+                    "limitations": [],
+                    "evidence_bundle": {
+                        "cluster": "current-context",
+                        "target": {"namespace": None, "kind": "node", "name": "worker3"},
+                        "object_state": {"kind": "node", "conditions": [{"type": "Ready", "status": "False"}]},
+                        "events": ["NodeNotReady"],
+                        "log_excerpt": "",
+                        "metrics": {"prometheus_available": True},
+                        "findings": [
+                            {
+                                "severity": "critical",
+                                "source": "k8s",
+                                "title": "Node Not Ready",
+                                "evidence": "Node condition Ready=False",
+                            }
+                        ],
+                        "limitations": [],
+                        "enrichment_hints": [],
+                    },
+                }
             ],
-            limitations=[],
-            enrichment_hints=[],
+            execution_notes=[],
         ),
+    )
+    monkeypatch.setattr(
+        "investigation_service.reporting.update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
     )
 
     report = build_root_cause_report_from_request(
@@ -1016,28 +1148,53 @@ def test_build_root_cause_report_from_request_collects_node_context(monkeypatch)
 def test_build_root_cause_report_from_request_canonicalizes_service_target(monkeypatch) -> None:
     captured = {}
 
-    def fake_collect_service(req):
-        captured["target"] = req.target
-        captured["service_name"] = req.service_name
-        return CollectedContextResponse(
-            target=TargetRef(namespace="observability", kind="service", name="giraffe-kube-prometheus-st-prometheus"),
-            object_state={"kind": "service", "name": "giraffe-kube-prometheus-st-prometheus"},
-            events=["no related events"],
-            log_excerpt="logs only supported for pod or deployment targets",
-            metrics={"service_latency_p95_seconds": 1.5, "prometheus_available": True},
-            findings=[
-                Finding(
-                    severity="warning",
-                    source="prometheus",
-                    title="High Service Latency",
-                    evidence="p95 latency is 1.500s",
-                )
+    monkeypatch.setattr("investigation_service.reporting.load_guideline_rules", lambda: ([], []))
+
+    def fake_execute(req):
+        captured["target"] = req.plan.target.target
+        captured["service_name"] = req.plan.target.service_name
+        return EvidenceBatchExecution(
+            batch_id="batch-1",
+            executed_step_ids=["collect-target-evidence"],
+            artifacts=[
+                {
+                    "step_id": "collect-target-evidence",
+                    "plane": "service",
+                    "artifact_type": "evidence_bundle",
+                    "summary": ["High Service Latency"],
+                    "limitations": [],
+                    "evidence_bundle": {
+                        "cluster": "current-context",
+                        "target": {
+                            "namespace": "observability",
+                            "kind": "service",
+                            "name": "giraffe-kube-prometheus-st-prometheus",
+                        },
+                        "object_state": {"kind": "service", "name": "giraffe-kube-prometheus-st-prometheus"},
+                        "events": ["no related events"],
+                        "log_excerpt": "logs only supported for pod or deployment targets",
+                        "metrics": {"service_latency_p95_seconds": 1.5, "prometheus_available": True},
+                        "findings": [
+                            {
+                                "severity": "warning",
+                                "source": "prometheus",
+                                "title": "High Service Latency",
+                                "evidence": "p95 latency is 1.500s",
+                            }
+                        ],
+                        "limitations": [],
+                        "enrichment_hints": [],
+                    },
+                }
             ],
-            limitations=[],
-            enrichment_hints=[],
+            execution_notes=[],
         )
 
-    monkeypatch.setattr("investigation_service.reporting.collect_service_context", fake_collect_service)
+    monkeypatch.setattr("investigation_service.reporting.execute_investigation_step", fake_execute)
+    monkeypatch.setattr(
+        "investigation_service.reporting.update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
+    )
 
     report = build_root_cause_report_from_request(
         BuildRootCauseReportRequest(
@@ -1166,46 +1323,71 @@ def test_collect_correlated_changes_for_target_matches_request_wrapper(monkeypat
 
 
 def test_build_investigation_report_dedupes_related_changes(monkeypatch) -> None:
+    monkeypatch.setattr("investigation_service.reporting.load_guideline_rules", lambda: ([], []))
     monkeypatch.setattr(
-        "investigation_service.reporting.collect_workload_context",
-        lambda _req: CollectedContextResponse(
-            target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-abc123"),
-            object_state={"kind": "pod", "name": "crashy-abc123"},
-            events=["BackOff restarting failed container"],
-            log_excerpt="starting",
-            metrics={"prometheus_available": True},
-            findings=[
-                Finding(
-                    severity="critical",
-                    source="events",
-                    title="Crash Loop Detected",
-                    evidence="Events indicate BackOff/CrashLoopBackOff behavior",
-                )
+        "investigation_service.reporting.execute_investigation_step",
+        lambda _req: EvidenceBatchExecution(
+            batch_id="batch-1",
+            executed_step_ids=["collect-target-evidence", "collect-change-candidates"],
+            artifacts=[
+                {
+                    "step_id": "collect-target-evidence",
+                    "plane": "workload",
+                    "artifact_type": "evidence_bundle",
+                    "summary": ["Crash Loop Detected"],
+                    "limitations": [],
+                    "evidence_bundle": {
+                        "cluster": "current-context",
+                        "target": {"namespace": "kagent-smoke", "kind": "pod", "name": "crashy-abc123"},
+                        "object_state": {"kind": "pod", "name": "crashy-abc123"},
+                        "events": ["BackOff restarting failed container"],
+                        "log_excerpt": "starting",
+                        "metrics": {"prometheus_available": True},
+                        "findings": [
+                            {
+                                "severity": "critical",
+                                "source": "events",
+                                "title": "Crash Loop Detected",
+                                "evidence": "Events indicate BackOff/CrashLoopBackOff behavior",
+                            }
+                        ],
+                        "limitations": [],
+                        "enrichment_hints": [],
+                    },
+                },
+                {
+                    "step_id": "collect-change-candidates",
+                    "plane": "changes",
+                    "artifact_type": "change_candidates",
+                    "summary": ["BackOff: restarting failed container"],
+                    "limitations": [],
+                    "change_candidates": {
+                        "cluster": "current-context",
+                        "scope": "workload",
+                        "target": "pod/crashy-abc123",
+                        "changes": [
+                            {
+                                "fingerprint": "event|pod/crashy-abc123|backoff|restarting failed container",
+                                "timestamp": _now_iso(),
+                                "source": "k8s_event",
+                                "resource_kind": "pod",
+                                "namespace": "kagent-smoke",
+                                "name": "crashy-abc123",
+                                "relation": "direct",
+                                "summary": "BackOff: restarting failed container",
+                                "confidence": "high",
+                            }
+                        ],
+                        "limitations": [],
+                    },
+                },
             ],
-            limitations=[],
-            enrichment_hints=[],
+            execution_notes=[],
         ),
     )
     monkeypatch.setattr(
-        "investigation_service.reporting.collect_correlated_changes",
-        lambda _req: CorrelatedChangesResponse(
-            scope="workload",
-            target="pod/crashy-abc123",
-            changes=[
-                {
-                    "fingerprint": "event|pod/crashy-abc123|backoff|restarting failed container",
-                    "timestamp": _now_iso(),
-                    "source": "k8s_event",
-                    "resource_kind": "pod",
-                    "namespace": "kagent-smoke",
-                    "name": "crashy-abc123",
-                    "relation": "direct",
-                    "summary": "BackOff: restarting failed container",
-                    "confidence": "high",
-                }
-            ],
-            limitations=[],
-        ),
+        "investigation_service.reporting.update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
     )
 
     report = build_investigation_report(
@@ -1217,34 +1399,59 @@ def test_build_investigation_report_dedupes_related_changes(monkeypatch) -> None
 
 
 def test_build_investigation_report_keeps_empty_related_note_out_of_limitations(monkeypatch) -> None:
+    monkeypatch.setattr("investigation_service.reporting.load_guideline_rules", lambda: ([], []))
     monkeypatch.setattr(
-        "investigation_service.reporting.collect_workload_context",
-        lambda _req: CollectedContextResponse(
-            target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-abc123"),
-            object_state={"kind": "pod", "name": "crashy-abc123"},
-            events=["BackOff restarting failed container"],
-            log_excerpt="starting",
-            metrics={"prometheus_available": True},
-            findings=[
-                Finding(
-                    severity="critical",
-                    source="events",
-                    title="Crash Loop Detected",
-                    evidence="Events indicate BackOff/CrashLoopBackOff behavior",
-                )
+        "investigation_service.reporting.execute_investigation_step",
+        lambda _req: EvidenceBatchExecution(
+            batch_id="batch-1",
+            executed_step_ids=["collect-target-evidence", "collect-change-candidates"],
+            artifacts=[
+                {
+                    "step_id": "collect-target-evidence",
+                    "plane": "workload",
+                    "artifact_type": "evidence_bundle",
+                    "summary": ["Crash Loop Detected"],
+                    "limitations": ["metric unavailable: accepted_spans_per_second"],
+                    "evidence_bundle": {
+                        "cluster": "current-context",
+                        "target": {"namespace": "kagent-smoke", "kind": "pod", "name": "crashy-abc123"},
+                        "object_state": {"kind": "pod", "name": "crashy-abc123"},
+                        "events": ["BackOff restarting failed container"],
+                        "log_excerpt": "starting",
+                        "metrics": {"prometheus_available": True},
+                        "findings": [
+                            {
+                                "severity": "critical",
+                                "source": "events",
+                                "title": "Crash Loop Detected",
+                                "evidence": "Events indicate BackOff/CrashLoopBackOff behavior",
+                            }
+                        ],
+                        "limitations": ["metric unavailable: accepted_spans_per_second"],
+                        "enrichment_hints": [],
+                    },
+                },
+                {
+                    "step_id": "collect-change-candidates",
+                    "plane": "changes",
+                    "artifact_type": "change_candidates",
+                    "summary": ["No meaningful change candidates found in the requested window"],
+                    "limitations": ["no correlated changes found in the requested time window"],
+                    "change_candidates": {
+                        "cluster": "current-context",
+                        "scope": "workload",
+                        "target": "pod/crashy-abc123",
+                        "changes": [],
+                        "limitations": ["no correlated changes found in the requested time window"],
+                    },
+                },
             ],
-            limitations=["metric unavailable: accepted_spans_per_second"],
-            enrichment_hints=[],
+            execution_notes=[],
         ),
     )
     monkeypatch.setattr(
-        "investigation_service.reporting.collect_correlated_changes",
-        lambda _req: CorrelatedChangesResponse(
-            scope="workload",
-            target="pod/crashy-abc123",
-            changes=[],
-            limitations=["no correlated changes found in the requested time window"],
-        ),
+        "investigation_service.reporting.update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
     )
 
     report = build_investigation_report(

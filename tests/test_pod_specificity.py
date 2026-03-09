@@ -1,14 +1,57 @@
-from investigation_service.models import CollectedContextResponse, EvidenceItem, InvestigationReportRequest, RootCauseReport, TargetRef
+from investigation_service.models import (
+    CollectedContextResponse,
+    EvidenceBatchExecution,
+    EvidenceItem,
+    InvestigationReportRequest,
+    RootCauseReport,
+    TargetRef,
+)
 from investigation_service import reporting
+
+
+def _patch_execution(monkeypatch, context: CollectedContextResponse) -> None:
+    monkeypatch.setattr(
+        reporting,
+        "execute_investigation_step",
+        lambda _req: EvidenceBatchExecution(
+            batch_id="batch-1",
+            executed_step_ids=["collect-target-evidence"],
+            artifacts=[
+                {
+                    "step_id": "collect-target-evidence",
+                    "plane": "service" if context.target.kind == "service" else "workload",
+                    "artifact_type": "evidence_bundle",
+                    "summary": [],
+                    "limitations": list(context.limitations),
+                    "evidence_bundle": {
+                        "cluster": context.cluster,
+                        "target": context.target.model_dump(mode="json"),
+                        "object_state": context.object_state,
+                        "events": context.events,
+                        "log_excerpt": context.log_excerpt,
+                        "metrics": context.metrics,
+                        "findings": [item.model_dump(mode="json") for item in context.findings],
+                        "limitations": context.limitations,
+                        "enrichment_hints": context.enrichment_hints,
+                    },
+                }
+            ],
+            execution_notes=[],
+        ),
+    )
+    monkeypatch.setattr(
+        reporting,
+        "update_investigation_plan",
+        lambda req: req.plan.model_copy(update={"active_batch_id": None}),
+    )
+    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
 
 def test_build_investigation_report_rewrites_explicit_pod_prefix_to_resolved_pod(monkeypatch) -> None:
     captured = {}
-
-    monkeypatch.setattr(
-        reporting,
-        "_collect_context_for_normalized_request",
-        lambda normalized: CollectedContextResponse(
+    _patch_execution(
+        monkeypatch,
+        CollectedContextResponse(
             cluster="erauner-home",
             target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-6f5689f4cd-czdlg"),
             object_state={"kind": "pod", "name": "crashy-6f5689f4cd-czdlg"},
@@ -47,31 +90,27 @@ def test_build_investigation_report_rewrites_explicit_pod_prefix_to_resolved_pod
         )
 
     monkeypatch.setattr(reporting, "build_root_cause_report_impl", fake_build_root_cause)
-    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
-    report = reporting.build_investigation_report(
+    reporting.build_investigation_report(
         InvestigationReportRequest(namespace="kagent-smoke", target="pod/crashy", include_related_data=False)
     )
 
-    normalized = captured["normalized"]
-    assert normalized.target == "pod/crashy-6f5689f4cd-czdlg"
+    assert captured["normalized"].target == "pod/crashy-6f5689f4cd-czdlg"
 
 
 def test_build_investigation_report_resolves_backend_target_to_deployment(monkeypatch) -> None:
     captured = {}
-
     monkeypatch.setattr(
         reporting,
         "resolve_cluster",
         lambda cluster: type("ResolvedCluster", (), {"alias": cluster or "erauner-home"})(),
     )
     monkeypatch.setattr(reporting, "get_backend_cr", lambda namespace, name, cluster=None: {"metadata": {"name": name}})
-    monkeypatch.setattr(
-        reporting,
-        "_collect_context_for_normalized_request",
-        lambda normalized: CollectedContextResponse(
+    _patch_execution(
+        monkeypatch,
+        CollectedContextResponse(
             cluster="erauner-home",
-            target=TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+            target=TargetRef(namespace="operator-smoke", kind="pod", name="crashy"),
             object_state={"kind": "deployment", "name": "crashy"},
             events=["BackOff restarting failed container"],
             log_excerpt="starting",
@@ -99,7 +138,6 @@ def test_build_investigation_report_resolves_backend_target_to_deployment(monkey
         )
 
     monkeypatch.setattr(reporting, "build_root_cause_report_impl", fake_build_root_cause)
-    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
     report = reporting.build_investigation_report(
         InvestigationReportRequest(namespace="operator-smoke", target="Backend/crashy", include_related_data=False)
@@ -116,19 +154,17 @@ def test_build_investigation_report_resolves_backend_target_to_deployment(monkey
 
 def test_build_investigation_report_resolves_frontend_target_to_deployment(monkeypatch) -> None:
     captured = {}
-
     monkeypatch.setattr(
         reporting,
         "resolve_cluster",
         lambda cluster: type("ResolvedCluster", (), {"alias": cluster or "erauner-home"})(),
     )
     monkeypatch.setattr(reporting, "get_frontend_cr", lambda namespace, name, cluster=None: {"metadata": {"name": name}})
-    monkeypatch.setattr(
-        reporting,
-        "_collect_context_for_normalized_request",
-        lambda normalized: CollectedContextResponse(
+    _patch_execution(
+        monkeypatch,
+        CollectedContextResponse(
             cluster="erauner-home",
-            target=TargetRef(namespace="operator-smoke", kind="deployment", name="landing"),
+            target=TargetRef(namespace="operator-smoke", kind="pod", name="landing"),
             object_state={"kind": "deployment", "name": "landing"},
             events=["Deployment rollout progressing"],
             log_excerpt="starting",
@@ -156,7 +192,6 @@ def test_build_investigation_report_resolves_frontend_target_to_deployment(monke
         )
 
     monkeypatch.setattr(reporting, "build_root_cause_report_impl", fake_build_root_cause)
-    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
     report = reporting.build_investigation_report(
         InvestigationReportRequest(namespace="operator-smoke", target="Frontend/landing", include_related_data=False)
@@ -173,7 +208,6 @@ def test_build_investigation_report_resolves_frontend_target_to_deployment(monke
 
 def test_build_investigation_report_resolves_frontend_service_profile_to_service(monkeypatch) -> None:
     captured = {}
-
     monkeypatch.setattr(
         reporting,
         "resolve_cluster",
@@ -184,10 +218,9 @@ def test_build_investigation_report_resolves_frontend_service_profile_to_service
         "get_frontend_cr",
         lambda namespace, name, cluster=None: {"kind": "Frontend", "metadata": {"name": name, "namespace": namespace}},
     )
-    monkeypatch.setattr(
-        reporting,
-        "_collect_context_for_normalized_request",
-        lambda normalized: CollectedContextResponse(
+    _patch_execution(
+        monkeypatch,
+        CollectedContextResponse(
             cluster="erauner-home",
             target=TargetRef(namespace="operator-smoke", kind="service", name="landing"),
             object_state={"kind": "service", "name": "landing"},
@@ -217,7 +250,6 @@ def test_build_investigation_report_resolves_frontend_service_profile_to_service
         )
 
     monkeypatch.setattr(reporting, "build_root_cause_report_impl", fake_build_root_cause)
-    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
     report = reporting.build_investigation_report(
         InvestigationReportRequest(
@@ -239,7 +271,6 @@ def test_build_investigation_report_resolves_frontend_service_profile_to_service
 
 def test_build_investigation_report_resolves_cluster_target_to_failing_component(monkeypatch) -> None:
     captured = {}
-
     monkeypatch.setattr(
         reporting,
         "resolve_cluster",
@@ -257,12 +288,11 @@ def test_build_investigation_report_resolves_cluster_target_to_failing_component
             }
         },
     )
-    monkeypatch.setattr(
-        reporting,
-        "_collect_context_for_normalized_request",
-        lambda normalized: CollectedContextResponse(
+    _patch_execution(
+        monkeypatch,
+        CollectedContextResponse(
             cluster="erauner-home",
-            target=TargetRef(namespace="operator-smoke", kind="deployment", name="api"),
+            target=TargetRef(namespace="operator-smoke", kind="pod", name="api"),
             object_state={"kind": "deployment", "name": "api"},
             events=["BackOff restarting failed container"],
             log_excerpt="starting",
@@ -290,7 +320,6 @@ def test_build_investigation_report_resolves_cluster_target_to_failing_component
         )
 
     monkeypatch.setattr(reporting, "build_root_cause_report_impl", fake_build_root_cause)
-    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
     report = reporting.build_investigation_report(
         InvestigationReportRequest(namespace="operator-smoke", target="Cluster/testapp", include_related_data=False)
@@ -308,7 +337,6 @@ def test_build_investigation_report_resolves_cluster_target_to_failing_component
 
 def test_build_investigation_report_resolves_cluster_service_profile_to_frontend_service(monkeypatch) -> None:
     captured = {}
-
     monkeypatch.setattr(
         reporting,
         "resolve_cluster",
@@ -326,10 +354,9 @@ def test_build_investigation_report_resolves_cluster_service_profile_to_frontend
             }
         },
     )
-    monkeypatch.setattr(
-        reporting,
-        "_collect_context_for_normalized_request",
-        lambda normalized: CollectedContextResponse(
+    _patch_execution(
+        monkeypatch,
+        CollectedContextResponse(
             cluster="erauner-home",
             target=TargetRef(namespace="operator-smoke", kind="service", name="landing"),
             object_state={"kind": "service", "name": "landing"},
@@ -359,7 +386,6 @@ def test_build_investigation_report_resolves_cluster_service_profile_to_frontend
         )
 
     monkeypatch.setattr(reporting, "build_root_cause_report_impl", fake_build_root_cause)
-    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
     report = reporting.build_investigation_report(
         InvestigationReportRequest(
@@ -382,11 +408,9 @@ def test_build_investigation_report_resolves_cluster_service_profile_to_frontend
 
 def test_build_investigation_report_rewrites_alert_shaped_pod_to_resolved_pod(monkeypatch) -> None:
     captured = {}
-
-    monkeypatch.setattr(
-        reporting,
-        "_collect_context_for_normalized_request",
-        lambda normalized: CollectedContextResponse(
+    _patch_execution(
+        monkeypatch,
+        CollectedContextResponse(
             cluster="erauner-home",
             target=TargetRef(namespace="kagent-smoke", kind="pod", name="crashy-6f5689f4cd-czdlg"),
             object_state={"kind": "pod", "name": "crashy-6f5689f4cd-czdlg"},
@@ -431,7 +455,6 @@ def test_build_investigation_report_rewrites_alert_shaped_pod_to_resolved_pod(mo
 
     monkeypatch.setattr(reporting, "normalize_alert_input", fake_normalize_alert)
     monkeypatch.setattr(reporting, "build_root_cause_report_impl", fake_build_root_cause)
-    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
     reporting.build_investigation_report(
         InvestigationReportRequest(
@@ -442,5 +465,4 @@ def test_build_investigation_report_rewrites_alert_shaped_pod_to_resolved_pod(mo
         )
     )
 
-    normalized = captured["normalized"]
-    assert normalized.target == "pod/crashy-6f5689f4cd-czdlg"
+    assert captured["normalized"].target == "pod/crashy-6f5689f4cd-czdlg"

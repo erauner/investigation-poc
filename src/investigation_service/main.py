@@ -12,6 +12,8 @@ from .models import (
     CollectedContextResponse,
     CorrelatedChangesResponse,
     EvidenceBundle,
+    EvidenceBatchExecution,
+    ExecuteInvestigationStepRequest,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     InvestigationAnalysis,
@@ -22,6 +24,7 @@ from .models import (
     InvestigateRequest,
     InvestigationResponse,
     RootCauseReport,
+    UpdateInvestigationPlanRequest,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
@@ -31,10 +34,12 @@ from .reporting import (
     build_investigation_plan as build_investigation_plan_from_request,
     build_investigation_report,
     build_root_cause_report as build_root_cause_report_from_request,
+    execute_investigation_step as execute_investigation_step_from_request,
     normalize_incident_input as normalize_incident_input_from_request,
     rank_hypotheses as rank_hypotheses_from_request,
     render_investigation_report,
     resolve_primary_target as resolve_primary_target_from_request,
+    update_investigation_plan as update_investigation_plan_from_request,
 )
 from .tools import (
     collect_alert_context,
@@ -86,6 +91,16 @@ def resolve_target(req: InvestigationReportRequest) -> InvestigationTarget:
 @app.post("/tools/build_investigation_plan", response_model=InvestigationPlan)
 def build_plan(req: BuildInvestigationPlanRequest) -> InvestigationPlan:
     return build_investigation_plan_from_request(req)
+
+
+@app.post("/tools/execute_investigation_step", response_model=EvidenceBatchExecution)
+def execute_plan_step(req: ExecuteInvestigationStepRequest) -> EvidenceBatchExecution:
+    return execute_investigation_step_from_request(req)
+
+
+@app.post("/tools/update_investigation_plan", response_model=InvestigationPlan)
+def update_plan(req: UpdateInvestigationPlanRequest) -> InvestigationPlan:
+    return update_investigation_plan_from_request(req)
 
 
 @app.post("/tools/collect_node_context", response_model=CollectedContextResponse)

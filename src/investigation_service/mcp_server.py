@@ -11,9 +11,11 @@ from .models import (
     CollectNodeContextRequest,
     CollectServiceContextRequest,
     BuildRootCauseReportRequest,
+    ExecuteInvestigationStepRequest,
     FindUnhealthyPodRequest,
     FindUnhealthyWorkloadsRequest,
     InvestigationReportRequest,
+    UpdateInvestigationPlanRequest,
 )
 from .correlation import collect_change_candidates as collect_change_candidates_impl
 from .correlation import collect_correlated_changes as collect_correlated_changes_impl
@@ -21,10 +23,12 @@ from .reporting import build_alert_investigation_report as build_alert_investiga
 from .reporting import build_investigation_plan as build_investigation_plan_impl
 from .reporting import build_investigation_report as build_investigation_report_impl
 from .reporting import build_root_cause_report as build_root_cause_report_impl
+from .reporting import execute_investigation_step as execute_investigation_step_impl
 from .reporting import normalize_incident_input as normalize_incident_input_impl
 from .reporting import rank_hypotheses as rank_hypotheses_impl
 from .reporting import render_investigation_report as render_investigation_report_impl
 from .reporting import resolve_primary_target as resolve_primary_target_impl
+from .reporting import update_investigation_plan as update_investigation_plan_impl
 from .tools import collect_alert_context as collect_alert_context_impl
 from .tools import collect_alert_evidence as collect_alert_evidence_impl
 from .tools import collect_node_context as collect_node_context_impl
@@ -222,6 +226,35 @@ def build_investigation_plan(
             node_name=node_name,
             objective=objective,
             question=question,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def execute_investigation_step(
+    plan: dict,
+    incident: dict,
+    batch_id: str | None = None,
+) -> dict:
+    """Execute one bounded evidence batch from an investigation plan. This is a control-plane step that dispatches only planner-owned evidence batches."""
+    response = execute_investigation_step_impl(
+        ExecuteInvestigationStepRequest(
+            plan=plan,
+            incident=incident,
+            batch_id=batch_id,
+        )
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+def update_investigation_plan(plan: dict, execution: dict) -> dict:
+    """Update plan state after one executed evidence batch. Use this before ranking hypotheses or rendering a report."""
+    response = update_investigation_plan_impl(
+        UpdateInvestigationPlanRequest(
+            plan=plan,
+            execution=execution,
         )
     )
     return response.model_dump(mode="json")
