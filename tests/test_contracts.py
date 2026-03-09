@@ -341,6 +341,24 @@ def test_normalize_alert_input_accepts_explicit_service_name() -> None:
     assert normalized.service_name == "kagent-controller"
 
 
+def test_normalize_alert_input_keeps_pod_alerts_in_workload_scope_when_service_label_is_present() -> None:
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="PodCrashLooping",
+            labels={
+                "namespace": "toolbridge",
+                "pod": "toolbridge-api-migrate-j5wwf",
+                "service": "toolbridge-api",
+            },
+        )
+    )
+
+    assert normalized.target == "pod/toolbridge-api-migrate-j5wwf"
+    assert normalized.scope == "workload"
+    assert normalized.profile == "workload"
+    assert normalized.service_name is None
+
+
 def test_normalize_alert_input_does_not_treat_app_label_as_concrete_target() -> None:
     with pytest.raises(ValueError, match="target could not be inferred from alert input"):
         normalize_alert_input(
@@ -634,6 +652,41 @@ def test_find_unhealthy_workloads_prefers_crashlooping_pods(monkeypatch) -> None
     assert len(response.candidates) == 1
     assert response.candidates[0].target == "pod/crashy-abc123"
     assert response.candidates[0].reason == "CrashLoopBackOff"
+
+
+def test_find_unhealthy_workloads_includes_init_blocked_pods(monkeypatch) -> None:
+    pods_payload = {
+        "items": [
+            {
+                "metadata": {"name": "toolbridge-api-migrate-j5wwf", "namespace": "toolbridge"},
+                "status": {
+                    "phase": "Pending",
+                    "initContainerStatuses": [
+                        {
+                            "name": "wait-for-postgres",
+                            "ready": False,
+                            "restartCount": 1,
+                            "state": {"waiting": {"reason": "PodInitializing"}},
+                            "lastState": {"terminated": {"reason": "Error", "exitCode": 1}},
+                        }
+                    ],
+                    "containerStatuses": [],
+                },
+            }
+        ]
+    }
+
+    monkeypatch.setattr(
+        "investigation_service.k8s_adapter._run_kubectl",
+        lambda _args: (True, json.dumps(pods_payload)),
+    )
+
+    response = find_unhealthy_workloads_impl(namespace="toolbridge", limit=5)
+
+    assert response.limitations == []
+    assert len(response.candidates) == 1
+    assert response.candidates[0].target == "pod/toolbridge-api-migrate-j5wwf"
+    assert response.candidates[0].summary.startswith("init blocked:")
 
 
 def test_build_root_cause_report_route_is_removed_from_public_surface() -> None:

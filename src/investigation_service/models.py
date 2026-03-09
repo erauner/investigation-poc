@@ -399,6 +399,14 @@ class CorrelatedChangesResponse(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class ToolPathTrace(BaseModel):
+    planner_path_used: bool = False
+    source: str = "investigation-mcp-server"
+    mode: InvestigationMode | None = None
+    executed_batch_ids: list[str] = Field(default_factory=list)
+    executed_step_ids: list[str] = Field(default_factory=list)
+
+
 class InvestigationState(BaseModel):
     incident: BuildInvestigationPlanRequest
     target: InvestigationTarget | None = None
@@ -407,6 +415,7 @@ class InvestigationState(BaseModel):
     artifacts: list[StepArtifact] = Field(default_factory=list)
     primary_evidence: EvidenceBundle | None = None
     change_candidates: CorrelatedChangesResponse | None = None
+    tool_path_trace: ToolPathTrace | None = None
 
 
 class InvestigationReport(BaseModel):
@@ -425,6 +434,7 @@ class InvestigationReport(BaseModel):
     suggested_follow_ups: list[str] = Field(default_factory=list)
     guidelines: list[ResolvedGuideline] = Field(default_factory=list)
     normalization_notes: list[str] = Field(default_factory=list)
+    tool_path_trace: ToolPathTrace | None = None
 
 
 class InvestigationResponse(BaseModel):

@@ -155,6 +155,36 @@ def resolve_runtime_target(target: TargetRef, cluster: ResolvedCluster | None = 
     return target
 
 
+def _container_status_details(spec_containers: list[dict], status_containers: list[dict]) -> list[dict]:
+    status_by_name = {item.get("name"): item for item in status_containers if item.get("name")}
+    details: list[dict] = []
+    for container in spec_containers:
+        name = container.get("name")
+        container_status = status_by_name.get(name, {})
+        last_terminated = container_status.get("lastState", {}).get("terminated", {}) or {}
+        waiting_state = container_status.get("state", {}).get("waiting", {}) or {}
+        running_state = container_status.get("state", {}).get("running", {}) or {}
+        terminated_state = container_status.get("state", {}).get("terminated", {}) or {}
+        details.append(
+            {
+                "name": name,
+                "ready": container_status.get("ready"),
+                "restartCount": container_status.get("restartCount", 0),
+                "image": container.get("image"),
+                "command": container.get("command", []),
+                "args": container.get("args", []),
+                "waitingReason": waiting_state.get("reason"),
+                "terminationReason": terminated_state.get("reason"),
+                "terminationExitCode": terminated_state.get("exitCode"),
+                "lastTerminationReason": last_terminated.get("reason"),
+                "lastTerminationExitCode": last_terminated.get("exitCode"),
+                "lastTerminationMessage": last_terminated.get("message"),
+                "startedAt": running_state.get("startedAt"),
+            }
+        )
+    return details
+
+
 def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) -> dict:
     args = ["get", target.kind, target.name, "-o", "json"]
     if target.namespace:
@@ -184,32 +214,28 @@ def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) ->
         "creationTimestamp": metadata.get("creationTimestamp"),
     }
     if target.kind == "pod":
-        container_details: list[dict] = []
-        status_by_name = {
-            item.get("name"): item for item in status.get("containerStatuses", []) if item.get("name")
-        }
-        for container in spec.get("containers", []):
-            name = container.get("name")
-            container_status = status_by_name.get(name, {})
-            last_terminated = container_status.get("lastState", {}).get("terminated", {}) or {}
-            waiting_state = container_status.get("state", {}).get("waiting", {}) or {}
-            running_state = container_status.get("state", {}).get("running", {}) or {}
-            container_details.append(
-                {
-                    "name": name,
-                    "ready": container_status.get("ready"),
-                    "restartCount": container_status.get("restartCount", 0),
-                    "image": container.get("image"),
-                    "command": container.get("command", []),
-                    "args": container.get("args", []),
-                    "waitingReason": waiting_state.get("reason"),
-                    "lastTerminationReason": last_terminated.get("reason"),
-                    "lastTerminationExitCode": last_terminated.get("exitCode"),
-                    "lastTerminationMessage": last_terminated.get("message"),
-                    "startedAt": running_state.get("startedAt"),
-                }
-            )
-        response["containers"] = container_details
+        response["reason"] = status.get("reason")
+        response["conditions"] = status.get("conditions", [])
+        response["containers"] = _container_status_details(
+            spec.get("containers", []),
+            status.get("containerStatuses", []) or [],
+        )
+        response["initContainers"] = _container_status_details(
+            spec.get("initContainers", []),
+            status.get("initContainerStatuses", []) or [],
+        )
+    if target.kind == "deployment" and target.namespace:
+        runtime_pod_name = _call_with_optional_cluster(
+            _first_pod_for_deployment,
+            target.namespace,
+            target.name,
+            cluster=cluster,
+        )
+        if runtime_pod_name:
+            runtime_target = TargetRef(namespace=target.namespace, kind="pod", name=runtime_pod_name)
+            runtime_pod = get_k8s_object(runtime_target, cluster=cluster)
+            if not runtime_pod.get("error"):
+                response["runtimePod"] = runtime_pod
     if target.kind == "node":
         response["conditions"] = status.get("conditions", [])
         response["allocatable"] = status.get("allocatable", {})
@@ -448,11 +474,18 @@ def find_unhealthy_workloads(
         metadata = item.get("metadata", {})
         status = item.get("status", {})
         container_statuses = status.get("containerStatuses", []) or []
+        init_container_statuses = status.get("initContainerStatuses", []) or []
         total_restarts = sum(container.get("restartCount", 0) for container in container_statuses)
+        total_init_restarts = sum(container.get("restartCount", 0) for container in init_container_statuses)
         ready = all(container.get("ready", False) for container in container_statuses) if container_statuses else False
         waiting_reasons = [
             container.get("state", {}).get("waiting", {}).get("reason")
             for container in container_statuses
+            if container.get("state", {}).get("waiting", {}).get("reason")
+        ]
+        init_waiting_reasons = [
+            container.get("state", {}).get("waiting", {}).get("reason")
+            for container in init_container_statuses
             if container.get("state", {}).get("waiting", {}).get("reason")
         ]
         terminated_reasons = [
@@ -460,12 +493,30 @@ def find_unhealthy_workloads(
             for container in container_statuses
             if container.get("lastState", {}).get("terminated", {}).get("reason")
         ]
+        init_terminated_reasons = [
+            container.get("lastState", {}).get("terminated", {}).get("reason")
+            for container in init_container_statuses
+            if container.get("lastState", {}).get("terminated", {}).get("reason")
+        ]
         phase = status.get("phase")
-        reason = status.get("reason") or next(iter(waiting_reasons), None) or next(iter(terminated_reasons), None)
+        reason = (
+            status.get("reason")
+            or next(iter(waiting_reasons), None)
+            or next(iter(init_waiting_reasons), None)
+            or next(iter(terminated_reasons), None)
+            or next(iter(init_terminated_reasons), None)
+        )
 
         unhealthy_score = 0
         if "CrashLoopBackOff" in waiting_reasons:
             unhealthy_score = 100
+        elif init_container_statuses and (
+            init_waiting_reasons
+            or init_terminated_reasons
+            or total_init_restarts > 0
+            or any(not container.get("ready", False) for container in init_container_statuses)
+        ):
+            unhealthy_score = 90
         elif phase in {"Failed", "Pending"}:
             unhealthy_score = 80
         elif not ready and container_statuses:
@@ -478,8 +529,14 @@ def find_unhealthy_workloads(
 
         name = metadata.get("name", "")
         summary = reason or phase or "unhealthy"
+        if init_waiting_reasons:
+            summary = f"init blocked: {init_waiting_reasons[0]}"
+        elif init_terminated_reasons:
+            summary = f"init failed: {init_terminated_reasons[0]}"
         if total_restarts > 0:
             summary = f"{summary}; restarts={total_restarts}"
+        elif total_init_restarts > 0:
+            summary = f"{summary}; init_restarts={total_init_restarts}"
         candidates.append(
             (
                 unhealthy_score,
@@ -612,6 +669,37 @@ def get_pod_logs(target: TargetRef, tail: int = 200, cluster: ResolvedCluster | 
         cluster=cluster,
     )
     current_logs = output.strip() if ok else ""
+    if not current_logs:
+        pod_state = get_k8s_object(TargetRef(namespace=target.namespace, kind="pod", name=pod_name), cluster=cluster)
+        init_containers = pod_state.get("initContainers", []) if not pod_state.get("error") else []
+        active_init = next(
+            (
+                container for container in init_containers
+                if container.get("waitingReason")
+                or container.get("terminationReason")
+                or container.get("lastTerminationReason")
+                or container.get("restartCount", 0) > 0
+            ),
+            None,
+        )
+        if active_init and active_init.get("name"):
+            init_ok, init_output = _call_with_optional_cluster(
+                _run_kubectl,
+                [
+                    "-n",
+                    target.namespace,
+                    "logs",
+                    pod_name,
+                    "-c",
+                    active_init["name"],
+                    "--tail",
+                    str(tail),
+                    "--timestamps=true",
+                ],
+                cluster=cluster,
+            )
+            if init_ok:
+                current_logs = init_output.strip()
 
     previous_ok, previous_output = _call_with_optional_cluster(
         _run_kubectl,

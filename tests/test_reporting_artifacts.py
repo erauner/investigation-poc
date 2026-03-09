@@ -140,7 +140,11 @@ def _alert_execution() -> EvidenceBatchExecution:
                 step_id="collect-alert-evidence",
                 plane="alert",
                 artifact_type="evidence_bundle",
-                summary=["Alert PodCrashLooping targeted pod/crashy-abc123", "Alert fired"],
+                summary=[
+                    "Alert PodCrashLooping requested pod/crashy",
+                    "Resolved runtime target: pod/crashy-abc123",
+                    "Alert fired",
+                ],
                 limitations=[],
                 evidence_bundle=EvidenceBundle(
                     cluster="artifact-cluster",
@@ -271,6 +275,10 @@ def test_render_investigation_report_uses_execution_artifacts_by_default(monkeyp
     assert report.diagnosis == "Artifact analysis"
     assert report.likely_cause == "Artifact likely cause"
     assert report.recommended_next_step == "artifact next step"
+    assert report.tool_path_trace is not None
+    assert report.tool_path_trace.planner_path_used is True
+    assert report.tool_path_trace.executed_batch_ids == ["batch-1"]
+    assert report.tool_path_trace.executed_step_ids == ["collect-target-evidence"]
 
 
 def test_render_investigation_report_reuses_executed_change_artifacts(monkeypatch) -> None:
@@ -379,10 +387,13 @@ def test_render_investigation_report_preserves_alert_artifact_evidence(monkeypat
     report = reporting.render_investigation_report(
         InvestigationReportRequest(
             alertname="PodCrashLooping",
+            target="pod/crashy",
             labels={"namespace": "artifact-ns", "pod": "crashy-abc123"},
             include_related_data=False,
         )
     )
 
     assert any("PodCrashLooping" in item for item in report.evidence)
+    assert any("requested pod/crashy" in item for item in report.evidence)
+    assert any("Resolved runtime target: pod/crashy-abc123" in item for item in report.evidence)
     assert any("crashy-abc123" in item for item in report.evidence)

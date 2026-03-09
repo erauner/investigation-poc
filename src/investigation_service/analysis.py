@@ -21,6 +21,7 @@ _SOURCE_PRIORITY = {
 
 _SCOPE_TITLE_PRIORITY = {
     "workload": {
+        "Init Container Dependency Blocked": 90,
         "Container Restart Failure Details": 80,
         "Crash Loop Detected": 70,
         "Service Returning 5xx Responses": 68,
@@ -162,13 +163,60 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
     if object_state.get("kind") == "node":
         findings.extend(_derive_node_findings(object_state, metrics))
 
-    containers = object_state.get("containers", [])
+    runtime_state = object_state
+    if object_state.get("kind") == "deployment" and object_state.get("runtimePod"):
+        runtime_state = object_state["runtimePod"]
+
+    init_containers = runtime_state.get("initContainers", [])
+    for container in init_containers:
+        waiting_reason = container.get("waitingReason")
+        termination_reason = container.get("terminationReason") or container.get("lastTerminationReason")
+        exit_code = container.get("terminationExitCode")
+        if exit_code is None:
+            exit_code = container.get("lastTerminationExitCode")
+        restart_count = container.get("restartCount", 0)
+        command = container.get("command", [])
+        args = container.get("args", [])
+        if not (waiting_reason or termination_reason or exit_code is not None or restart_count > 0):
+            continue
+
+        command_text = " ".join([*command, *args]).strip()
+        evidence_parts = [f"init container={container.get('name')}"]
+        if waiting_reason:
+            evidence_parts.append(f"waiting reason={waiting_reason}")
+        if termination_reason:
+            evidence_parts.append(f"termination reason={termination_reason}")
+        if exit_code is not None:
+            evidence_parts.append(f"exit code={exit_code}")
+        if restart_count:
+            evidence_parts.append(f"restarts={restart_count}")
+        if command_text:
+            evidence_parts.append(f"command='{command_text}'")
+        if logs:
+            lower_logs = logs.lower()
+            dependency_markers = ("waiting for", "connection refused", "dial tcp", "timed out", "could not connect")
+            if any(marker in lower_logs for marker in dependency_markers):
+                evidence_parts.append("init logs indicate dependency wait or connection failure")
+
+        findings.append(
+            Finding(
+                severity="critical",
+                source="k8s",
+                title="Init Container Dependency Blocked",
+                evidence=", ".join(evidence_parts),
+            )
+        )
+        break
+
+    containers = runtime_state.get("containers", [])
     for container in containers:
         exit_code = container.get("lastTerminationExitCode")
         termination_reason = container.get("lastTerminationReason")
         waiting_reason = container.get("waitingReason")
         command = container.get("command", [])
         args = container.get("args", [])
+        if waiting_reason == "PodInitializing":
+            continue
         if exit_code is not None or termination_reason or waiting_reason:
             command_text = " ".join([*command, *args]).strip()
             evidence_parts = []
@@ -305,7 +353,7 @@ def _select_confidence(scope: str, lead: Finding, limitations: list[str]) -> Con
         limitation_penalty += 1
 
     base_score = 0
-    if lead.title in {"Container Restart Failure Details", "Node Not Ready", "Service Returning 5xx Responses"}:
+    if lead.title in {"Init Container Dependency Blocked", "Container Restart Failure Details", "Node Not Ready", "Service Returning 5xx Responses"}:
         base_score = 3
     elif lead.title in {"Crash Loop Detected", "High Node Memory Request Saturation", "High Service Latency"}:
         base_score = 2
@@ -347,6 +395,16 @@ def _derive_likely_cause(scope: str, lead: Finding, requested_target_kind: str |
             return f"Container is exiting with code {exit_code}, which is causing repeated CrashLoopBackOff restarts."
         if waiting_reason:
             return f"Container is repeatedly entering {waiting_reason} based on direct pod status."
+    if lead.title == "Init Container Dependency Blocked":
+        container_name = _extract_field(r"init container=([^,]+)", lead.evidence)
+        waiting_reason = _extract_field(r"waiting reason=([^,]+)", lead.evidence)
+        if container_name and waiting_reason:
+            return (
+                f"Init container '{container_name}' is blocked in {waiting_reason}, preventing the workload from completing startup."
+            )
+        if container_name:
+            return f"Init container '{container_name}' is blocking workload startup before the main container can run."
+        return "An init container is blocking workload startup before the main container can run."
     if lead.title == "Crash Loop Detected":
         if requested_target_kind == "pod":
             return "The pod is repeatedly failing shortly after start, so Kubernetes is backing off restarts."

@@ -385,8 +385,15 @@ def _summary_for_evidence_bundle(bundle: EvidenceBundle) -> list[str]:
     return [f"Collected {bundle.target.kind} evidence for {bundle.target.name}"]
 
 
-def _summary_for_alert_bundle(alertname: str, bundle: EvidenceBundle) -> list[str]:
-    values = [f"Alert {alertname} targeted {bundle.target.kind}/{bundle.target.name}"]
+def _summary_for_alert_bundle(
+    alertname: str,
+    requested_target: str | None,
+    bundle: EvidenceBundle,
+) -> list[str]:
+    values: list[str] = []
+    if requested_target:
+        values.append(f"Alert {alertname} requested {requested_target}")
+    values.append(f"Resolved runtime target: {bundle.target.kind}/{bundle.target.name}")
     values.extend(_summary_for_evidence_bundle(bundle))
     deduped: list[str] = []
     seen: set[str] = set()
@@ -474,7 +481,7 @@ def _execute_step(
             step_id=step.id,
             plane=step.plane,
             artifact_type="evidence_bundle",
-            summary=_summary_for_alert_bundle(incident.alertname, bundle),
+            summary=_summary_for_alert_bundle(incident.alertname, target.requested_target, bundle),
             limitations=list(bundle.limitations),
             evidence_bundle=bundle,
         )

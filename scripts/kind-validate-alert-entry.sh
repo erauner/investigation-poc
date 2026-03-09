@@ -260,6 +260,8 @@ for heading in required:
         raise AssertionError(f"missing heading: {heading}")
 if "PodCrashLooping" not in body:
     raise AssertionError("expected alert context in final output")
+if "pod/crashy" not in body:
+    raise AssertionError("expected original alert-derived target in final output")
 if pod_name not in body:
     raise AssertionError("expected resolved crashy pod context in final output")
 if "BackOff" not in body and "CrashLoopBackOff" not in body and "crash loop" not in body.lower():

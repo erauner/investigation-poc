@@ -150,6 +150,125 @@ def test_workload_findings_include_service_enrichment_when_present() -> None:
     assert "High Service Latency" in titles
 
 
+def test_workload_findings_prefer_init_container_blockage_over_podinitializing_noise() -> None:
+    findings = derive_findings(
+        "workload",
+        {
+            "kind": "pod",
+            "name": "toolbridge-api-migrate-j5wwf",
+            "initContainers": [
+                {
+                    "name": "wait-for-postgres",
+                    "waitingReason": "PodInitializing",
+                    "lastTerminationReason": "Error",
+                    "lastTerminationExitCode": 1,
+                    "restartCount": 1,
+                    "command": ["/bin/sh"],
+                    "args": ["/app/scripts/wait-for-postgres.sh"],
+                }
+            ],
+            "containers": [
+                {
+                    "name": "migrate",
+                    "waitingReason": "PodInitializing",
+                    "command": ["/bin/sh"],
+                    "args": ["/app/scripts/migrate.sh"],
+                }
+            ],
+        },
+        [],
+        "Waiting for postgres...\nconnection refused",
+        {},
+    )
+
+    titles = [item.title for item in findings]
+    assert titles[0] == "Init Container Dependency Blocked"
+    assert "Container Restart Failure Details" not in titles
+
+
+def test_explicit_pod_request_uses_init_block_likely_cause_when_init_container_is_stuck() -> None:
+    request = NormalizedInvestigationRequest(
+        source="manual",
+        scope="workload",
+        namespace="toolbridge",
+        target="pod/toolbridge-api-migrate-j5wwf",
+        profile="workload",
+        lookback_minutes=15,
+        normalization_notes=[],
+    )
+    report = build_root_cause_report(
+        CollectedContextResponse(
+            target=TargetRef(namespace="toolbridge", kind="pod", name="toolbridge-api-migrate-j5wwf"),
+            object_state={
+                "kind": "pod",
+                "name": "toolbridge-api-migrate-j5wwf",
+                "initContainers": [
+                    {
+                        "name": "wait-for-postgres",
+                        "waitingReason": "PodInitializing",
+                        "lastTerminationReason": "Error",
+                        "lastTerminationExitCode": 1,
+                        "restartCount": 1,
+                    }
+                ],
+                "containers": [{"name": "migrate", "waitingReason": "PodInitializing"}],
+            },
+            events=[],
+            log_excerpt="Waiting for postgres...\nconnection refused",
+            metrics={},
+            findings=[
+                Finding(
+                    severity="critical",
+                    source="k8s",
+                    title="Init Container Dependency Blocked",
+                    evidence=(
+                        "init container=wait-for-postgres, waiting reason=PodInitializing, "
+                        "termination reason=Error, exit code=1, restarts=1, "
+                        "init logs indicate dependency wait or connection failure"
+                    ),
+                )
+            ],
+            limitations=[],
+            enrichment_hints=[],
+        ),
+        request,
+    )
+
+    assert report.diagnosis == "Init Container Dependency Blocked"
+    assert report.likely_cause == (
+        "Init container 'wait-for-postgres' is blocked in PodInitializing, preventing the workload from completing startup."
+    )
+
+
+def test_workload_findings_use_runtime_pod_init_status_for_deployments() -> None:
+    findings = derive_findings(
+        "workload",
+        {
+            "kind": "deployment",
+            "name": "toolbridge-api-migrate",
+            "runtimePod": {
+                "kind": "pod",
+                "name": "toolbridge-api-migrate-j5wwf",
+                "initContainers": [
+                    {
+                        "name": "wait-for-postgres",
+                        "waitingReason": "PodInitializing",
+                        "lastTerminationReason": "Error",
+                        "lastTerminationExitCode": 1,
+                        "restartCount": 1,
+                    }
+                ],
+                "containers": [{"name": "migrate", "waitingReason": "PodInitializing"}],
+            },
+        },
+        [],
+        "Waiting for postgres...\nconnection refused",
+        {},
+    )
+
+    assert findings[0].title == "Init Container Dependency Blocked"
+
+
 def test_workload_service_degradation_outranks_generic_log_patterns() -> None:
     request = NormalizedInvestigationRequest(
         source="manual",

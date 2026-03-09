@@ -294,7 +294,7 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
     )
     node_name = req.node_name or _label_value(labels, "node", "node_name", "kubernetes_node", "instance")
     profile = req.profile
-    if profile == "workload" and (target.startswith("service/") or service_name):
+    if profile == "workload" and target.startswith("service/"):
         profile = "service"
         notes.append("profile promoted to service based on target")
 

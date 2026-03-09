@@ -8,6 +8,7 @@ from .models import (
     InvestigationTarget,
     NormalizedInvestigationRequest,
     StepArtifact,
+    ToolPathTrace,
 )
 
 
@@ -59,7 +60,10 @@ def align_target_with_primary_evidence(
         notes = list(aligned.normalization_notes)
 
     if evidence_ref.kind == "pod" and aligned.target.startswith("pod/") and aligned.target != f"pod/{evidence_ref.name}":
-        notes.append(f"resolved pod target to {evidence_ref.name}")
+        if aligned.source == "alert":
+            notes.append(f"alert-derived pod target resolved to pod/{evidence_ref.name}")
+        else:
+            notes.append(f"resolved pod target to {evidence_ref.name}")
         aligned = aligned.model_copy(update={"target": f"pod/{evidence_ref.name}", "normalization_notes": notes})
         notes = list(aligned.normalization_notes)
 
@@ -95,6 +99,16 @@ def build_investigation_state(
     change_candidates = _change_candidates_from_artifacts(artifacts)
     aligned_target = align_target_with_primary_evidence(updated_plan.target or initial_plan.target, primary_evidence)
     plan = updated_plan.model_copy(update={"target": aligned_target})
+    tool_path_trace = ToolPathTrace(
+        planner_path_used=bool(executions),
+        mode=plan.mode,
+        executed_batch_ids=[execution.batch_id for execution in executions],
+        executed_step_ids=[
+            step_id
+            for execution in executions
+            for step_id in execution.executed_step_ids
+        ],
+    )
     return InvestigationState(
         incident=incident,
         target=aligned_target,
@@ -103,4 +117,5 @@ def build_investigation_state(
         artifacts=artifacts,
         primary_evidence=primary_evidence,
         change_candidates=change_candidates,
+        tool_path_trace=tool_path_trace,
     )
