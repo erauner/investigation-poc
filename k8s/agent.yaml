@@ -1,7 +1,7 @@
 apiVersion: kagent.dev/v1alpha2
 kind: Agent
 metadata:
-  name: investigation-agent
+  name: incident-triage
   namespace: kagent
 spec:
   description: Read-only Kubernetes investigation assistant.

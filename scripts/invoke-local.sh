@@ -2,7 +2,7 @@
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-kagent}"
-AGENT_NAME="${AGENT_NAME:-investigation-agent}"
+AGENT_NAME="${AGENT_NAME:-incident-triage}"
 LOCAL_PORT="${LOCAL_PORT:-8083}"
 TASK="${*:-List pods in namespace kagent-smoke and tell me which one is unhealthy.}"
 

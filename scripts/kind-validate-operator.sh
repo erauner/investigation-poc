@@ -24,7 +24,7 @@ kind_stack_is_reusable() {
   kind get clusters | grep -qx "${KIND_CLUSTER_NAME}" || return 1
   kubectl config get-contexts "${KIND_CONTEXT}" >/dev/null 2>&1 || return 1
   kubectl --context "${KIND_CONTEXT}" -n kagent get deploy/investigation-mcp-server >/dev/null 2>&1 || return 1
-  kubectl --context "${KIND_CONTEXT}" -n kagent get agent/investigation-agent >/dev/null 2>&1 || return 1
+  kubectl --context "${KIND_CONTEXT}" -n kagent get agent/incident-triage >/dev/null 2>&1 || return 1
 }
 
 operator_stack_is_reusable() {

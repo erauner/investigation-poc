@@ -4,7 +4,7 @@ PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
 KIND_CONTEXT ?= kind-$(KIND_CLUSTER_NAME)
 KAGENT_NAMESPACE ?= kagent
-KAGENT_VERSION ?= 0.7.22
+KAGENT_VERSION ?= 0.7.23
 K8S_OVERLAY ?= k8s-overlays/local-kind
 HOST_PROMETHEUS_OVERLAY ?= k8s-overlays/local-kind-host-prometheus
 HTTP_DEBUG_OVERLAY ?= k8s-overlays/local-kind-optional-http
@@ -124,7 +124,7 @@ kind-install-kagent:
 		kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kube-state-metrics --timeout=180s; \
 	fi
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-mcp-server --timeout=180s
-	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/investigation-agent --timeout=180s
+	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/incident-triage --timeout=180s
 
 kind-install-operator:
 	@KIND_CLUSTER_NAME="$(KIND_CLUSTER_NAME)" KIND_CONTEXT="$(KIND_CONTEXT)" HOMELAB_OPERATOR_DIR="$(HOMELAB_OPERATOR_DIR)" OPERATOR_IMAGE="$(OPERATOR_IMAGE)" ./scripts/operator-install.sh

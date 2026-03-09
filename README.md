@@ -194,7 +194,7 @@ Use the kagent MCP server to list available agents and show their names.
 ```
 
 ```text
-Use the kagent MCP server to invoke kagent/investigation-agent.
+Use the kagent MCP server to invoke kagent/incident-triage.
 Task: Investigate the unhealthy pod in namespace kagent-smoke and return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
 ```
 

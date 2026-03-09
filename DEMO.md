@@ -4,7 +4,7 @@ This document is the repo-local demo and validation guide for the `investigation
 
 Use this repo when you want to prove the full local path with kind:
 
-`kind` -> `kagent` -> `investigation-agent` -> `investigation-mcp-server`
+`kind` -> `kagent` -> `incident-triage` -> `investigation-mcp-server`
 
 Keep this file aligned with the code and local manifests in this repository.
 
@@ -103,7 +103,7 @@ This installs:
 - `kagent-crds`
 - `kagent`
 - the local investigation MCP server and RBAC from `k8s/`
-- the local `investigation-agent`
+- the local `incident-triage`
 
 ### 3. Deploy the smoke workload
 
