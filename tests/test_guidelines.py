@@ -181,7 +181,7 @@ def test_resolve_guidelines_for_context_matches_legacy_resolution() -> None:
     assert artifact == legacy
 
 
-def test_build_investigation_report_applies_guidelines_without_mutating_diagnosis(monkeypatch) -> None:
+def test_render_investigation_report_applies_guidelines_without_mutating_diagnosis(monkeypatch) -> None:
     rules = [
         GuidelineRule.model_validate(
             {
@@ -313,7 +313,7 @@ def test_build_investigation_report_applies_guidelines_without_mutating_diagnosi
     )
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: (rules, []))
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(
             namespace="kagent",
             target="service/kagent-controller",

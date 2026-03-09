@@ -12,9 +12,7 @@ from .event_fingerprints import canonicalize_event_fingerprint
 from .guidelines import guideline_context_from_analysis, load_guideline_rules, resolve_guidelines_for_context
 from .k8s_adapter import get_backend_cr, get_cluster_cr, get_frontend_cr
 from .models import (
-    AlertInvestigationReportRequest,
     BuildInvestigationPlanRequest,
-    BuildRootCauseReportRequest,
     CorrelatedChange,
     EvidenceBatchExecution,
     ExecuteInvestigationStepRequest,
@@ -25,18 +23,16 @@ from .models import (
     InvestigationState,
     InvestigationTarget,
     ResolvedGuideline,
-    RootCauseReport,
     UpdateInvestigationPlanRequest,
 )
 from .planner import PlannerDeps
 from .routing import canonical_target, scope_from_target
 from .state import build_investigation_state as build_investigation_state_artifact
 from .tools import (
-    collect_alert_context,
-    collect_node_context,
-    collect_service_context,
-    collect_workload_context,
-    evidence_bundle_from_context,
+    collect_alert_evidence,
+    collect_node_evidence,
+    collect_service_evidence,
+    collect_workload_evidence,
     find_unhealthy_pod,
     normalize_alert_input,
 )
@@ -61,13 +57,10 @@ def _planner_deps() -> PlannerDeps:
         get_frontend_cr=get_frontend_cr,
         get_cluster_cr=get_cluster_cr,
         find_unhealthy_pod=find_unhealthy_pod,
-        collect_node_context=collect_node_context,
-        collect_service_context=collect_service_context,
-        collect_workload_context=collect_workload_context,
-        collect_alert_evidence=lambda req: evidence_bundle_from_context(collect_alert_context(req)),
-        collect_node_evidence=lambda req: evidence_bundle_from_context(collect_node_context(req)),
-        collect_service_evidence=lambda req: evidence_bundle_from_context(collect_service_context(req)),
-        collect_workload_evidence=lambda req: evidence_bundle_from_context(collect_workload_context(req)),
+        collect_alert_evidence=collect_alert_evidence,
+        collect_node_evidence=collect_node_evidence,
+        collect_service_evidence=collect_service_evidence,
+        collect_workload_evidence=collect_workload_evidence,
         collect_change_candidates=collect_change_candidates,
     )
 
@@ -111,7 +104,7 @@ def _filter_related_data_from_evidence(primary_evidence_items, changes: list[Cor
     return [], _EMPTY_RELATED_DATA_NOTE
 
 
-def _filter_related_data(report: RootCauseReport, changes: list[CorrelatedChange]) -> tuple[list[CorrelatedChange], str | None]:
+def _filter_related_data(report, changes: list[CorrelatedChange]) -> tuple[list[CorrelatedChange], str | None]:
     return _filter_related_data_from_evidence(report.evidence_items, changes)
 
 
@@ -306,33 +299,6 @@ def render_investigation_report_from_state(
     )
 
 
-def build_root_cause_report(req: BuildRootCauseReportRequest) -> RootCauseReport:
-    report = render_investigation_report(
-        InvestigationReportRequest(
-            cluster=req.cluster,
-            namespace=req.namespace,
-            target=req.target,
-            profile=req.profile,
-            service_name=req.service_name,
-            lookback_minutes=req.lookback_minutes,
-            include_related_data=False,
-        )
-    )
-    return RootCauseReport(
-        cluster=report.cluster,
-        scope=report.scope,
-        target=report.target,
-        diagnosis=report.diagnosis,
-        likely_cause=report.likely_cause,
-        confidence=report.confidence,
-        evidence=report.evidence,
-        evidence_items=report.evidence_items,
-        limitations=report.limitations,
-        recommended_next_step=report.recommended_next_step,
-        suggested_follow_ups=report.suggested_follow_ups,
-    )
-
-
 def normalize_incident_input(req: InvestigationReportRequest) -> InvestigationTarget:
     normalized = planner.normalized_request(req, _planner_deps())
     return planner.investigation_target_from_normalized(
@@ -358,28 +324,3 @@ def render_investigation_report(req: InvestigationReportRequest) -> Investigatio
         anchor_timestamp=req.anchor_timestamp,
         alertname=req.alertname,
     )
-
-
-def build_alert_investigation_report(req: AlertInvestigationReportRequest) -> InvestigationReport:
-    return render_investigation_report(
-        InvestigationReportRequest(
-            cluster=req.cluster,
-            namespace=req.namespace,
-            target=req.target,
-            profile=req.profile,
-            service_name=req.service_name,
-            lookback_minutes=req.lookback_minutes,
-            include_related_data=req.include_related_data,
-            correlation_window_minutes=req.correlation_window_minutes,
-            correlation_limit=req.correlation_limit,
-            anchor_timestamp=req.anchor_timestamp,
-            alertname=req.alertname,
-            labels=req.labels,
-            annotations=req.annotations,
-            node_name=req.node_name,
-        )
-    )
-
-
-def build_investigation_report(req: InvestigationReportRequest) -> InvestigationReport:
-    return render_investigation_report(req)

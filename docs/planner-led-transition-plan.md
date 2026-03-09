@@ -54,8 +54,22 @@ What is now true:
 What is still missing:
 
 - a real alert-plane artifact instead of alert-shaped runtime indirection
-- further cleanup of exploratory context surfaces from the intentional agent-visible catalog
-- agent/runtime behavior that intentionally prefers the planner-led path
+- stronger real-cluster validation around alert and init-container cases
+- clearer observability of which peer tool surfaces the agent actually chose during a run
+
+## Post-Slice-7 Validation Findings
+
+Recent homelab validation changed the shape of the remaining work:
+
+- the planner-led path is now working against a real cluster, not just kind
+- local/default cluster access now falls back cleanly to in-cluster auth when no multicluster kubeconfig is mounted
+- the remaining report-first and context-shaped backend surfaces have been removed
+- observability now shows that peer tool servers can satisfy an investigation without necessarily using the planner/control-plane path from `investigation-mcp-server`
+
+What this means:
+
+- the next problem is no longer legacy surface cleanup
+- the next problem is making real-cluster behavior correct and making tool-path choice observable enough to judge whether the planner-led path is being preferred appropriately
 
 ## Planned Surface Retirement
 
@@ -300,42 +314,62 @@ Validation gate:
 
 ### Slice 7: Remove Transitional Report-First And Context Surfaces
 
+Status: Completed
+
+Delivered:
+
+- removed `build_investigation_report` from the backend and public surfaces
+- removed `build_alert_investigation_report` from the backend and public surfaces
+- removed `collect_workload_context` from the backend and public surfaces
+- removed `collect_service_context` from the backend and public surfaces
+- removed `collect_node_context` from the backend and public surfaces
+- removed `collect_alert_context` from the backend and public surfaces
+- rewired `/investigate` and the remaining contract tests to the canonical `render_investigation_report` path
+- simplified planner dependencies so planning no longer carries dead context-collection seams
+
+Validation delivered:
+
+- route and MCP tests proving the removed surfaces are gone
+- service tests proving canonical ranking and rendering no longer depend on the deleted entrypoints
+- full local suite green after the deletion pass
+
+### Slice 8: Real-Cluster Correctness And Planner-Path Preference
+
 Status: Planned
 
-Once the planner-led kagent config is live and validated, remove the remaining transitional surfaces that no longer earn their keep:
+Now that the transitional surfaces are gone, the next slice should focus on what homelab validation actually exposed:
 
-- remove `build_investigation_report`
-- remove `build_alert_investigation_report`
-- remove `collect_workload_context`
-- remove `collect_service_context`
-- remove `collect_node_context`
-- remove `collect_alert_context`
-
-This slice should only proceed after the planner-led tool sequence is stable in e2e coverage. The goal is to stop carrying dual report-first and artifact-first entrypoints in the backend.
+- tighten diagnosis quality for real workload states such as init-container dependency blocks
+- strengthen alert-path correctness and preserve alert-derived context more explicitly
+- make tool-path choice observable enough to tell when `incident-triage` used:
+  - `investigation-mcp-server`
+  - `kagent-tools`
+  - other peer evidence tools
+- decide where the planner-led path should be preferred versus where peer evidence tools are acceptable first responders
 
 Validation gate:
 
-- route and MCP tests proving the removed surfaces are gone
-- service tests proving no canonical flow depends on the deleted entrypoints
-- kagent config and prompt no longer reference the removed tools anywhere
+- homelab investigations for real pods and services
+- visible proof of which peer tool surfaces were invoked during a run
+- corrected diagnosis for known real-cluster cases that previously returned misleading interpretations
 
 ## Immediate Recommendation
 
 The next implementation move should be:
 
-### Implement Slice 7
+### Implement Slice 8
 
 Why:
 
-- the planner-led mental model is now taught across the local agent and wrapper surfaces
-- the remaining duplicated legacy surface is primarily in transitional backend endpoints and context-shaped helpers
-- the next meaningful gain is deleting code and routes that no longer earn their keep
+- the deletion pass is complete, so the remaining risk is behavior quality rather than surface sprawl
+- homelab validation exposed real diagnosis gaps that kind-only tests would not catch
+- observability now shows that peer tool usage is part of the runtime story and needs to be measured intentionally
 
 What not to do yet:
 
-- do not expose a large raw evidence-plane surface yet
 - do not introduce a generic raw-tool orchestration layer
-- do not split MCP deployments
+- do not add more compatibility surfaces back into the backend
+- do not assume peer evidence-tool usage is bad by default; measure and judge it first
 
 ## End-State E2E Expectations
 

@@ -1,14 +1,12 @@
 from fastapi import FastAPI
 
 from .models import (
-    AlertInvestigationReportRequest,
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
     CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
-    CollectedContextResponse,
     CorrelatedChangesResponse,
     EvidenceBundle,
     EvidenceBatchExecution,
@@ -28,9 +26,7 @@ from .models import (
 )
 from .correlation import collect_change_candidates
 from .reporting import (
-    build_alert_investigation_report,
     build_investigation_plan as build_investigation_plan_from_request,
-    build_investigation_report,
     execute_investigation_step as execute_investigation_step_from_request,
     normalize_incident_input as normalize_incident_input_from_request,
     rank_hypotheses as rank_hypotheses_from_request,
@@ -39,13 +35,9 @@ from .reporting import (
     update_investigation_plan as update_investigation_plan_from_request,
 )
 from .tools import (
-    collect_alert_context,
     collect_alert_evidence,
-    collect_node_context,
     collect_node_evidence,
-    collect_service_context,
     collect_service_evidence,
-    collect_workload_context,
     collect_workload_evidence,
     find_unhealthy_pod,
     find_unhealthy_workloads,
@@ -58,16 +50,6 @@ app = FastAPI(title="Investigation Service", version="0.2.0")
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok"}
-
-
-@app.post("/tools/collect_workload_context", response_model=CollectedContextResponse)
-def collect_context(req: CollectContextRequest) -> CollectedContextResponse:
-    return collect_workload_context(req)
-
-
-@app.post("/tools/collect_alert_context", response_model=CollectedContextResponse)
-def collect_alert(req: CollectAlertContextRequest) -> CollectedContextResponse:
-    return collect_alert_context(req)
 
 
 @app.post("/tools/normalize_alert_input")
@@ -100,11 +82,6 @@ def update_plan(req: UpdateInvestigationPlanRequest) -> InvestigationPlan:
     return update_investigation_plan_from_request(req)
 
 
-@app.post("/tools/collect_node_context", response_model=CollectedContextResponse)
-def collect_node(req: CollectNodeContextRequest) -> CollectedContextResponse:
-    return collect_node_context(req)
-
-
 @app.post("/tools/collect_workload_evidence", response_model=EvidenceBundle)
 def collect_workload_bundle(req: CollectContextRequest) -> EvidenceBundle:
     return collect_workload_evidence(req)
@@ -118,11 +95,6 @@ def collect_alert_bundle(req: CollectAlertContextRequest) -> EvidenceBundle:
 @app.post("/tools/collect_node_evidence", response_model=EvidenceBundle)
 def collect_node_bundle(req: CollectNodeContextRequest) -> EvidenceBundle:
     return collect_node_evidence(req)
-
-
-@app.post("/tools/collect_service_context", response_model=CollectedContextResponse)
-def collect_service(req: CollectServiceContextRequest) -> CollectedContextResponse:
-    return collect_service_context(req)
 
 
 @app.post("/tools/collect_service_evidence", response_model=EvidenceBundle)
@@ -145,19 +117,9 @@ def rank_analysis(req: InvestigationReportRequest) -> InvestigationAnalysis:
     return rank_hypotheses_from_request(req)
 
 
-@app.post("/tools/build_investigation_report", response_model=InvestigationReport)
-def build_investigation(req: InvestigationReportRequest) -> InvestigationReport:
-    return build_investigation_report(req)
-
-
 @app.post("/tools/render_investigation_report", response_model=InvestigationReport)
 def render_report(req: InvestigationReportRequest) -> InvestigationReport:
     return render_investigation_report(req)
-
-
-@app.post("/tools/build_alert_investigation_report", response_model=InvestigationReport)
-def build_alert_investigation(req: AlertInvestigationReportRequest) -> InvestigationReport:
-    return build_alert_investigation_report(req)
 
 
 @app.post("/tools/collect_change_candidates", response_model=CorrelatedChangesResponse)
@@ -167,7 +129,7 @@ def collect_change_candidates_route(req: CollectCorrelatedChangesRequest) -> Cor
 
 @app.post("/investigate", response_model=InvestigationResponse)
 def investigate(req: InvestigateRequest) -> InvestigationResponse:
-    report = build_investigation_report(
+    report = render_investigation_report(
         InvestigationReportRequest(
             cluster=req.cluster,
             namespace=req.namespace,

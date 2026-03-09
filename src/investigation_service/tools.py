@@ -318,10 +318,6 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
     )
 
 
-def collect_workload_context(req: CollectContextRequest) -> CollectedContextResponse:
-    return _collect_context(req)
-
-
 def collect_workload_evidence(req: CollectContextRequest) -> EvidenceBundle:
     return collect_evidence_bundle(req)
 
@@ -346,18 +342,6 @@ def find_unhealthy_pod(req: FindUnhealthyPodRequest) -> UnhealthyPodResponse:
     )
 
 
-def collect_node_context(req: CollectNodeContextRequest) -> CollectedContextResponse:
-    return _collect_context(
-        CollectContextRequest(
-            cluster=req.cluster,
-            namespace=None,
-            target=f"node/{req.node_name}",
-            profile="workload",
-            lookback_minutes=req.lookback_minutes,
-        )
-    )
-
-
 def collect_node_evidence(req: CollectNodeContextRequest) -> EvidenceBundle:
     return collect_evidence_bundle(
         CollectContextRequest(
@@ -365,20 +349,6 @@ def collect_node_evidence(req: CollectNodeContextRequest) -> EvidenceBundle:
             namespace=None,
             target=f"node/{req.node_name}",
             profile="workload",
-            lookback_minutes=req.lookback_minutes,
-        )
-    )
-
-
-def collect_service_context(req: CollectServiceContextRequest) -> CollectedContextResponse:
-    target = _canonical_target(req.target or req.service_name, profile="service", service_name=req.service_name)
-    return _collect_context(
-        CollectContextRequest(
-            cluster=req.cluster,
-            namespace=req.namespace,
-            target=target,
-            profile="service",
-            service_name=req.service_name,
             lookback_minutes=req.lookback_minutes,
         )
     )
@@ -395,51 +365,6 @@ def collect_service_evidence(req: CollectServiceContextRequest) -> EvidenceBundl
             service_name=req.service_name,
             lookback_minutes=req.lookback_minutes,
         )
-    )
-
-
-def collect_alert_context(req: CollectAlertContextRequest) -> CollectedContextResponse:
-    normalized = normalize_alert_input(req)
-    if normalized.scope == "node" and normalized.node_name:
-        context = collect_node_context(
-            CollectNodeContextRequest(
-                cluster=normalized.cluster,
-                node_name=normalized.node_name,
-                lookback_minutes=normalized.lookback_minutes,
-            )
-        )
-    elif normalized.scope == "service" and normalized.service_name and normalized.namespace:
-        context = collect_service_context(
-            CollectServiceContextRequest(
-                cluster=normalized.cluster,
-                namespace=normalized.namespace,
-                service_name=normalized.service_name,
-                target=normalized.target,
-                lookback_minutes=normalized.lookback_minutes,
-            )
-        )
-    else:
-        context = collect_workload_context(
-            CollectContextRequest(
-                cluster=normalized.cluster,
-                namespace=normalized.namespace,
-                target=normalized.target,
-                profile=normalized.profile,
-                service_name=normalized.service_name,
-                lookback_minutes=normalized.lookback_minutes,
-            )
-        )
-
-    limitations = list(context.limitations)
-    limitations.append(f"alertname: {req.alertname}")
-    if req.annotations:
-        limitations.append("alert annotations supplied as investigation hints")
-    enrichment_hints = sorted(set(context.enrichment_hints + ["normalization completed before collection"]))
-    return context.model_copy(
-        update={
-            "limitations": sorted(set(limitations)),
-            "enrichment_hints": enrichment_hints,
-        }
     )
 
 

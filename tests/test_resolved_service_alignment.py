@@ -5,10 +5,10 @@ from investigation_service.models import (
     InvestigationAnalysis,
     InvestigationReportRequest,
 )
-from investigation_service.reporting import build_investigation_report
+from investigation_service.reporting import render_investigation_report
 
 
-def test_build_investigation_report_promotes_resolved_service_to_service_scope(monkeypatch) -> None:
+def test_render_investigation_report_promotes_resolved_service_to_service_scope(monkeypatch) -> None:
     monkeypatch.setattr(
         "investigation_service.reporting.execute_investigation_step",
         lambda _req: EvidenceBatchExecution(
@@ -86,7 +86,7 @@ def test_build_investigation_report_promotes_resolved_service_to_service_scope(m
         lambda: ([], []),
     )
 
-    report = build_investigation_report(
+    report = render_investigation_report(
         InvestigationReportRequest(
             namespace="observability",
             target="giraffe-kube-prometheus-st-prometheus",

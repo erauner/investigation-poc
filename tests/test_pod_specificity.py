@@ -78,7 +78,7 @@ def _capture_state(captured: dict, *, diagnosis: str, target: str, scope: str):
     return fake_rank
 
 
-def test_build_investigation_report_rewrites_explicit_pod_prefix_to_resolved_pod(monkeypatch) -> None:
+def test_render_investigation_report_rewrites_explicit_pod_prefix_to_resolved_pod(monkeypatch) -> None:
     captured = {}
     _patch_execution(
         monkeypatch,
@@ -100,14 +100,14 @@ def test_build_investigation_report_rewrites_explicit_pod_prefix_to_resolved_pod
         _capture_state(captured, diagnosis="Crash Loop Detected", target="pod/crashy-6f5689f4cd-czdlg", scope="workload"),
     )
 
-    reporting.build_investigation_report(
+    reporting.render_investigation_report(
         InvestigationReportRequest(namespace="kagent-smoke", target="pod/crashy", include_related_data=False)
     )
 
     assert captured["state"].target.target == "pod/crashy-6f5689f4cd-czdlg"
 
 
-def test_build_investigation_report_resolves_backend_target_to_deployment(monkeypatch) -> None:
+def test_render_investigation_report_resolves_backend_target_to_deployment(monkeypatch) -> None:
     captured = {}
     monkeypatch.setattr(
         reporting,
@@ -135,7 +135,7 @@ def test_build_investigation_report_resolves_backend_target_to_deployment(monkey
         _capture_state(captured, diagnosis="Crash Loop Detected", target="deployment/crashy", scope="workload"),
     )
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(namespace="operator-smoke", target="Backend/crashy", include_related_data=False)
     )
 
@@ -148,7 +148,7 @@ def test_build_investigation_report_resolves_backend_target_to_deployment(monkey
     assert report.target == "deployment/crashy"
 
 
-def test_build_investigation_report_resolves_frontend_target_to_deployment(monkeypatch) -> None:
+def test_render_investigation_report_resolves_frontend_target_to_deployment(monkeypatch) -> None:
     captured = {}
     monkeypatch.setattr(
         reporting,
@@ -176,7 +176,7 @@ def test_build_investigation_report_resolves_frontend_target_to_deployment(monke
         _capture_state(captured, diagnosis="No Critical Signals Found", target="deployment/landing", scope="workload"),
     )
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(namespace="operator-smoke", target="Frontend/landing", include_related_data=False)
     )
 
@@ -189,7 +189,7 @@ def test_build_investigation_report_resolves_frontend_target_to_deployment(monke
     assert report.target == "deployment/landing"
 
 
-def test_build_investigation_report_resolves_frontend_service_profile_to_service(monkeypatch) -> None:
+def test_render_investigation_report_resolves_frontend_service_profile_to_service(monkeypatch) -> None:
     captured = {}
     monkeypatch.setattr(
         reporting,
@@ -221,7 +221,7 @@ def test_build_investigation_report_resolves_frontend_service_profile_to_service
         _capture_state(captured, diagnosis="Elevated Error Rate", target="service/landing", scope="service"),
     )
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(
             namespace="operator-smoke",
             target="Frontend/landing",
@@ -239,7 +239,7 @@ def test_build_investigation_report_resolves_frontend_service_profile_to_service
     assert report.target == "service/landing"
 
 
-def test_build_investigation_report_resolves_cluster_target_to_failing_component(monkeypatch) -> None:
+def test_render_investigation_report_resolves_cluster_target_to_failing_component(monkeypatch) -> None:
     captured = {}
     monkeypatch.setattr(
         reporting,
@@ -278,7 +278,7 @@ def test_build_investigation_report_resolves_cluster_target_to_failing_component
         _capture_state(captured, diagnosis="Crash Loop Detected", target="deployment/api", scope="workload"),
     )
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(namespace="operator-smoke", target="Cluster/testapp", include_related_data=False)
     )
 
@@ -292,7 +292,7 @@ def test_build_investigation_report_resolves_cluster_target_to_failing_component
     assert report.target == "deployment/api"
 
 
-def test_build_investigation_report_resolves_cluster_service_profile_to_frontend_service(monkeypatch) -> None:
+def test_render_investigation_report_resolves_cluster_service_profile_to_frontend_service(monkeypatch) -> None:
     captured = {}
     monkeypatch.setattr(
         reporting,
@@ -331,7 +331,7 @@ def test_build_investigation_report_resolves_cluster_service_profile_to_frontend
         _capture_state(captured, diagnosis="Elevated Error Rate", target="service/landing", scope="service"),
     )
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(
             namespace="operator-smoke",
             target="Cluster/testapp",
@@ -350,7 +350,7 @@ def test_build_investigation_report_resolves_cluster_service_profile_to_frontend
     assert report.target == "service/landing"
 
 
-def test_build_investigation_report_rewrites_alert_shaped_pod_to_resolved_pod(monkeypatch) -> None:
+def test_render_investigation_report_rewrites_alert_shaped_pod_to_resolved_pod(monkeypatch) -> None:
     captured = {}
     _patch_execution(
         monkeypatch,
@@ -388,7 +388,7 @@ def test_build_investigation_report_rewrites_alert_shaped_pod_to_resolved_pod(mo
         _capture_state(captured, diagnosis="Crash Loop Detected", target="pod/crashy-6f5689f4cd-czdlg", scope="workload"),
     )
 
-    reporting.build_investigation_report(
+    reporting.render_investigation_report(
         InvestigationReportRequest(
             alertname="PodCrashLooping",
             namespace="kagent-smoke",

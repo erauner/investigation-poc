@@ -11,7 +11,6 @@ from investigation_service.models import (
     InvestigationReportRequest,
     InvestigationTarget,
     PlanStep,
-    RootCauseReport,
     StepArtifact,
     TargetRef,
 )
@@ -192,7 +191,7 @@ def _alert_execution() -> EvidenceBatchExecution:
     )
 
 
-def test_build_investigation_report_prefers_plan_target_fields(monkeypatch) -> None:
+def test_render_investigation_report_prefers_plan_target_fields(monkeypatch) -> None:
     correlation_request = {}
 
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda req: _plan())
@@ -218,7 +217,7 @@ def test_build_investigation_report_prefers_plan_target_fields(monkeypatch) -> N
         )[1],
     )
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(target="service/api", profile="service", include_related_data=True)
     )
 
@@ -231,7 +230,7 @@ def test_build_investigation_report_prefers_plan_target_fields(monkeypatch) -> N
     assert correlation_request["target"].target == "service/api-resolved"
 
 
-def test_build_investigation_report_uses_execution_artifacts_by_default(monkeypatch) -> None:
+def test_render_investigation_report_uses_execution_artifacts_by_default(monkeypatch) -> None:
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda req: _plan())
     monkeypatch.setattr(reporting, "execute_investigation_step", lambda req: _execution())
     monkeypatch.setattr(
@@ -265,7 +264,7 @@ def test_build_investigation_report_uses_execution_artifacts_by_default(monkeypa
     )
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(target="service/api", profile="service", include_related_data=False)
     )
 
@@ -274,7 +273,7 @@ def test_build_investigation_report_uses_execution_artifacts_by_default(monkeypa
     assert report.recommended_next_step == "artifact next step"
 
 
-def test_build_investigation_report_reuses_executed_change_artifacts(monkeypatch) -> None:
+def test_render_investigation_report_reuses_executed_change_artifacts(monkeypatch) -> None:
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda req: _plan())
     monkeypatch.setattr(reporting, "execute_investigation_step", lambda req: _execution(include_changes=True))
     monkeypatch.setattr(
@@ -289,14 +288,14 @@ def test_build_investigation_report_reuses_executed_change_artifacts(monkeypatch
         lambda target, **kwargs: (_ for _ in ()).throw(AssertionError("executed changes should be reused")),
     )
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(target="service/api", profile="service", include_related_data=True)
     )
 
     assert report.related_data[0].summary == "Deployment rollout"
 
 
-def test_build_investigation_report_softens_confidence_when_hypotheses_are_close(monkeypatch) -> None:
+def test_render_investigation_report_softens_confidence_when_hypotheses_are_close(monkeypatch) -> None:
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda req: _plan())
     monkeypatch.setattr(reporting, "execute_investigation_step", lambda req: _execution())
     monkeypatch.setattr(
@@ -339,7 +338,7 @@ def test_build_investigation_report_softens_confidence_when_hypotheses_are_close
     )
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(target="service/api", profile="service", include_related_data=False)
     )
 
@@ -351,37 +350,7 @@ def test_build_investigation_report_softens_confidence_when_hypotheses_are_close
     )
 
 
-def test_build_root_cause_report_is_alias_over_render(monkeypatch) -> None:
-    monkeypatch.setattr(
-        reporting,
-        "render_investigation_report",
-        lambda req: reporting.InvestigationReport(
-            cluster="artifact-cluster",
-            scope="service",
-            target="service/api-resolved",
-            diagnosis="Artifact analysis",
-            likely_cause="Artifact likely cause",
-            confidence="medium",
-            evidence=["artifact evidence"],
-            evidence_items=[],
-            related_data=[],
-            related_data_note=None,
-            limitations=[],
-            recommended_next_step="artifact next step",
-            suggested_follow_ups=[],
-            guidelines=[],
-            normalization_notes=["artifact-note"],
-        ),
-    )
-
-    report = reporting.build_root_cause_report(
-        reporting.BuildRootCauseReportRequest(target="service/api", profile="service")
-    )
-
-    assert report.diagnosis == "Artifact analysis"
-
-
-def test_build_investigation_report_preserves_alert_artifact_evidence(monkeypatch) -> None:
+def test_render_investigation_report_preserves_alert_artifact_evidence(monkeypatch) -> None:
     alert_target = InvestigationTarget(
         source="alert",
         scope="workload",
@@ -407,7 +376,7 @@ def test_build_investigation_report_preserves_alert_artifact_evidence(monkeypatc
     monkeypatch.setattr(reporting, "update_investigation_plan", lambda req: alert_plan)
     monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
 
-    report = reporting.build_investigation_report(
+    report = reporting.render_investigation_report(
         InvestigationReportRequest(
             alertname="PodCrashLooping",
             labels={"namespace": "artifact-ns", "pod": "crashy-abc123"},

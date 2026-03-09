@@ -3,7 +3,6 @@ import os
 from mcp.server.fastmcp import FastMCP
 
 from .models import (
-    AlertInvestigationReportRequest,
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
@@ -17,22 +16,16 @@ from .models import (
     UpdateInvestigationPlanRequest,
 )
 from .correlation import collect_change_candidates as collect_change_candidates_impl
-from .reporting import build_alert_investigation_report as build_alert_investigation_report_impl
 from .reporting import build_investigation_plan as build_investigation_plan_impl
-from .reporting import build_investigation_report as build_investigation_report_impl
 from .reporting import execute_investigation_step as execute_investigation_step_impl
 from .reporting import normalize_incident_input as normalize_incident_input_impl
 from .reporting import rank_hypotheses as rank_hypotheses_impl
 from .reporting import render_investigation_report as render_investigation_report_impl
 from .reporting import resolve_primary_target as resolve_primary_target_impl
 from .reporting import update_investigation_plan as update_investigation_plan_impl
-from .tools import collect_alert_context as collect_alert_context_impl
 from .tools import collect_alert_evidence as collect_alert_evidence_impl
-from .tools import collect_node_context as collect_node_context_impl
 from .tools import collect_node_evidence as collect_node_evidence_impl
-from .tools import collect_service_context as collect_service_context_impl
 from .tools import collect_service_evidence as collect_service_evidence_impl
-from .tools import collect_workload_context as collect_workload_context_impl
 from .tools import collect_workload_evidence as collect_workload_evidence_impl
 from .tools import find_unhealthy_pod as find_unhealthy_pod_impl
 from .tools import find_unhealthy_workloads as find_unhealthy_workloads_impl
@@ -44,60 +37,6 @@ mcp = FastMCP(
     port=int(os.getenv("MCP_PORT", "8001")),
     streamable_http_path=os.getenv("MCP_PATH", "/mcp"),
 )
-
-
-@mcp.tool()
-def collect_workload_context(
-    namespace: str,
-    target: str,
-    cluster: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 15,
-) -> dict:
-    """Collect structured workload context for exploratory drill-down. This is not part of the canonical planner-led control plane."""
-    response = collect_workload_context_impl(
-        CollectContextRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
-def collect_alert_context(
-    alertname: str,
-    labels: dict[str, str] | None = None,
-    annotations: dict[str, str] | None = None,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    node_name: str | None = None,
-    target: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 15,
-) -> dict:
-    """Collect structured context for an alert-shaped input by inferring the investigation target. Exploratory only; not a canonical control-plane step."""
-    response = collect_alert_context_impl(
-        CollectAlertContextRequest(
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            cluster=cluster,
-            namespace=namespace,
-            node_name=node_name,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-        )
-    )
-    return response.model_dump(mode="json")
 
 
 @mcp.tool()
@@ -258,15 +197,6 @@ def update_investigation_plan(plan: dict, execution: dict) -> dict:
 
 
 @mcp.tool()
-def collect_node_context(node_name: str, lookback_minutes: int = 15, cluster: str | None = None) -> dict:
-    """Collect structured context for a cluster node target as a lower-level exploratory follow-up tool."""
-    response = collect_node_context_impl(
-        CollectNodeContextRequest(cluster=cluster, node_name=node_name, lookback_minutes=lookback_minutes)
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
 def collect_workload_evidence(
     namespace: str,
     target: str,
@@ -314,27 +244,6 @@ def collect_alert_evidence(
             target=target,
             profile=profile,
             service_name=service_name,
-            lookback_minutes=lookback_minutes,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
-def collect_service_context(
-    namespace: str,
-    service_name: str,
-    cluster: str | None = None,
-    target: str | None = None,
-    lookback_minutes: int = 15,
-) -> dict:
-    """Collect structured context for a namespaced service target as a lower-level exploratory follow-up tool."""
-    response = collect_service_context_impl(
-        CollectServiceContextRequest(
-            cluster=cluster,
-            namespace=namespace,
-            service_name=service_name,
-            target=target,
             lookback_minutes=lookback_minutes,
         )
     )
@@ -446,45 +355,6 @@ def rank_hypotheses(
 
 
 @mcp.tool()
-def build_investigation_report(
-    target: str | None = None,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 15,
-    include_related_data: bool = True,
-    correlation_window_minutes: int = 60,
-    correlation_limit: int = 10,
-    anchor_timestamp: str | None = None,
-    alertname: str | None = None,
-    labels: dict[str, str] | None = None,
-    annotations: dict[str, str] | None = None,
-    node_name: str | None = None,
-) -> dict:
-    """Compatibility facade over the canonical render path for request-shaped callers. Do not treat this as the intentional agent-facing entrypoint in the planner-led model."""
-    response = build_investigation_report_impl(
-        InvestigationReportRequest(
-            cluster=cluster,
-            namespace=namespace,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-            include_related_data=include_related_data,
-            correlation_window_minutes=correlation_window_minutes,
-            correlation_limit=correlation_limit,
-            anchor_timestamp=anchor_timestamp,
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            node_name=node_name,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
 def render_investigation_report(
     target: str | None = None,
     cluster: str | None = None,
@@ -518,45 +388,6 @@ def render_investigation_report(
             labels=labels or {},
             annotations=annotations or {},
             node_name=node_name,
-        )
-    )
-    return response.model_dump(mode="json")
-
-
-@mcp.tool()
-def build_alert_investigation_report(
-    alertname: str,
-    labels: dict[str, str] | None = None,
-    annotations: dict[str, str] | None = None,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    node_name: str | None = None,
-    target: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 15,
-    include_related_data: bool = True,
-    correlation_window_minutes: int = 60,
-    correlation_limit: int = 10,
-    anchor_timestamp: str | None = None,
-) -> dict:
-    """Compatibility facade over the canonical render path for alert-shaped callers. Keep this as a wrapper, not as an intentional planner-led entrypoint."""
-    response = build_alert_investigation_report_impl(
-        AlertInvestigationReportRequest(
-            alertname=alertname,
-            labels=labels or {},
-            annotations=annotations or {},
-            cluster=cluster,
-            namespace=namespace,
-            node_name=node_name,
-            target=target,
-            profile=profile,
-            service_name=service_name,
-            lookback_minutes=lookback_minutes,
-            include_related_data=include_related_data,
-            correlation_window_minutes=correlation_window_minutes,
-            correlation_limit=correlation_limit,
-            anchor_timestamp=anchor_timestamp,
         )
     )
     return response.model_dump(mode="json")

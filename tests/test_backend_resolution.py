@@ -13,9 +13,6 @@ def _deps(**overrides) -> PlannerDeps:
         get_frontend_cr=lambda namespace, name, cluster=None: {},
         get_cluster_cr=lambda namespace, name, cluster=None: {},
         find_unhealthy_pod=lambda req: None,
-        collect_node_context=lambda req: None,
-        collect_service_context=lambda req: None,
-        collect_workload_context=lambda req: None,
     )
     return PlannerDeps(**{**base.__dict__, **overrides})
 

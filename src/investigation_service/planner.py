@@ -46,9 +46,6 @@ class PlannerDeps:
     get_frontend_cr: Callable[..., dict]
     get_cluster_cr: Callable[..., dict]
     find_unhealthy_pod: Callable[[FindUnhealthyPodRequest], Any]
-    collect_node_context: Callable[[CollectNodeContextRequest], Any]
-    collect_service_context: Callable[[CollectServiceContextRequest], Any]
-    collect_workload_context: Callable[[CollectContextRequest], Any]
     collect_alert_evidence: Callable[[CollectAlertContextRequest], EvidenceBundle] = field(
         default=lambda req: (_ for _ in ()).throw(AssertionError("unexpected alert evidence collection"))
     )

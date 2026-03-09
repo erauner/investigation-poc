@@ -65,13 +65,6 @@ def _deps(calls: list[str] | None = None) -> PlannerDeps:
         get_frontend_cr=lambda *args, **kwargs: calls.append("get_frontend_cr") or {},
         get_cluster_cr=lambda *args, **kwargs: calls.append("get_cluster_cr") or {},
         find_unhealthy_pod=lambda req: calls.append("find_unhealthy_pod") or None,
-        collect_node_context=lambda req: (_ for _ in ()).throw(AssertionError("planning must not collect node context")),
-        collect_service_context=lambda req: (_ for _ in ()).throw(
-            AssertionError("planning must not collect service context")
-        ),
-        collect_workload_context=lambda req: (_ for _ in ()).throw(
-            AssertionError("planning must not collect workload context")
-        ),
         collect_alert_evidence=lambda req: calls.append("collect_alert_evidence")
         or _bundle(kind="pod", name="api-alert", findings=[Finding(severity="warning", source="events", title="Alert fired", evidence="alert evidence")]),
         collect_node_evidence=lambda req: calls.append("collect_node_evidence") or _bundle(kind="node", name=req.node_name),

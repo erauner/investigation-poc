@@ -10,12 +10,10 @@ from investigation_service.k8s_adapter import find_unhealthy_workloads as find_u
 from investigation_service.k8s_adapter import get_k8s_object
 from investigation_service.main import app
 from investigation_service.models import (
-    AlertInvestigationReportRequest,
     BuildInvestigationPlanRequest,
     BuildRootCauseReportRequest,
     CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
-    CollectServiceContextRequest,
     CollectedContextResponse,
     CorrelatedChangesResponse,
     EvidenceBundle,
@@ -27,18 +25,15 @@ from investigation_service.models import (
     InvestigationReport,
     InvestigationReportRequest,
     InvestigationTarget,
-    RootCauseReport,
     TargetRef,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
 from investigation_service.reporting import (
-    build_alert_investigation_report,
-    build_investigation_report,
-    build_root_cause_report as build_root_cause_report_from_request,
+    render_investigation_report,
 )
 from investigation_service.synthesis import build_root_cause_report
-from investigation_service.tools import collect_service_context, normalize_alert_input
+from investigation_service.tools import normalize_alert_input
 from investigation_service.tools import evidence_bundle_from_context, render_collected_context
 
 
@@ -75,11 +70,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def test_collect_context_accepts_profile_fields(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.collect_workload_context",
-        lambda _req: _sample_response(TargetRef(namespace="default", kind="pod", name="api-123")),
-    )
+def test_collect_workload_context_route_is_removed_from_public_surface() -> None:
     client = TestClient(app)
 
     response = client.post(
@@ -93,11 +84,31 @@ def test_collect_context_accepts_profile_fields(monkeypatch) -> None:
         },
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["target"]["name"] == "api-123"
-    assert body["limitations"] == ["metric unavailable: service_latency_p95_seconds"]
-    assert body["enrichment_hints"]
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/tools/collect_node_context", {"node_name": "worker3"}),
+        ("/tools/collect_service_context", {"namespace": "kagent", "service_name": "kagent-controller"}),
+        (
+            "/tools/collect_alert_context",
+            {"alertname": "PodCrashLooping", "labels": {"namespace": "kagent-smoke", "pod": "api-123"}},
+        ),
+        ("/tools/build_investigation_report", {"namespace": "kagent-smoke", "target": "pod/crashy-abc123"}),
+        (
+            "/tools/build_alert_investigation_report",
+            {"alertname": "PodCrashLooping", "labels": {"namespace": "kagent-smoke", "pod": "crashy-abc123"}},
+        ),
+    ],
+)
+def test_removed_slice7_routes_are_not_public(path: str, payload: dict) -> None:
+    client = TestClient(app)
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 404
 
 
 def test_build_investigation_plan_route_returns_plan(monkeypatch) -> None:
@@ -249,7 +260,7 @@ def test_update_investigation_plan_route_returns_plan(monkeypatch) -> None:
 
 def test_investigate_includes_limitations(monkeypatch) -> None:
     monkeypatch.setattr(
-        "investigation_service.main.build_investigation_report",
+        "investigation_service.main.render_investigation_report",
         lambda _req: InvestigationReport(
             scope="service",
             target="deployment/api",
@@ -467,41 +478,6 @@ def test_resolve_primary_target_route_returns_target_artifact(monkeypatch) -> No
     assert body["target"] == "pod/crashy-abc123"
 
 
-def test_collect_node_context_route_returns_context(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.collect_node_context",
-        lambda _req: _sample_response(TargetRef(namespace=None, kind="node", name="worker3")),
-    )
-    client = TestClient(app)
-
-    response = client.post("/tools/collect_node_context", json={"node_name": "worker3"})
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["target"] == {"namespace": None, "kind": "node", "name": "worker3"}
-
-
-def test_collect_service_context_route_returns_context(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.collect_service_context",
-        lambda _req: _sample_response(TargetRef(namespace="kagent", kind="service", name="kagent-controller")),
-    )
-    client = TestClient(app)
-
-    response = client.post(
-        "/tools/collect_service_context",
-        json={"namespace": "kagent", "service_name": "kagent-controller"},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["target"] == {
-        "namespace": "kagent",
-        "kind": "service",
-        "name": "kagent-controller",
-    }
-
-
 def test_collect_workload_evidence_route_returns_bundle(monkeypatch) -> None:
     monkeypatch.setattr(
         "investigation_service.main.collect_workload_evidence",
@@ -555,27 +531,6 @@ def test_collect_alert_evidence_route_returns_bundle(monkeypatch) -> None:
     body = response.json()
     assert body["target"]["name"] == "crashy-abc123"
     assert "alertname: PodCrashLooping" in body["limitations"]
-
-
-def test_collect_service_context_canonicalizes_bare_service_target(monkeypatch) -> None:
-    captured = {}
-
-    def fake_collect(_req):
-        captured["target"] = _req.target
-        return _sample_response(TargetRef(namespace="kagent", kind="service", name="kagent-controller"))
-
-    monkeypatch.setattr("investigation_service.tools._collect_context", fake_collect)
-
-    response = collect_service_context(
-        CollectServiceContextRequest(
-            namespace="kagent",
-            service_name="kagent-controller",
-            target="kagent-controller",
-        )
-    )
-
-    assert captured["target"] == "service/kagent-controller"
-    assert response.target.kind == "service"
 
 
 def test_find_unhealthy_workloads_route_returns_candidates(monkeypatch) -> None:
@@ -681,50 +636,6 @@ def test_find_unhealthy_workloads_prefers_crashlooping_pods(monkeypatch) -> None
     assert response.candidates[0].reason == "CrashLoopBackOff"
 
 
-def test_collect_alert_context_route_returns_context(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.collect_alert_context",
-        lambda _req: CollectedContextResponse(
-            target=TargetRef(namespace="kagent-smoke", kind="pod", name="api-123"),
-            object_state={"namespace": "kagent-smoke", "kind": "pod", "name": "api-123"},
-            events=["BackOff restarting failed container"],
-            log_excerpt="starting",
-            metrics={"prometheus_available": True},
-            findings=[
-                Finding(
-                    severity="critical",
-                    source="events",
-                    title="Crash Loop Detected",
-                    evidence="Events indicate BackOff/CrashLoopBackOff behavior",
-                )
-            ],
-            limitations=["alertname: PodCrashLooping"],
-            enrichment_hints=["normalization completed before collection"],
-        ),
-    )
-    client = TestClient(app)
-
-    response = client.post(
-        "/tools/collect_alert_context",
-        json={
-            "alertname": "PodCrashLooping",
-            "labels": {
-                "namespace": "kagent-smoke",
-                "pod": "api-123",
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["target"] == {
-        "namespace": "kagent-smoke",
-        "kind": "pod",
-        "name": "api-123",
-    }
-    assert "alertname: PodCrashLooping" in body["limitations"]
-
-
 def test_build_root_cause_report_route_is_removed_from_public_surface() -> None:
     client = TestClient(app)
 
@@ -780,47 +691,6 @@ def test_collect_change_candidates_route_returns_ranked_changes(monkeypatch) -> 
     body = response.json()
     assert body["target"] == "pod/crashy-abc123"
     assert body["changes"][0]["confidence"] == "high"
-
-
-def test_build_investigation_report_route_returns_typed_report(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.build_investigation_report",
-        lambda _req: InvestigationReport(
-            scope="workload",
-            target="pod/crashy-abc123",
-            diagnosis="Container Restart Failure Details",
-            likely_cause="Container is exiting with code 1, which is causing repeated CrashLoopBackOff restarts.",
-            confidence="high",
-            evidence=["k8s: Container Restart Failure Details - exit code=1"],
-            evidence_items=[
-                EvidenceItem(
-                    fingerprint="finding|workload|container restart failure details|exit code=1",
-                    source="k8s",
-                    kind="finding",
-                    severity="critical",
-                    summary="k8s: Container Restart Failure Details",
-                    detail="exit code=1",
-                )
-            ],
-            related_data=[],
-            related_data_note="no meaningful correlated changes found in the requested time window",
-            limitations=[],
-            recommended_next_step="Confirm the failure with describe output, recent logs, and rollout history before taking write actions.",
-            suggested_follow_ups=[],
-            normalization_notes=["target normalized from manual request"],
-        ),
-    )
-    client = TestClient(app)
-
-    response = client.post(
-        "/tools/build_investigation_report",
-        json={"namespace": "kagent-smoke", "target": "pod/crashy-abc123"},
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["target"] == "pod/crashy-abc123"
-    assert body["evidence_items"][0]["fingerprint"].startswith("finding|workload|")
 
 
 def test_rank_hypotheses_route_returns_analysis(monkeypatch) -> None:
@@ -889,79 +759,6 @@ def test_render_investigation_report_route_returns_typed_report(monkeypatch) -> 
     body = response.json()
     assert body["target"] == "pod/crashy-abc123"
     assert body["diagnosis"] == "Crash Loop Detected"
-
-
-def test_build_alert_investigation_report_wrapper_maps_into_shared_report_flow(monkeypatch) -> None:
-    captured = {}
-
-    def fake_render_investigation_report(req):
-        captured["request"] = req
-        return InvestigationReport(
-            scope="workload",
-            target="pod/crashy-abc123",
-            diagnosis="Crash Loop Detected",
-            likely_cause="The pod is repeatedly failing shortly after start, so Kubernetes is backing off restarts.",
-            confidence="high",
-            evidence=["events: Crash Loop Detected - Events indicate BackOff/CrashLoopBackOff behavior"],
-            evidence_items=[],
-            related_data=[],
-            related_data_note="no meaningful correlated changes found in the requested time window",
-            limitations=[],
-            recommended_next_step="Confirm the failure with describe output, recent logs, and rollout history before taking write actions.",
-            suggested_follow_ups=[],
-            normalization_notes=["alertname=PodCrashLooping"],
-        )
-
-    monkeypatch.setattr("investigation_service.reporting.render_investigation_report", fake_render_investigation_report)
-
-    report = build_alert_investigation_report(
-        AlertInvestigationReportRequest(
-            alertname="PodCrashLooping",
-            labels={"namespace": "kagent-smoke", "pod": "crashy-abc123"},
-            include_related_data=False,
-        )
-    )
-
-    req = captured["request"]
-    assert req.alertname == "PodCrashLooping"
-    assert req.labels["pod"] == "crashy-abc123"
-    assert req.include_related_data is False
-    assert report.normalization_notes == ["alertname=PodCrashLooping"]
-
-
-def test_build_alert_investigation_report_route_returns_typed_report(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.build_alert_investigation_report",
-        lambda _req: InvestigationReport(
-            scope="workload",
-            target="pod/crashy-abc123",
-            diagnosis="Crash Loop Detected",
-            likely_cause="The pod is repeatedly failing shortly after start, so Kubernetes is backing off restarts.",
-            confidence="high",
-            evidence=["events: Crash Loop Detected - Events indicate BackOff/CrashLoopBackOff behavior"],
-            evidence_items=[],
-            related_data=[],
-            related_data_note="no meaningful correlated changes found in the requested time window",
-            limitations=[],
-            recommended_next_step="Confirm the failure with describe output, recent logs, and rollout history before taking write actions.",
-            suggested_follow_ups=[],
-            normalization_notes=["alertname=PodCrashLooping"],
-        ),
-    )
-    client = TestClient(app)
-
-    response = client.post(
-        "/tools/build_alert_investigation_report",
-        json={
-            "alertname": "PodCrashLooping",
-            "labels": {"namespace": "kagent-smoke", "pod": "crashy-abc123"},
-        },
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["target"] == "pod/crashy-abc123"
-    assert body["normalization_notes"] == ["alertname=PodCrashLooping"]
 
 
 def test_node_findings_distinguish_request_saturation_from_pressure() -> None:
@@ -1053,7 +850,7 @@ def test_build_root_cause_report_prefers_direct_restart_evidence() -> None:
     assert report.evidence_items
 
 
-def test_build_root_cause_report_from_request_collects_node_context(monkeypatch) -> None:
+def test_render_investigation_report_from_request_collects_node_evidence(monkeypatch) -> None:
     monkeypatch.setattr("investigation_service.reporting.load_guideline_rules", lambda: ([], []))
     monkeypatch.setattr(
         "investigation_service.reporting.execute_investigation_step",
@@ -1095,8 +892,8 @@ def test_build_root_cause_report_from_request_collects_node_context(monkeypatch)
         lambda req: req.plan.model_copy(update={"active_batch_id": None}),
     )
 
-    report = build_root_cause_report_from_request(
-        BuildRootCauseReportRequest(target="node/worker3", lookback_minutes=20)
+    report = render_investigation_report(
+        InvestigationReportRequest(target="node/worker3", lookback_minutes=20, include_related_data=False)
     )
 
     assert report.scope == "node"
@@ -1104,7 +901,7 @@ def test_build_root_cause_report_from_request_collects_node_context(monkeypatch)
     assert report.diagnosis == "Node Not Ready"
 
 
-def test_build_root_cause_report_from_request_canonicalizes_service_target(monkeypatch) -> None:
+def test_render_investigation_report_from_request_canonicalizes_service_target(monkeypatch) -> None:
     captured = {}
 
     monkeypatch.setattr("investigation_service.reporting.load_guideline_rules", lambda: ([], []))
@@ -1155,12 +952,13 @@ def test_build_root_cause_report_from_request_canonicalizes_service_target(monke
         lambda req: req.plan.model_copy(update={"active_batch_id": None}),
     )
 
-    report = build_root_cause_report_from_request(
-        BuildRootCauseReportRequest(
+    report = render_investigation_report(
+        InvestigationReportRequest(
             namespace="observability",
             target="giraffe-kube-prometheus-st-prometheus",
             profile="service",
             service_name="giraffe-kube-prometheus-st-prometheus",
+            include_related_data=False,
         )
     )
 
@@ -1281,7 +1079,7 @@ def test_collect_correlated_changes_for_target_matches_request_wrapper(monkeypat
     assert via_target == via_request
 
 
-def test_build_investigation_report_dedupes_related_changes(monkeypatch) -> None:
+def test_render_investigation_report_dedupes_related_changes(monkeypatch) -> None:
     monkeypatch.setattr("investigation_service.reporting.load_guideline_rules", lambda: ([], []))
     monkeypatch.setattr(
         "investigation_service.reporting.execute_investigation_step",
@@ -1349,7 +1147,7 @@ def test_build_investigation_report_dedupes_related_changes(monkeypatch) -> None
         lambda req: req.plan.model_copy(update={"active_batch_id": None}),
     )
 
-    report = build_investigation_report(
+    report = render_investigation_report(
         InvestigationReportRequest(namespace="kagent-smoke", target="pod/crashy-abc123")
     )
 
@@ -1357,7 +1155,7 @@ def test_build_investigation_report_dedupes_related_changes(monkeypatch) -> None
     assert report.related_data_note == "all correlated changes duplicated primary evidence"
 
 
-def test_build_investigation_report_keeps_empty_related_note_out_of_limitations(monkeypatch) -> None:
+def test_render_investigation_report_keeps_empty_related_note_out_of_limitations(monkeypatch) -> None:
     monkeypatch.setattr("investigation_service.reporting.load_guideline_rules", lambda: ([], []))
     monkeypatch.setattr(
         "investigation_service.reporting.execute_investigation_step",
@@ -1413,7 +1211,7 @@ def test_build_investigation_report_keeps_empty_related_note_out_of_limitations(
         lambda req: req.plan.model_copy(update={"active_batch_id": None}),
     )
 
-    report = build_investigation_report(
+    report = render_investigation_report(
         InvestigationReportRequest(namespace="kagent-smoke", target="pod/crashy-abc123")
     )
 
