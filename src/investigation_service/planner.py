@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from .execution_policy import policy_fields
 from .models import (
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
@@ -564,6 +565,7 @@ def _primary_evidence_step(target: InvestigationTarget) -> PlanStep:
             plane="node",
             rationale="Gather current node state, events, logs, and metrics for the resolved node target.",
             suggested_capability="node_evidence_plane",
+            **policy_fields("node_evidence_plane"),
         )
     if target.scope == "service":
         return PlanStep(
@@ -573,6 +575,7 @@ def _primary_evidence_step(target: InvestigationTarget) -> PlanStep:
             plane="service",
             rationale="Gather service-scoped state, metrics, and recent signals for the resolved service target.",
             suggested_capability="service_evidence_plane",
+            **policy_fields("service_evidence_plane"),
         )
     return PlanStep(
         id="collect-target-evidence",
@@ -581,6 +584,7 @@ def _primary_evidence_step(target: InvestigationTarget) -> PlanStep:
         plane="workload",
         rationale="Gather workload state, events, logs, and metrics for the resolved primary target.",
         suggested_capability="workload_evidence_plane",
+        **policy_fields("workload_evidence_plane"),
     )
 
 
@@ -596,6 +600,7 @@ def _alert_plan(
             plane="alert",
             rationale="Preserve alert-specific context before drilling into the runtime target.",
             suggested_capability="alert_evidence_plane",
+            **policy_fields("alert_evidence_plane"),
         ),
         _primary_evidence_step(target),
         PlanStep(
@@ -605,6 +610,7 @@ def _alert_plan(
             plane="changes",
             rationale="Review recent changes around the alert window before forming conclusions.",
             suggested_capability="collect_change_candidates",
+            **policy_fields("collect_change_candidates"),
         ),
         PlanStep(
             id="rank-hypotheses",
@@ -614,6 +620,7 @@ def _alert_plan(
             status="deferred",
             rationale="Analyze the collected evidence and rank the most plausible explanations.",
             suggested_capability="rank_hypotheses",
+            **policy_fields("rank_hypotheses"),
             depends_on=["collect-alert-evidence", "collect-target-evidence", "collect-change-candidates"],
         ),
         PlanStep(
@@ -624,6 +631,7 @@ def _alert_plan(
             status="deferred",
             rationale="Render the final investigation report after evidence has been gathered and analyzed.",
             suggested_capability="render_investigation_report",
+            **policy_fields("render_investigation_report"),
             depends_on=["rank-hypotheses"],
         ),
     ]
@@ -670,6 +678,7 @@ def _targeted_plan(req: BuildInvestigationPlanRequest, target: InvestigationTarg
             plane="changes",
             rationale="Review recent changes related to the target before forming conclusions.",
             suggested_capability="collect_change_candidates",
+            **policy_fields("collect_change_candidates"),
         ),
         PlanStep(
             id="rank-hypotheses",
@@ -679,6 +688,7 @@ def _targeted_plan(req: BuildInvestigationPlanRequest, target: InvestigationTarg
             status="deferred",
             rationale="Analyze the gathered evidence and rank the most plausible explanations.",
             suggested_capability="rank_hypotheses",
+            **policy_fields("rank_hypotheses"),
             depends_on=["collect-target-evidence", "collect-change-candidates"],
         ),
         PlanStep(
@@ -689,6 +699,7 @@ def _targeted_plan(req: BuildInvestigationPlanRequest, target: InvestigationTarg
             status="deferred",
             rationale="Render the final investigation report after evidence has been gathered and analyzed.",
             suggested_capability="render_investigation_report",
+            **policy_fields("render_investigation_report"),
             depends_on=["rank-hypotheses"],
         ),
     ]
@@ -737,6 +748,7 @@ def _factual_plan(
             plane="factual",
             rationale="Gather the primary factual evidence needed to answer the question without defaulting to RCA semantics.",
             suggested_capability=None,
+            **policy_fields(None),
         ),
         PlanStep(
             id="summarize-findings",
@@ -746,6 +758,7 @@ def _factual_plan(
             status="deferred",
             rationale="Summarize the gathered findings once enough factual evidence has been collected.",
             suggested_capability=None,
+            **policy_fields(None),
             depends_on=["collect-factual-evidence"],
         ),
     ]
@@ -834,6 +847,7 @@ def _insert_service_follow_up(plan: InvestigationPlan) -> InvestigationPlan:
         plane="service",
         rationale="Collect one additional bounded service evidence batch before analysis when the primary workload evidence is inconclusive.",
         suggested_capability="service_evidence_plane",
+        **policy_fields("service_evidence_plane"),
         depends_on=["collect-target-evidence"],
     )
     follow_up_batch = EvidenceBatch(

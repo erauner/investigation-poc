@@ -122,8 +122,40 @@ def test_build_investigation_plan_creates_targeted_plan_without_collecting_evide
         "rank-hypotheses",
         "render-report",
     ]
+    target_step = next(step for step in plan.steps if step.id == "collect-target-evidence")
+    assert target_step.suggested_capability == "workload_evidence_plane"
+    assert target_step.preferred_mcp_server == "kubernetes-mcp-server"
+    assert "pods_log" in target_step.preferred_tool_names
     assert [batch.id for batch in plan.evidence_batches] == ["batch-1", "batch-2", "batch-3"]
     assert calls == ["canonical_target", "scope_from_target"]
+
+
+def test_build_investigation_plan_sets_metrics_first_policy_for_service_targets() -> None:
+    calls: list[str] = []
+    deps = _deps(calls)
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "scope_from_target": lambda target, profile: calls.append("scope_from_target") or "service",
+        }
+    )
+
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(
+            namespace="default",
+            target="service/api",
+            profile="service",
+            service_name="api",
+        ),
+        deps,
+    )
+
+    target_step = next(step for step in plan.steps if step.id == "collect-target-evidence")
+    assert target_step.suggested_capability == "service_evidence_plane"
+    assert target_step.preferred_mcp_server == "prometheus-mcp-server"
+    assert target_step.preferred_tool_names == ["execute_query", "execute_range_query"]
+    assert target_step.fallback_mcp_server == "kubernetes-mcp-server"
+    assert target_step.fallback_tool_names == ["resources_get", "events_list"]
 
 
 def test_build_investigation_plan_resolves_convenience_targets_before_plan_construction() -> None:

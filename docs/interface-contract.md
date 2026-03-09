@@ -61,6 +61,24 @@ For backend tool surfaces, prefer the planner-led control plane when available:
 - alert-shaped investigations should preserve alert routing, but still treat `render_investigation_report` as the canonical final report surface
 - direct logs, events, resource inspection, metrics queries, alert queries, and exemplar lookups should be treated as evidence-plane work, not as replacements for planning or final rendering
 
+The current capability-to-tool policy is:
+
+- `workload_evidence_plane`
+  - prefer `kubernetes-mcp-server`
+  - use tools such as `pods_log`, `resources_get`, `events_list`, `pods_list_in_namespace`
+- `service_evidence_plane`
+  - prefer `prometheus-mcp-server`
+  - use tools such as `execute_query`, `execute_range_query`
+  - fall back to `kubernetes-mcp-server` for runtime inspection
+- `node_evidence_plane`
+  - prefer `prometheus-mcp-server`
+  - use tools such as `execute_query`, `execute_range_query`
+  - fall back to `kubernetes-mcp-server` for runtime inspection
+- `alert_evidence_plane`
+  - stays product-owned for alert extraction and alert-shaped context
+- `collect_change_candidates`, `rank_hypotheses`, and `render_investigation_report`
+  - stay product-owned on `investigation-mcp-server`
+
 ## Client-side routing
 
 Clients should preserve one small, deterministic routing rule before handing work to the controller-backed agent path.

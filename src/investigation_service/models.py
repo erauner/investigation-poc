@@ -104,6 +104,10 @@ class PlanStep(BaseModel):
     status: PlanStatus = "pending"
     rationale: str
     suggested_capability: str | None = None
+    preferred_mcp_server: str | None = None
+    preferred_tool_names: list[str] = Field(default_factory=list)
+    fallback_mcp_server: str | None = None
+    fallback_tool_names: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
 
 
