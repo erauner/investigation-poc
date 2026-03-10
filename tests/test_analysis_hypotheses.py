@@ -1,6 +1,7 @@
 from investigation_service.analysis import (
     adjusted_confidence_from_hypotheses,
     ambiguity_limitations_from_hypotheses,
+    build_primary_evidence_from_bundle,
     build_investigation_analysis,
     follow_ups_from_hypotheses,
 )
@@ -135,3 +136,39 @@ def test_close_secondary_hypotheses_reduce_confidence_and_add_follow_up() -> Non
     assert follow_ups_from_hypotheses(analysis) == [
         "Validate the leading hypothesis against the next most plausible cause before taking write actions."
     ]
+
+
+def test_build_primary_evidence_from_bundle_surfaces_node_top_pod_summary() -> None:
+    bundle = EvidenceBundle(
+        cluster="erauner-home",
+        target=TargetRef(namespace=None, kind="node", name="worker3"),
+        object_state={
+            "kind": "node",
+            "name": "worker3",
+            "conditions": [],
+            "top_pods_by_memory_request": [
+                {"namespace": "operator-smoke", "name": "api-0", "memory_request_bytes": 536870912}
+            ],
+        },
+        events=["Warning DiskPressure node/worker3"],
+        log_excerpt="",
+        metrics={
+            "node_memory_allocatable_bytes": 100.0,
+            "node_memory_working_set_bytes": 40.0,
+            "node_memory_request_bytes": 90.0,
+        },
+        findings=[
+            Finding(
+                severity="warning",
+                source="prometheus",
+                title="High Node Memory Request Saturation",
+                evidence="Memory requests are at 90.0% of allocatable capacity",
+            )
+        ],
+        limitations=[],
+        enrichment_hints=[],
+    )
+
+    evidence_items = build_primary_evidence_from_bundle(bundle, "node")
+
+    assert any(item.summary == "k8s: Top Node Memory Request Consumers" for item in evidence_items)

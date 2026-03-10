@@ -10,6 +10,7 @@ from investigation_service.submission_materialization import (
     materialize_service_submission,
 )
 from .mcp_clients import KubernetesMcpClient, PeerMcpError, PrometheusMcpClient
+from .node_scout import maybe_run_bounded_node_scout
 from .service_scout import maybe_run_bounded_service_follow_up_scout
 from .workload_scout import materialize_workload_snapshot, maybe_run_bounded_workload_scout
 
@@ -187,7 +188,7 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
                     f"kubernetes peer fallback failed: {kube_exc}",
                 ],
             )
-        return materialize_node_submission(
+        baseline_artifact = materialize_node_submission(
             step,
             target=runtime_snapshot.target,
             metrics={"prometheus_available": False},
@@ -197,6 +198,11 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
             attempted_routes=[_planned_peer_route(step)],
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
+        )
+        return maybe_run_bounded_node_scout(
+            step,
+            baseline_artifact=baseline_artifact,
+            kubernetes_mcp_client=_kubernetes_mcp_client,
         )
 
     try:
@@ -217,7 +223,7 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
         if not metrics_snapshot.metrics.get("prometheus_available")
         else _peer_route([*metrics_snapshot.tool_path, *runtime_snapshot.tool_path])
     )
-    return materialize_node_submission(
+    baseline_artifact = materialize_node_submission(
         step,
         target=runtime_snapshot.target,
         metrics=metrics_snapshot.metrics,
@@ -227,6 +233,11 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
         attempted_routes=[] if metrics_snapshot.metrics.get("prometheus_available") else [_peer_route(metrics_snapshot.tool_path)],
         cluster_alias=runtime_snapshot.cluster_alias,
         extra_limitations=limitations,
+    )
+    return maybe_run_bounded_node_scout(
+        step,
+        baseline_artifact=baseline_artifact,
+        kubernetes_mcp_client=_kubernetes_mcp_client,
     )
 
 

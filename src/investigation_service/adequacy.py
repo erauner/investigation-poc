@@ -5,6 +5,9 @@ from .models import EvidenceBundle, InvestigationTarget, StepArtifact
 
 TARGET_EVIDENCE_STEP_ID = "collect-target-evidence"
 NO_CRITICAL_SIGNALS_TITLE = "No Critical Signals Found"
+NODE_REQUEST_SATURATION_TITLE = "High Node Memory Request Saturation"
+NODE_NOT_READY_TITLE = "Node Not Ready"
+NODE_MEMORY_PRESSURE_TITLE = "Node Memory Pressure"
 _SOFT_WORKLOAD_LIMITATION_PREFIXES = (
     "metric unavailable:",
     "prometheus unavailable",
@@ -84,6 +87,37 @@ def service_bundle_quality_key(bundle: EvidenceBundle | None) -> tuple[int, int,
 
 def service_bundle_improves(baseline: EvidenceBundle | None, candidate: EvidenceBundle | None) -> bool:
     return service_bundle_quality_key(candidate) > service_bundle_quality_key(baseline)
+
+
+def node_bundle_quality_key(bundle: EvidenceBundle | None) -> tuple[int, int, int, int]:
+    if bundle is None:
+        return (0, 0, 0, 0)
+    hard_limitations = tuple(
+        item
+        for item in bundle.limitations
+        if item != "no related Kubernetes events found"
+    )
+    direct_node_findings = sum(
+        1
+        for finding in bundle.findings
+        if finding.title in {NODE_NOT_READY_TITLE, NODE_MEMORY_PRESSURE_TITLE}
+    )
+    top_pods_present = 1 if bundle.object_state.get("top_pods_by_memory_request") else 0
+    usable_node_metrics = sum(
+        1
+        for key in ("node_memory_allocatable_bytes", "node_memory_working_set_bytes", "node_memory_request_bytes")
+        if bundle.metrics.get(key) is not None
+    )
+    return (
+        direct_node_findings,
+        top_pods_present,
+        usable_node_metrics,
+        -len(hard_limitations),
+    )
+
+
+def node_bundle_improves(baseline: EvidenceBundle | None, candidate: EvidenceBundle | None) -> bool:
+    return node_bundle_quality_key(candidate) > node_bundle_quality_key(baseline)
 
 
 def assess_workload_evidence_bundle(
@@ -167,6 +201,70 @@ def assess_service_evidence_bundle(
         return EvidenceAdequacyAssessment(
             outcome="weak",
             reasons=("no_critical_signals_found",),
+        )
+    if hard_limitations:
+        return EvidenceAdequacyAssessment(
+            outcome="weak",
+            reasons=("bundle_limitations_present",),
+        )
+    return EvidenceAdequacyAssessment(outcome="adequate")
+
+
+def assess_node_evidence_bundle(
+    *,
+    bundle: EvidenceBundle | None,
+) -> EvidenceAdequacyAssessment:
+    if bundle is None:
+        return EvidenceAdequacyAssessment(outcome="not_applicable")
+
+    has_no_critical_signals = any(finding.title == NO_CRITICAL_SIGNALS_TITLE for finding in bundle.findings)
+    has_other_findings = any(finding.title != NO_CRITICAL_SIGNALS_TITLE for finding in bundle.findings)
+    hard_limitations = tuple(
+        item
+        for item in bundle.limitations
+        if item != "no related Kubernetes events found"
+    )
+    usable_node_metrics = any(
+        bundle.metrics.get(key) is not None
+        for key in ("node_memory_allocatable_bytes", "node_memory_working_set_bytes", "node_memory_request_bytes")
+    )
+    has_direct_node_failure = any(
+        finding.title in {NODE_NOT_READY_TITLE, NODE_MEMORY_PRESSURE_TITLE}
+        for finding in bundle.findings
+    )
+    has_saturation_only = any(finding.title == NODE_REQUEST_SATURATION_TITLE for finding in bundle.findings)
+
+    if hard_limitations and not bundle.findings and not usable_node_metrics:
+        return EvidenceAdequacyAssessment(
+            outcome="blocked",
+            reasons=("bundle_limitations_present", "bundle_findings_missing"),
+        )
+    if has_no_critical_signals and has_other_findings:
+        return EvidenceAdequacyAssessment(
+            outcome="contradictory",
+            reasons=("no_critical_signals_conflicts_with_other_findings",),
+        )
+    if has_direct_node_failure:
+        if hard_limitations:
+            return EvidenceAdequacyAssessment(
+                outcome="weak",
+                reasons=("bundle_limitations_present",),
+            )
+        return EvidenceAdequacyAssessment(outcome="adequate")
+    if not bundle.findings:
+        return EvidenceAdequacyAssessment(
+            outcome="weak",
+            reasons=("bundle_findings_missing",),
+        )
+    if has_no_critical_signals:
+        return EvidenceAdequacyAssessment(
+            outcome="weak",
+            reasons=("no_critical_signals_found",),
+        )
+    if has_saturation_only:
+        return EvidenceAdequacyAssessment(
+            outcome="weak",
+            reasons=("request_saturation_only",),
         )
     if hard_limitations:
         return EvidenceAdequacyAssessment(

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 from investigation_orchestrator import mcp_clients
-from investigation_orchestrator.mcp_clients import PrometheusMcpClient
+from investigation_orchestrator.mcp_clients import KubernetesMcpClient, PrometheusMcpClient
 from investigation_service.models import StepExecutionInputs
 
 
@@ -116,4 +116,67 @@ def test_collect_service_range_metrics_parses_execute_range_query_payload(monkey
     assert snapshot.metrics["service_error_rate"] == 0.5
     assert snapshot.metrics["service_latency_p95_seconds"] == 1.2
     assert snapshot.metrics["prometheus_available"] is True
+    assert snapshot.limitations == []
+
+
+def test_collect_node_top_pods_parses_resources_list_payload(monkeypatch) -> None:
+    client = KubernetesMcpClient()
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        if tool_name != "resources_list":
+            raise AssertionError(f"unexpected tool {tool_name}")
+        return {
+            "items": [
+                {
+                    "metadata": {"namespace": "operator-smoke", "name": "worker-helper"},
+                    "spec": {"containers": [{"resources": {"requests": {"memory": "128Mi"}}}]},
+                },
+                {
+                    "metadata": {"namespace": "operator-smoke", "name": "api-0"},
+                    "spec": {"containers": [{"resources": {"requests": {"memory": "512Mi"}}}]},
+                },
+                {
+                    "metadata": {"namespace": "operator-smoke", "name": "api-1"},
+                    "spec": {"containers": [{"resources": {"requests": {"memory": "256Mi"}}}]},
+                },
+            ]
+        }
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="local-kind", kube_context=None, kubeconfig_path=None),
+    )
+    monkeypatch.setattr(KubernetesMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_node_top_pods(
+        StepExecutionInputs(
+            request_kind="target_context",
+            target="node/worker3",
+            profile="workload",
+            node_name="worker3",
+            lookback_minutes=15,
+        ),
+        limit=2,
+    )
+
+    assert calls == [
+        (
+            "resources_list",
+            {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "fieldSelector": "spec.nodeName=worker3",
+            },
+        )
+    ]
+    assert snapshot.top_pods_by_memory_request == [
+        {"namespace": "operator-smoke", "name": "api-0", "memory_request_bytes": 536870912},
+        {"namespace": "operator-smoke", "name": "api-1", "memory_request_bytes": 268435456},
+    ]
     assert snapshot.limitations == []
