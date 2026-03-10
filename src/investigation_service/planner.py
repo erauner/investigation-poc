@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from .adequacy import assess_target_evidence_adequacy
 from .execution_policy import policy_fields
 from .models import (
     ActiveEvidenceBatchContract,
@@ -1345,20 +1346,8 @@ def _should_insert_service_follow_up(plan: InvestigationPlan, execution: Evidenc
     if any(step.id == "collect-service-follow-up-evidence" for step in plan.steps):
         return False
 
-    evidence_artifacts = [artifact for artifact in execution.artifacts if artifact.evidence_bundle is not None]
-    if not evidence_artifacts:
-        return False
-
-    for artifact in evidence_artifacts:
-        bundle = artifact.evidence_bundle
-        assert bundle is not None
-        if bundle.limitations:
-            return True
-        if not bundle.findings:
-            return True
-        if any(finding.title == "No Critical Signals Found" for finding in bundle.findings):
-            return True
-    return False
+    assessment = assess_target_evidence_adequacy(target=target, artifacts=execution.artifacts)
+    return assessment.outcome == "inadequate"
 
 
 def _insert_service_follow_up(plan: InvestigationPlan) -> InvestigationPlan:
