@@ -138,6 +138,25 @@ def test_pick_runtime_pod_for_deployment_uses_selector_not_prefix() -> None:
     assert _pick_runtime_pod_for_deployment(deployment, pods) == "crashy-58b5897796-lckp9"
 
 
+def test_pick_runtime_pod_for_deployment_without_match_labels_fails_closed() -> None:
+    deployment = {
+        "metadata": {"name": "crashy"},
+        "spec": {"selector": {}},
+    }
+    pods = {
+        "items": [
+            {
+                "metadata": {
+                    "name": "crashy-58b5897796-lckp9",
+                    "labels": {"app.kubernetes.io/name": "crashy"},
+                }
+            }
+        ]
+    }
+
+    assert _pick_runtime_pod_for_deployment(deployment, pods) is None
+
+
 def test_normalize_object_state_for_deployment_attaches_runtime_pod() -> None:
     deployment = {
         "metadata": {

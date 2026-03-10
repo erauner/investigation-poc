@@ -127,6 +127,8 @@ def _pick_runtime_pod_for_deployment(deployment_raw: Any, pods_raw: Any) -> str 
     deployment_meta = deployment_raw.get("metadata", {}) or {}
     deployment_name = deployment_meta.get("name")
     selector = deployment_raw.get("spec", {}).get("selector", {}).get("matchLabels", {}) or {}
+    if not selector:
+        return None
     selector_items = set(selector.items())
 
     def _matches_selector(item: Any) -> bool:
