@@ -5,6 +5,7 @@ import httpx
 
 from investigation_orchestrator import OrchestratorRuntimeConfig
 from investigation_service.models import CorrelatedChange, EvidenceItem, InvestigationReport
+from investigation_service.presentation import render_presentation_markdown
 from investigation_shadow_runtime.a2a_app import build_shadow_app
 from investigation_shadow_runtime.checkpoint_adapter import ShadowKAgentCheckpointer
 from investigation_shadow_runtime.host_adapter import format_shadow_report, parse_shadow_task
@@ -81,6 +82,7 @@ def test_format_shadow_report_uses_fixed_sections() -> None:
     assert "## Related Data" in rendered
     assert "## Limitations" in rendered
     assert "## Recommended next step" in rendered
+    assert rendered == render_presentation_markdown(report, profile="operator_summary")
 
 
 def test_format_shadow_report_prefers_structured_evidence_items() -> None:
