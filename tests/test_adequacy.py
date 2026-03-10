@@ -1,4 +1,4 @@
-from investigation_service.adequacy import assess_target_evidence_adequacy
+from investigation_service.adequacy import assess_target_evidence_adequacy, assess_workload_evidence_bundle
 from investigation_service.models import Finding, InvestigationTarget, StepArtifact, StepRouteProvenance, TargetRef
 
 
@@ -80,7 +80,7 @@ def test_assess_target_evidence_adequacy_returns_inadequate_for_no_critical_sign
         ],
     )
 
-    assert assessment.outcome == "inadequate"
+    assert assessment.outcome == "weak"
     assert assessment.reasons == ("no_critical_signals_found",)
 
 
@@ -90,7 +90,50 @@ def test_assess_target_evidence_adequacy_returns_inadequate_when_limitations_exi
         artifacts=[_artifact(limitations=["logs unavailable"])],
     )
 
-    assert assessment.outcome == "inadequate"
+    assert assessment.outcome == "blocked"
+    assert assessment.reasons == ("bundle_limitations_present", "bundle_findings_missing")
+
+
+def test_assess_workload_evidence_bundle_returns_contradictory_for_conflicting_findings() -> None:
+    assessment = assess_workload_evidence_bundle(
+        bundle=_artifact(
+            findings=[
+                Finding(
+                    severity="info",
+                    source="heuristic",
+                    title="No Critical Signals Found",
+                    evidence="nothing decisive",
+                ),
+                Finding(
+                    severity="critical",
+                    source="k8s",
+                    title="CrashLoopBackOff",
+                    evidence="pod is crash looping",
+                ),
+            ]
+        ).evidence_bundle
+    )
+
+    assert assessment.outcome == "contradictory"
+    assert assessment.reasons == ("no_critical_signals_conflicts_with_other_findings",)
+
+
+def test_assess_workload_evidence_bundle_returns_weak_for_limited_but_non_empty_findings() -> None:
+    assessment = assess_workload_evidence_bundle(
+        bundle=_artifact(
+            findings=[
+                Finding(
+                    severity="warning",
+                    source="k8s",
+                    title="CrashLoopBackOff",
+                    evidence="pod is crash looping",
+                )
+            ],
+            limitations=["peer logs truncated"],
+        ).evidence_bundle
+    )
+
+    assert assessment.outcome == "weak"
     assert assessment.reasons == ("bundle_limitations_present",)
 
 

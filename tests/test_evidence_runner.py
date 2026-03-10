@@ -102,6 +102,7 @@ def test_workload_external_step_prefers_peer_mcp(monkeypatch) -> None:
                     log_excerpt="panic: startup failed",
                     limitations=["peer partial: events only from namespace scope"],
                     tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_log"],
+                    runtime_pod_name="crashy-abc123",
                 )
             },
         )(),
@@ -149,6 +150,157 @@ def test_workload_external_step_records_failed_peer_attempt_for_downstream_fallb
     assert artifact.actual_route.tool_path == ["kubernetes-mcp-server"]
     assert artifact.evidence_bundle is None
     assert "peer workload MCP attempt failed: peer unavailable" in artifact.limitations
+
+
+def test_workload_external_step_runs_bounded_scout_and_keeps_improved_artifact(monkeypatch) -> None:
+    step = _workload_step().model_copy(
+        update={
+            "execution_inputs": _workload_step().execution_inputs.model_copy(
+                update={"target": "deployment/crashy"}
+            )
+        }
+    )
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def _collect(_self, _inputs, *, excluded_pod_names=()):
+        calls.append((_inputs.target or "", excluded_pod_names))
+        if not excluded_pod_names:
+            return WorkloadRuntimeSnapshot(
+                cluster_alias="erauner-home",
+                target=TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+                object_state={
+                    "kind": "deployment",
+                    "name": "crashy",
+                    "namespace": "operator-smoke",
+                    "runtimePod": {"name": "crashy-a"},
+                    "readyReplicas": 1,
+                    "replicas": 1,
+                },
+                events=["Normal ScalingReplicaSet deployment/crashy"],
+                log_excerpt="",
+                limitations=[],
+                tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_list_in_namespace", "resources_get", "pods_log"],
+                runtime_pod_name="crashy-a",
+            )
+        return WorkloadRuntimeSnapshot(
+            cluster_alias="erauner-home",
+            target=TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+            object_state={
+                "kind": "deployment",
+                "name": "crashy",
+                "namespace": "operator-smoke",
+                "runtimePod": {
+                    "name": "crashy-b",
+                    "containers": [{"name": "app", "restartCount": 5, "ready": False}],
+                },
+                "readyReplicas": 0,
+                "replicas": 1,
+            },
+            events=["Warning BackOff pod/crashy-b"],
+            log_excerpt="panic: startup failed",
+            limitations=[],
+            tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_list_in_namespace", "resources_get", "pods_log"],
+            runtime_pod_name="crashy-b",
+        )
+
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type("ClientStub", (), {"collect_workload_runtime": _collect})(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert calls == [("deployment/crashy", ()), ("deployment/crashy", ("crashy-a",))]
+    assert artifact.evidence_bundle is not None
+    assert any(item.title == "Crash Loop Detected" for item in artifact.evidence_bundle.findings)
+    assert artifact.actual_route.tool_path[-1] == "pods_log"
+    assert artifact.attempted_routes[0].tool_path[-1] == "pods_log"
+
+
+def test_workload_external_step_keeps_baseline_when_scout_is_not_better(monkeypatch) -> None:
+    step = _workload_step().model_copy(
+        update={
+            "execution_inputs": _workload_step().execution_inputs.model_copy(
+                update={"target": "deployment/crashy"}
+            )
+        }
+    )
+
+    def _collect(_self, _inputs, *, excluded_pod_names=()):
+        pod_name = "crashy-a" if not excluded_pod_names else "crashy-b"
+        return WorkloadRuntimeSnapshot(
+            cluster_alias="erauner-home",
+            target=TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+            object_state={
+                "kind": "deployment",
+                "name": "crashy",
+                "namespace": "operator-smoke",
+                "runtimePod": {"name": pod_name},
+                "readyReplicas": 1,
+                "replicas": 1,
+            },
+            events=["Normal ScalingReplicaSet deployment/crashy"],
+            log_excerpt="",
+            limitations=[],
+            tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_list_in_namespace", "resources_get", "pods_log"],
+            runtime_pod_name=pod_name,
+        )
+
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type("ClientStub", (), {"collect_workload_runtime": _collect})(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.evidence_bundle is not None
+    assert any(item.title == "No Critical Signals Found" for item in artifact.evidence_bundle.findings)
+    assert artifact.attempted_routes
+
+
+def test_workload_external_step_keeps_baseline_and_records_failed_scout(monkeypatch) -> None:
+    step = _workload_step().model_copy(
+        update={
+            "execution_inputs": _workload_step().execution_inputs.model_copy(
+                update={"target": "deployment/crashy"}
+            )
+        }
+    )
+
+    def _collect(_self, _inputs, *, excluded_pod_names=()):
+        if excluded_pod_names:
+            raise PeerMcpError("no sibling pod available")
+        return WorkloadRuntimeSnapshot(
+            cluster_alias="erauner-home",
+            target=TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+            object_state={
+                "kind": "deployment",
+                "name": "crashy",
+                "namespace": "operator-smoke",
+                "runtimePod": {"name": "crashy-a"},
+                "readyReplicas": 1,
+                "replicas": 1,
+            },
+            events=["Normal ScalingReplicaSet deployment/crashy"],
+            log_excerpt="",
+            limitations=[],
+            tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_list_in_namespace", "resources_get", "pods_log"],
+            runtime_pod_name="crashy-a",
+        )
+
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type("ClientStub", (), {"collect_workload_runtime": _collect})(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.evidence_bundle is not None
+    assert "bounded workload scout failed: no sibling pod available" in artifact.evidence_bundle.limitations
+    assert artifact.attempted_routes[0].tool_path == ["kubernetes-mcp-server"]
 
 
 def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:

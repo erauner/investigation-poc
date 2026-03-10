@@ -32,6 +32,7 @@ def materialize_workload_submission(
     events: list[str],
     log_excerpt: str,
     actual_route: ActualRoute,
+    attempted_routes: list[ActualRoute] | None = None,
     cluster_alias: str | None = None,
     extra_limitations: list[str] | None = None,
 ) -> SubmittedStepArtifact:
@@ -60,6 +61,7 @@ def materialize_workload_submission(
         step_id=step.step_id,
         evidence_bundle=bundle,
         actual_route=actual_route,
+        attempted_routes=list(attempted_routes or []),
     )
 
 

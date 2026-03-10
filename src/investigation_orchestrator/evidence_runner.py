@@ -8,9 +8,9 @@ from investigation_service.submission_materialization import (
     materialize_attempt_only_submission,
     materialize_node_submission,
     materialize_service_submission,
-    materialize_workload_submission,
 )
 from .mcp_clients import KubernetesMcpClient, PeerMcpError, PrometheusMcpClient
+from .workload_scout import materialize_workload_snapshot, maybe_run_bounded_workload_scout
 
 
 def _peer_route(tool_path: list[str]) -> ActualRoute:
@@ -50,15 +50,15 @@ _prometheus_mcp_client = PrometheusMcpClient()
 
 def _workload_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepArtifact:
     snapshot = _kubernetes_mcp_client.collect_workload_runtime(step.execution_inputs)
-    return materialize_workload_submission(
+    baseline_artifact = materialize_workload_snapshot(
         step,
-        target=snapshot.target,
-        object_state=snapshot.object_state,
-        events=snapshot.events,
-        log_excerpt=snapshot.log_excerpt,
-        actual_route=_peer_route(snapshot.tool_path),
-        cluster_alias=snapshot.cluster_alias,
-        extra_limitations=snapshot.limitations,
+        snapshot,
+    )
+    return maybe_run_bounded_workload_scout(
+        step,
+        baseline_snapshot=snapshot,
+        baseline_artifact=baseline_artifact,
+        kubernetes_mcp_client=_kubernetes_mcp_client,
     )
 
 
