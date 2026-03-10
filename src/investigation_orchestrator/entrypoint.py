@@ -14,10 +14,15 @@ from investigation_service.tools import find_unhealthy_pod
 
 from .control_plane import advance_batch, get_active_batch, render_report, seed_context
 from .checkpointing import GraphCheckpointConfig, resolve_checkpoint_config
-from .evidence_runner import run_required_external_steps
-from .graph import get_investigation_graph_state, invoke_investigation_graph, resume_investigation_graph
+from .evidence_runner import apply_pending_exploration_review, collect_external_steps
+from .graph import (
+    get_investigation_graph_state,
+    invoke_investigation_graph,
+    resume_investigation_graph,
+    update_investigation_graph_state,
+)
 from .graph_nodes import OrchestratorRuntimeDeps
-from .state import OrchestrationState, build_initial_state
+from .state import OrchestrationState, PendingExplorationReview, build_initial_state
 
 
 @dataclass(frozen=True)
@@ -102,13 +107,17 @@ def _maybe_attach_resolved_pod_context(
     )
 
 
-def _runtime_deps() -> OrchestratorRuntimeDeps:
+def _runtime_deps(*, allow_exploration_review: bool = False) -> OrchestratorRuntimeDeps:
     return OrchestratorRuntimeDeps(
         seed_context=seed_context,
         get_active_batch=get_active_batch,
         advance_batch=advance_batch,
         render_report=render_report,
-        run_required_external_steps=run_required_external_steps,
+        collect_external_steps=lambda active_batch: collect_external_steps(
+            active_batch,
+            allow_exploration_review=allow_exploration_review,
+        ),
+        apply_pending_exploration_review=apply_pending_exploration_review,
         active_batch_is_render_only=_active_batch_is_render_only,
     )
 
@@ -139,6 +148,7 @@ def _runtime_result(
 
 def _resolved_next_nodes(
     *,
+    allow_exploration_review: bool,
     checkpointer: BaseCheckpointSaver | None,
     checkpoint_config: GraphCheckpointConfig | None,
     interrupt_before: tuple[str, ...] | list[str],
@@ -147,13 +157,70 @@ def _resolved_next_nodes(
     if checkpointer is None or checkpoint_config is None:
         return ()
     snapshot = get_investigation_graph_state(
-        deps=_runtime_deps(),
+        deps=_runtime_deps(allow_exploration_review=allow_exploration_review),
         checkpointer=checkpointer,
         checkpoint_config=checkpoint_config,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
+        enable_exploration_review_interrupt=allow_exploration_review,
     )
     return tuple(snapshot.next)
+
+
+def _effective_allow_exploration_review(
+    *,
+    checkpointer: BaseCheckpointSaver | None,
+    checkpoint_config: GraphCheckpointConfig | None,
+) -> bool:
+    return checkpointer is not None and checkpoint_config is not None
+
+
+def _pending_review_or_raise(state: OrchestrationState) -> PendingExplorationReview:
+    pending_review = state.get("pending_exploration_review")
+    if pending_review is None:
+        raise ValueError("no pending exploration review exists for the requested thread_id")
+    return pending_review
+
+
+def _apply_exploration_review_decision(
+    *,
+    runtime: OrchestratorRuntimeConfig,
+    decision: Literal["approve", "skip"],
+) -> OrchestrationState:
+    resolved_checkpoint_config = resolve_checkpoint_config(
+        checkpoint_config=runtime.checkpoint_config,
+        thread_id=runtime.thread_id,
+        checkpoint_ns=runtime.checkpoint_ns,
+        checkpoint_id=runtime.checkpoint_id,
+        require_thread_id=True,
+    )
+    if runtime.checkpointer is None:
+        raise ValueError("checkpointer is required when applying an exploration review decision")
+    allow_exploration_review = _effective_allow_exploration_review(
+        checkpointer=runtime.checkpointer,
+        checkpoint_config=resolved_checkpoint_config,
+    )
+    current_snapshot = get_investigation_graph_state(
+        deps=_runtime_deps(allow_exploration_review=allow_exploration_review),
+        checkpointer=runtime.checkpointer,
+        checkpoint_config=resolved_checkpoint_config,
+        interrupt_before=runtime.interrupt_before,
+        interrupt_after=runtime.interrupt_after,
+        enable_exploration_review_interrupt=allow_exploration_review,
+    )
+    pending_review = _pending_review_or_raise(current_snapshot.values)
+    return update_investigation_graph_state(
+        deps=_runtime_deps(allow_exploration_review=allow_exploration_review),
+        checkpointer=runtime.checkpointer,
+        checkpoint_config=resolved_checkpoint_config,
+        values={
+            "pending_exploration_review": pending_review.model_copy(update={"decision": decision}),
+        },
+        as_node="prepare_exploration_review",
+        interrupt_before=runtime.interrupt_before,
+        interrupt_after=runtime.interrupt_after,
+        enable_exploration_review_interrupt=allow_exploration_review,
+    )
 
 
 def run_orchestrated_investigation_runtime(
@@ -170,21 +237,27 @@ def run_orchestrated_investigation_runtime(
         checkpoint_id=runtime.checkpoint_id,
         require_thread_id=runtime.checkpointer is not None,
     )
+    allow_exploration_review = _effective_allow_exploration_review(
+        checkpointer=runtime.checkpointer,
+        checkpoint_config=resolved_checkpoint_config,
+    )
     final_state = invoke_investigation_graph(
         build_initial_state(
             req,
             incident,
             remaining_batch_budget=runtime.max_batches,
         ),
-        deps=_runtime_deps(),
+        deps=_runtime_deps(allow_exploration_review=allow_exploration_review),
         checkpointer=runtime.checkpointer,
         checkpoint_config=resolved_checkpoint_config,
         interrupt_before=runtime.interrupt_before,
         interrupt_after=runtime.interrupt_after,
+        enable_exploration_review_interrupt=allow_exploration_review,
     )
     next_nodes = ()
     if final_state["final_report"] is None:
         next_nodes = _resolved_next_nodes(
+            allow_exploration_review=allow_exploration_review,
             checkpointer=runtime.checkpointer,
             checkpoint_config=resolved_checkpoint_config,
             interrupt_before=runtime.interrupt_before,
@@ -210,16 +283,22 @@ def resume_orchestrated_investigation_runtime(
     )
     if runtime.checkpointer is None:
         raise ValueError("checkpointer is required when resuming orchestrated investigations")
+    allow_exploration_review = _effective_allow_exploration_review(
+        checkpointer=runtime.checkpointer,
+        checkpoint_config=resolved_checkpoint_config,
+    )
     final_state = resume_investigation_graph(
-        deps=_runtime_deps(),
+        deps=_runtime_deps(allow_exploration_review=allow_exploration_review),
         checkpointer=runtime.checkpointer,
         checkpoint_config=resolved_checkpoint_config,
         interrupt_before=runtime.interrupt_before,
         interrupt_after=runtime.interrupt_after,
+        enable_exploration_review_interrupt=allow_exploration_review,
     )
     next_nodes = ()
     if final_state["final_report"] is None:
         next_nodes = _resolved_next_nodes(
+            allow_exploration_review=allow_exploration_review,
             checkpointer=runtime.checkpointer,
             checkpoint_config=resolved_checkpoint_config,
             interrupt_before=runtime.interrupt_before,

@@ -1,6 +1,8 @@
 from investigation_orchestrator.entrypoint import run_orchestrated_investigation
 from investigation_orchestrator.checkpointing import GraphCheckpointConfig, create_in_memory_checkpointer
 from investigation_orchestrator.graph import get_investigation_graph_state
+from investigation_orchestrator.evidence_runner import ExternalStepCollectionResult
+from investigation_orchestrator.state import PendingExplorationReview
 from investigation_service.models import (
     ActiveEvidenceBatchContract,
     AdvanceInvestigationRuntimeResponse,
@@ -19,6 +21,13 @@ from investigation_service.models import (
 )
 import investigation_orchestrator.entrypoint as entrypoint
 import pytest
+
+
+def _external_steps_result(*submitted_steps, pending_exploration_review=None) -> ExternalStepCollectionResult:
+    return ExternalStepCollectionResult(
+        submitted_steps=list(submitted_steps),
+        pending_exploration_review=pending_exploration_review,
+    )
 
 
 def _incident() -> BuildInvestigationPlanRequest:
@@ -202,8 +211,8 @@ def test_run_orchestrated_investigation_advances_and_renders(monkeypatch) -> Non
     )
     monkeypatch.setattr(
         entrypoint,
-        "run_required_external_steps",
-        lambda _batch: [
+        "collect_external_steps",
+        lambda _batch, allow_exploration_review=False: _external_steps_result(
             SubmittedStepArtifact(
                 step_id="collect-target-evidence",
                 actual_route={
@@ -231,7 +240,7 @@ def test_run_orchestrated_investigation_advances_and_renders(monkeypatch) -> Non
                     "enrichment_hints": [],
                 },
             )
-        ],
+        ),
     )
 
     def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
@@ -346,8 +355,8 @@ def test_run_orchestrated_investigation_forwards_workload_peer_failure_metadata(
     )
     monkeypatch.setattr(
         entrypoint,
-        "run_required_external_steps",
-        lambda _batch: [
+        "collect_external_steps",
+        lambda _batch, allow_exploration_review=False: _external_steps_result(
             SubmittedStepArtifact(
                 step_id="collect-target-evidence",
                 actual_route={
@@ -358,7 +367,7 @@ def test_run_orchestrated_investigation_forwards_workload_peer_failure_metadata(
                 },
                 limitations=["peer workload MCP attempt failed: peer unavailable"],
             )
-        ],
+        ),
     )
 
     def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
@@ -474,8 +483,8 @@ def test_run_orchestrated_investigation_forwards_service_peer_failure_metadata(m
     )
     monkeypatch.setattr(
         entrypoint,
-        "run_required_external_steps",
-        lambda _batch: [
+        "collect_external_steps",
+        lambda _batch, allow_exploration_review=False: _external_steps_result(
             SubmittedStepArtifact(
                 step_id="collect-target-evidence",
                 actual_route={
@@ -500,7 +509,7 @@ def test_run_orchestrated_investigation_forwards_service_peer_failure_metadata(m
                 ],
                 limitations=["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
             )
-        ],
+        ),
     )
 
     def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
@@ -617,8 +626,8 @@ def test_run_orchestrated_investigation_forwards_node_peer_failure_metadata(monk
     )
     monkeypatch.setattr(
         entrypoint,
-        "run_required_external_steps",
-        lambda _batch: [
+        "collect_external_steps",
+        lambda _batch, allow_exploration_review=False: _external_steps_result(
             SubmittedStepArtifact(
                 step_id="collect-target-evidence",
                 actual_route={
@@ -643,7 +652,7 @@ def test_run_orchestrated_investigation_forwards_node_peer_failure_metadata(monk
                 ],
                 limitations=["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
             )
-        ],
+        ),
     )
 
     def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
@@ -1158,7 +1167,11 @@ def test_internal_graph_runner_resumes_after_ensure_context_boundary(monkeypatch
             steps=[],
         ),
     )
-    monkeypatch.setattr(entrypoint, "run_required_external_steps", lambda _batch: [])
+    monkeypatch.setattr(
+        entrypoint,
+        "collect_external_steps",
+        lambda _batch, allow_exploration_review=False: _external_steps_result(),
+    )
     monkeypatch.setattr(
         entrypoint,
         "advance_batch",
@@ -1257,8 +1270,8 @@ def test_internal_graph_runner_resumes_after_external_step_materialization(monke
     )
     monkeypatch.setattr(
         entrypoint,
-        "run_required_external_steps",
-        lambda _batch: [
+        "collect_external_steps",
+        lambda _batch, allow_exploration_review=False: _external_steps_result(
             SubmittedStepArtifact(
                 step_id="collect-target-evidence",
                 actual_route={
@@ -1279,7 +1292,7 @@ def test_internal_graph_runner_resumes_after_external_step_materialization(monke
                     "enrichment_hints": [],
                 },
             )
-        ],
+        ),
     )
 
     def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
@@ -1306,14 +1319,14 @@ def test_internal_graph_runner_resumes_after_external_step_materialization(monke
             ),
             checkpointer=checkpointer,
             thread_id="resume-after-external-steps",
-            interrupt_after=["run_external_steps"],
+            interrupt_after=["collect_external_steps"],
         )
 
     snapshot = get_investigation_graph_state(
         deps=entrypoint._runtime_deps(),
         checkpointer=checkpointer,
         checkpoint_config=GraphCheckpointConfig(thread_id="resume-after-external-steps"),
-        interrupt_after=["run_external_steps"],
+        interrupt_after=["collect_external_steps"],
     )
 
     assert snapshot.next == ("advance_batch",)
@@ -1327,6 +1340,177 @@ def test_internal_graph_runner_resumes_after_external_step_materialization(monke
     assert captured["submitted"] is not None
     assert captured["submitted"][0].step_id == "collect-target-evidence"
     assert report.target == "deployment/crashy"
+
+
+def test_runtime_pauses_for_pending_workload_exploration_review(monkeypatch) -> None:
+    incident = _incident()
+    checkpointer = create_in_memory_checkpointer()
+    captured = {"submitted": None}
+    step = EvidenceStepContract(
+        step_id="collect-target-evidence",
+        title="Collect workload evidence",
+        plane="workload",
+        artifact_type="evidence_bundle",
+        requested_capability="workload_evidence_plane",
+        preferred_mcp_server="kubernetes-mcp-server",
+        preferred_tool_names=["pods_log"],
+        fallback_mcp_server=None,
+        fallback_tool_names=[],
+        execution_mode="external_preferred",
+        execution_inputs=StepExecutionInputs(
+            request_kind="target_context",
+            cluster="erauner-home",
+            namespace="operator-smoke",
+            target="deployment/crashy",
+            profile="workload",
+            lookback_minutes=15,
+        ),
+    )
+    baseline_artifact = SubmittedStepArtifact(
+        step_id="collect-target-evidence",
+        actual_route={
+            "source_kind": "peer_mcp",
+            "mcp_server": "kubernetes-mcp-server",
+            "tool_name": "pods_log",
+            "tool_path": ["kubernetes-mcp-server", "pods_log"],
+        },
+        evidence_bundle={
+            "cluster": "erauner-home",
+            "target": {"namespace": "operator-smoke", "kind": "deployment", "name": "crashy"},
+            "object_state": {
+                "kind": "deployment",
+                "name": "crashy",
+                "namespace": "operator-smoke",
+                "runtimePod": {"name": "crashy-a"},
+            },
+            "events": [],
+            "log_excerpt": "",
+            "metrics": {},
+            "findings": [],
+            "limitations": ["logs unavailable"],
+            "enrichment_hints": [],
+        },
+    )
+
+    monkeypatch.setattr(entrypoint, "find_unhealthy_pod", lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})())
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context())
+    monkeypatch.setattr(
+        entrypoint,
+        "get_active_batch",
+        lambda *_args, **_kwargs: ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect workload evidence",
+            subject=InvestigationSubject(
+                source="alert",
+                kind="alert",
+                summary="Investigate PodCrashLooping",
+                requested_target="pod/crashy",
+                alertname="PodCrashLooping",
+            ),
+            canonical_target=InvestigationTarget(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="pod/crashy",
+                target="deployment/crashy",
+                service_name=None,
+                node_name=None,
+                profile="workload",
+                lookback_minutes=15,
+                normalization_notes=["alertname=PodCrashLooping"],
+            ),
+            steps=[step],
+        ),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "collect_external_steps",
+        lambda _batch, allow_exploration_review=False: _external_steps_result(
+            pending_exploration_review=PendingExplorationReview(
+                batch_id="batch-1",
+                step=step,
+                capability="workload_evidence_plane",
+                baseline_artifact=baseline_artifact,
+                baseline_runtime_pod_name="crashy-a",
+                adequacy_outcome="weak",
+                adequacy_reasons=["logs unavailable"],
+                proposed_probe="Probe one additional runtime pod for deployment/crashy excluding crashy-a.",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "apply_pending_exploration_review",
+        lambda review: review.baseline_artifact.model_copy(
+            update={
+                "evidence_bundle": review.baseline_artifact.evidence_bundle.model_copy(
+                    update={
+                        "limitations": [
+                            *review.baseline_artifact.evidence_bundle.limitations,
+                            "bounded workload scout skipped by review decision",
+                        ]
+                    }
+                )
+            }
+        ),
+    )
+
+    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+        captured["submitted"] = submitted_steps
+        return AdvanceInvestigationRuntimeResponse(
+            execution_context=_context(active_batch_id=None),
+            next_active_batch=None,
+        )
+
+    monkeypatch.setattr(entrypoint, "advance_batch", fake_advance)
+    monkeypatch.setattr(entrypoint, "render_report", lambda *_args, **_kwargs: _report())
+
+    result = entrypoint.run_orchestrated_investigation_runtime(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+        ),
+        runtime=entrypoint.OrchestratorRuntimeConfig(
+            checkpointer=checkpointer,
+            thread_id="review-pause-thread",
+        ),
+    )
+
+    assert result.status == "interrupted"
+    assert result.next_nodes == ("apply_exploration_review",)
+    assert result.state["pending_exploration_review"] is not None
+    assert result.state["pending_exploration_review"].decision is None
+
+    updated_state = entrypoint._apply_exploration_review_decision(
+        runtime=entrypoint.OrchestratorRuntimeConfig(
+            checkpointer=checkpointer,
+            thread_id="review-pause-thread",
+        ),
+        decision="skip",
+    )
+
+    assert updated_state["pending_exploration_review"] is not None
+    assert updated_state["pending_exploration_review"].decision == "skip"
+
+    resumed = entrypoint.resume_orchestrated_investigation_runtime(
+        runtime=entrypoint.OrchestratorRuntimeConfig(
+            checkpointer=checkpointer,
+            thread_id="review-pause-thread",
+        )
+    )
+
+    assert resumed.status == "completed"
+    assert captured["submitted"] is not None
+    assert captured["submitted"][0].step_id == "collect-target-evidence"
+    assert "bounded workload scout skipped by review decision" in captured["submitted"][0].evidence_bundle.limitations
 
 
 def test_internal_graph_runner_reads_latest_state_even_with_pinned_checkpoint_id(monkeypatch) -> None:
@@ -1358,7 +1542,11 @@ def test_internal_graph_runner_reads_latest_state_even_with_pinned_checkpoint_id
             steps=[],
         ),
     )
-    monkeypatch.setattr(entrypoint, "run_required_external_steps", lambda _batch: [])
+    monkeypatch.setattr(
+        entrypoint,
+        "collect_external_steps",
+        lambda _batch, allow_exploration_review=False: _external_steps_result(),
+    )
     monkeypatch.setattr(
         entrypoint,
         "advance_batch",

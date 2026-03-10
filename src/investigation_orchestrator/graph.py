@@ -5,11 +5,13 @@ from langgraph.types import StateSnapshot
 from .checkpointing import GraphCheckpointConfig, build_graph_config
 from .graph_nodes import (
     OrchestratorRuntimeDeps,
+    apply_exploration_review_node,
     advance_batch_node,
+    collect_external_steps_node,
     ensure_context_node,
     load_active_batch_node,
+    prepare_exploration_review_node,
     render_report_node,
-    run_external_steps_node,
 )
 from .runtime_logging import log_graph_node, log_graph_run
 from .state import OrchestrationState
@@ -41,7 +43,13 @@ def _route_after_context(
 def _route_after_load_active_batch(state: OrchestrationState) -> str:
     if state["active_batch"] is None:
         return "render_report"
-    return "run_external_steps"
+    return "collect_external_steps"
+
+
+def _route_after_collect_external_steps(state: OrchestrationState) -> str:
+    if state["pending_exploration_review"] is not None:
+        return "prepare_exploration_review"
+    return "advance_batch"
 
 
 def _logged_node(node_name: str, node_fn, *, checkpoint_config: GraphCheckpointConfig | None):
@@ -82,7 +90,13 @@ def build_investigation_graph(
     checkpoint_config: GraphCheckpointConfig | None = None,
     interrupt_before: tuple[str, ...] | list[str] = (),
     interrupt_after: tuple[str, ...] | list[str] = (),
+    enable_exploration_review_interrupt: bool = False,
 ):
+    internal_interrupt_after = list(interrupt_after)
+    if enable_exploration_review_interrupt:
+        internal_interrupt_after = [*internal_interrupt_after, "prepare_exploration_review"]
+        internal_interrupt_after = list(dict.fromkeys(internal_interrupt_after))
+
     graph = StateGraph(OrchestrationState)
     graph.add_node(
         "ensure_context",
@@ -93,8 +107,28 @@ def build_investigation_graph(
         _logged_node("load_active_batch", lambda state: load_active_batch_node(state, deps), checkpoint_config=checkpoint_config),
     )
     graph.add_node(
-        "run_external_steps",
-        _logged_node("run_external_steps", lambda state: run_external_steps_node(state, deps), checkpoint_config=checkpoint_config),
+        "collect_external_steps",
+        _logged_node(
+            "collect_external_steps",
+            lambda state: collect_external_steps_node(state, deps),
+            checkpoint_config=checkpoint_config,
+        ),
+    )
+    graph.add_node(
+        "prepare_exploration_review",
+        _logged_node(
+            "prepare_exploration_review",
+            lambda state: prepare_exploration_review_node(state, deps),
+            checkpoint_config=checkpoint_config,
+        ),
+    )
+    graph.add_node(
+        "apply_exploration_review",
+        _logged_node(
+            "apply_exploration_review",
+            lambda state: apply_exploration_review_node(state, deps),
+            checkpoint_config=checkpoint_config,
+        ),
     )
     graph.add_node(
         "advance_batch",
@@ -118,18 +152,27 @@ def build_investigation_graph(
         "load_active_batch",
         _route_after_load_active_batch,
         {
-            "run_external_steps": "run_external_steps",
+            "collect_external_steps": "collect_external_steps",
             "render_report": "render_report",
         },
     )
-    graph.add_edge("run_external_steps", "advance_batch")
+    graph.add_conditional_edges(
+        "collect_external_steps",
+        _route_after_collect_external_steps,
+        {
+            "prepare_exploration_review": "prepare_exploration_review",
+            "advance_batch": "advance_batch",
+        },
+    )
+    graph.add_edge("prepare_exploration_review", "apply_exploration_review")
+    graph.add_edge("apply_exploration_review", "advance_batch")
     graph.add_edge("advance_batch", "ensure_context")
     graph.add_edge("render_report", END)
 
     return graph.compile(
         checkpointer=checkpointer,
         interrupt_before=list(interrupt_before),
-        interrupt_after=list(interrupt_after),
+        interrupt_after=internal_interrupt_after,
     )
 
 
@@ -141,6 +184,7 @@ def invoke_investigation_graph(
     checkpoint_config: GraphCheckpointConfig | None = None,
     interrupt_before: tuple[str, ...] | list[str] = (),
     interrupt_after: tuple[str, ...] | list[str] = (),
+    enable_exploration_review_interrupt: bool = False,
 ) -> OrchestrationState:
     if checkpoint_config is not None and checkpointer is None:
         raise ValueError("checkpoint_config requires a checkpointer")
@@ -153,6 +197,7 @@ def invoke_investigation_graph(
         checkpoint_config=checkpoint_config,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
+        enable_exploration_review_interrupt=enable_exploration_review_interrupt,
     )
     config = build_graph_config(checkpoint_config) if checkpointer else None
     log_graph_run(
@@ -199,6 +244,7 @@ def resume_investigation_graph(
     checkpoint_config: GraphCheckpointConfig,
     interrupt_before: tuple[str, ...] | list[str] = (),
     interrupt_after: tuple[str, ...] | list[str] = (),
+    enable_exploration_review_interrupt: bool = False,
 ) -> OrchestrationState:
     graph = build_investigation_graph(
         deps=deps,
@@ -206,6 +252,7 @@ def resume_investigation_graph(
         checkpoint_config=checkpoint_config,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
+        enable_exploration_review_interrupt=enable_exploration_review_interrupt,
     )
     config = build_graph_config(checkpoint_config)
     snapshot = graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
@@ -258,6 +305,7 @@ def get_investigation_graph_state(
     checkpoint_config: GraphCheckpointConfig,
     interrupt_before: tuple[str, ...] | list[str] = (),
     interrupt_after: tuple[str, ...] | list[str] = (),
+    enable_exploration_review_interrupt: bool = False,
 ) -> StateSnapshot:
     graph = build_investigation_graph(
         deps=deps,
@@ -265,5 +313,31 @@ def get_investigation_graph_state(
         checkpoint_config=checkpoint_config,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
+        enable_exploration_review_interrupt=enable_exploration_review_interrupt,
     )
     return graph.get_state(build_graph_config(checkpoint_config))
+
+
+def update_investigation_graph_state(
+    *,
+    deps: OrchestratorRuntimeDeps,
+    checkpointer: BaseCheckpointSaver,
+    checkpoint_config: GraphCheckpointConfig,
+    values: dict[str, object],
+    as_node: str | None = None,
+    interrupt_before: tuple[str, ...] | list[str] = (),
+    interrupt_after: tuple[str, ...] | list[str] = (),
+    enable_exploration_review_interrupt: bool = False,
+) -> OrchestrationState:
+    graph = build_investigation_graph(
+        deps=deps,
+        checkpointer=checkpointer,
+        checkpoint_config=checkpoint_config,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+        enable_exploration_review_interrupt=enable_exploration_review_interrupt,
+    )
+    config = build_graph_config(checkpoint_config)
+    graph.update_state(config, values, as_node=as_node)
+    snapshot = graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
+    return snapshot.values

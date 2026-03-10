@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from investigation_orchestrator import OrchestratorRuntimeConfig
 from investigation_service.models import CorrelatedChange, EvidenceItem, InvestigationReport
@@ -199,6 +200,28 @@ def test_run_shadow_investigation_applies_pod_compatibility(monkeypatch) -> None
     )
 
     assert "Resolved concrete crash-looping pod: pod/crashy-abc123" in result.markdown
+
+
+def test_run_shadow_investigation_fails_closed_on_interrupted_review(monkeypatch) -> None:
+    def fake_run(_req, *, runtime=None):
+        assert isinstance(runtime, OrchestratorRuntimeConfig)
+        return type(
+            "Result",
+            (),
+            {
+                "status": "interrupted",
+                "final_report": None,
+                "next_nodes": ("apply_exploration_review",),
+            },
+        )()
+
+    monkeypatch.setattr("investigation_shadow_runtime.runner.run_orchestrated_investigation_runtime", fake_run)
+
+    with pytest.raises(ValueError, match="shadow investigation interrupted before completion"):
+        run_shadow_investigation(
+            "Investigate deployment/crashy in namespace kagent-smoke.",
+            runtime=OrchestratorRuntimeConfig(),
+        )
 
 
 def test_build_shadow_app_disables_thread_dump_by_default(monkeypatch) -> None:
