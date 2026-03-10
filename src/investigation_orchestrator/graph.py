@@ -52,6 +52,12 @@ def _route_after_collect_external_steps(state: OrchestrationState) -> str:
     return "advance_batch"
 
 
+def _route_after_apply_exploration_review(state: OrchestrationState) -> str:
+    if state["deferred_external_steps"]:
+        return "collect_external_steps"
+    return "advance_batch"
+
+
 def _logged_node(node_name: str, node_fn, *, checkpoint_config: GraphCheckpointConfig | None):
     def _runner(state: OrchestrationState) -> dict:
         log_graph_node(
@@ -165,7 +171,14 @@ def build_investigation_graph(
         },
     )
     graph.add_edge("prepare_exploration_review", "apply_exploration_review")
-    graph.add_edge("apply_exploration_review", "advance_batch")
+    graph.add_conditional_edges(
+        "apply_exploration_review",
+        _route_after_apply_exploration_review,
+        {
+            "collect_external_steps": "collect_external_steps",
+            "advance_batch": "advance_batch",
+        },
+    )
     graph.add_edge("advance_batch", "ensure_context")
     graph.add_edge("render_report", END)
 

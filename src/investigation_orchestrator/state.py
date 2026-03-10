@@ -33,6 +33,7 @@ class OrchestrationState(TypedDict):
     active_batch: ActiveEvidenceBatchContract | None
     submitted_steps: list[SubmittedStepArtifact]
     pending_exploration_review: PendingExplorationReview | None
+    deferred_external_steps: list[EvidenceStepContract]
     remaining_batch_budget: int
     final_report: InvestigationReport | None
 
@@ -50,6 +51,7 @@ def build_initial_state(
         active_batch=None,
         submitted_steps=[],
         pending_exploration_review=None,
+        deferred_external_steps=[],
         remaining_batch_budget=remaining_batch_budget,
         final_report=None,
     )

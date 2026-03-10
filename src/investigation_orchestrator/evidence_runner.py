@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from investigation_service.models import (
     ActualRoute,
@@ -63,6 +63,7 @@ _prometheus_mcp_client = PrometheusMcpClient()
 class ExternalStepCollectionResult:
     submitted_steps: list[SubmittedStepArtifact]
     pending_exploration_review: PendingExplorationReview | None = None
+    deferred_external_steps: tuple[EvidenceStepContract, ...] = field(default_factory=tuple)
 
 
 def _workload_submission_via_peer_mcp(
@@ -301,13 +302,14 @@ def collect_external_steps(
     active_batch: ActiveEvidenceBatchContract,
     *,
     allow_exploration_review: bool = False,
+    steps: list[EvidenceStepContract] | None = None,
 ) -> ExternalStepCollectionResult:
     submissions: list[SubmittedStepArtifact] = []
     pending_review: PendingExplorationReview | None = None
-    external_steps = [step for step in active_batch.steps if step.execution_mode == "external_preferred"]
+    external_steps = steps or [step for step in active_batch.steps if step.execution_mode == "external_preferred"]
     skipped_workload_steps = 0
 
-    for step in external_steps:
+    for index, step in enumerate(external_steps):
         if step.requested_capability == "workload_evidence_plane":
             try:
                 result = _workload_submission_via_peer_mcp(
@@ -327,7 +329,11 @@ def collect_external_steps(
             submissions.extend(result.submitted_steps)
             if result.pending_exploration_review is not None and pending_review is None:
                 pending_review = result.pending_exploration_review
-                break
+                return ExternalStepCollectionResult(
+                    submitted_steps=submissions,
+                    pending_exploration_review=pending_review,
+                    deferred_external_steps=tuple(external_steps[index + 1 :]),
+                )
             elif not result.submitted_steps and result.pending_exploration_review is None:
                 skipped_workload_steps += 1
             continue

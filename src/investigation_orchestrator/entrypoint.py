@@ -114,9 +114,10 @@ def _runtime_deps(*, allow_exploration_review: bool = False) -> OrchestratorRunt
         get_active_batch=get_active_batch,
         advance_batch=advance_batch,
         render_report=render_report,
-        collect_external_steps=lambda active_batch: collect_external_steps(
+        collect_external_steps=lambda active_batch, **kwargs: collect_external_steps(
             active_batch,
             allow_exploration_review=allow_exploration_review,
+            **kwargs,
         ),
         apply_pending_exploration_review=apply_pending_exploration_review,
         active_batch_is_render_only=_active_batch_is_render_only,
@@ -195,7 +196,7 @@ def _apply_exploration_review_decision(
     *,
     runtime: OrchestratorRuntimeConfig,
     decision: Literal["approve", "skip"],
-) -> OrchestrationState:
+    ) -> OrchestrationState:
     resolved_checkpoint_config = resolve_checkpoint_config(
         checkpoint_config=runtime.checkpoint_config,
         thread_id=runtime.thread_id,
@@ -222,6 +223,8 @@ def _apply_exploration_review_decision(
         enable_exploration_review_interrupt=allow_exploration_review,
     )
     pending_review = _pending_review_or_raise(current_snapshot.values)
+    if pending_review.decision is not None:
+        raise ValueError("exploration review decision has already been recorded for the requested thread_id")
     return update_investigation_graph_state(
         deps=_runtime_deps(allow_exploration_review=allow_exploration_review),
         checkpointer=runtime.checkpointer,

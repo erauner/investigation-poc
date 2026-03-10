@@ -668,6 +668,7 @@ def test_collect_external_steps_stops_after_first_pending_review(monkeypatch) ->
     assert result.submitted_steps == []
     assert result.pending_exploration_review is not None
     assert result.pending_exploration_review.step.step_id == "collect-target-evidence"
+    assert [step.step_id for step in result.deferred_external_steps] == ["collect-target-evidence-2"]
 
 
 def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:

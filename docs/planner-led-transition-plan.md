@@ -790,6 +790,9 @@ The next implementation move should be:
 
 ### Continue Slice 8, Then Finish Slice 9 Adoption
 
+This remains the next quality, cleanup, and runtime-adoption continuation path for the pre-exploration transition work.
+It does not replace the bounded-exploration slices as the primary next architecture direction, which is defined later in this document.
+
 Why:
 
 - the deletion pass is complete, so the remaining risk is behavior quality rather than surface sprawl
@@ -881,6 +884,9 @@ That directive is now captured in:
 
 - `docs/adr/0004-bounded-exploratory-evidence.md`
 
+The bounded-exploration slices are the next architecture slices.
+Remaining Slice 8 and Slice 9 items continue in parallel where they are quality, cleanup, or runtime-adoption work, but they no longer define the primary architectural direction.
+
 ## Recommended Next Slices
 
 ### Slice 11: Evidence Adequacy Contract
@@ -923,6 +929,7 @@ Delivered in this slice should be:
 - node scout work finishes against the same bounded policy model
 - approved review/interrupt seams stay runtime-local and do not alter `ReportingExecutionContext`
 - deterministic materialization still returns `SubmittedStepArtifact`
+- earlier bounded service follow-up behavior is treated as a precursor pattern that should converge under the same bounded-exploration policy model
 
 Validation gate:
 
@@ -980,6 +987,8 @@ Delivered in this slice should be:
 Validation gate:
 
 - the same canonical investigation result can be rendered in multiple profiles without changing findings or route provenance
+
+Presentation profile work may proceed in parallel, but it must remain strictly downstream of canonical evidence adequacy, exploratory routing, and deterministic artifact materialization.
 
 ## Current Rollout Framing
 
