@@ -146,6 +146,24 @@ def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:
             },
         )(),
     )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
 
     artifact = evidence_runner._submitted_artifact(step)
 
@@ -155,6 +173,8 @@ def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:
     assert artifact.actual_route.tool_name == "execute_query"
     assert artifact.evidence_bundle is not None
     assert artifact.evidence_bundle.metrics["service_error_rate"] == 0.5
+    assert artifact.evidence_bundle.object_state["kind"] == "service"
+    assert artifact.evidence_bundle.events == ["Warning Unhealthy service/api"]
     assert any(item.title == "High Service Latency" for item in artifact.evidence_bundle.findings)
 
 
@@ -240,7 +260,10 @@ def test_service_external_step_falls_back_internally_after_peer_failures(monkeyp
     assert artifact.actual_route is not None
     assert artifact.actual_route.source_kind == "investigation_internal"
     assert artifact.actual_route.tool_name == "collect_service_evidence"
-    assert "peer service MCP fallback: prom down" in artifact.evidence_bundle.limitations or "peer service MCP fallback: kube down" in artifact.evidence_bundle.limitations
+    assert (
+        "peer service MCP fallback: prometheus peer failed: prom down; kubernetes peer fallback failed: kube down"
+        in artifact.evidence_bundle.limitations
+    )
 
 
 def test_pick_runtime_pod_for_workload_uses_selector_not_prefix() -> None:
