@@ -105,6 +105,7 @@ spec:
                             /kaniko/executor \
                                 --dockerfile=Dockerfile.shadow \
                                 --context=dir://. \
+                                --build-arg=BASE_IMAGE=${IMAGE_NAME}:${shortCommit} \
                                 --destination=${SHADOW_IMAGE_NAME}:${shortCommit} \
                                 --destination=${SHADOW_IMAGE_NAME}:latest \
                                 --cache=false \

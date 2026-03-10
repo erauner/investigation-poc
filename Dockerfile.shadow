@@ -1,13 +1,5 @@
-FROM python:3.12-alpine
-
-WORKDIR /app
-
-RUN apk add --no-cache kubectl
-
-COPY pyproject.toml README.md ./
-COPY src ./src
-
-RUN python -m pip install --no-cache-dir .
+ARG BASE_IMAGE=docker.nexus.erauner.dev/homelab/investigation-poc:latest
+FROM ${BASE_IMAGE}
 
 EXPOSE 8080
 
