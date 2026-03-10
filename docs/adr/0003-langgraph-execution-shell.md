@@ -366,6 +366,39 @@ This avoids changing:
 
 all at once.
 
+## After Shadow Validation
+
+If the shadow BYO LangGraph agent proves operationally worthwhile, the expected next move is:
+
+- promote the BYO LangGraph agent to the preferred hosted runtime path
+- keep `investigation_service` as the semantic/control-plane owner
+- keep `investigation_orchestrator` as the reusable execution engine
+- keep peer MCP servers as the evidence-plane transport boundary
+
+That promotion should mean:
+
+- the same orchestration core is reused
+- the main change is the outer hosting/runtime model
+- resumable execution and checkpoint-backed recovery become normal runtime capabilities of the preferred path
+
+It should **not** mean:
+
+- moving investigation semantics into the hosted agent wrapper
+- reopening prompt-owned MCP choreography as the routine happy path
+- replacing peer MCP servers with direct ad hoc evidence collection in prompts
+
+The most likely steady-state outcome after successful shadow validation is:
+
+- BYO LangGraph becomes the preferred hosted runtime
+- the declarative agent path is retained temporarily as a comparison, fallback, or rollback lane
+- public resume or session-facing APIs are considered only after the hosted thread identity model is stable and proven useful
+
+The precise retirement/deprecation timing for the declarative runtime remains a follow-on decision, but the intended direction is:
+
+- shadow first
+- preferred-runtime promotion second
+- declarative-path demotion or retirement only after hosted parity, observability, and rollback confidence are strong enough
+
 ## Future Deployment Direction
 
 The architectural decision in this ADR is about the execution shell, not immediate hosting.
