@@ -1,6 +1,6 @@
 # ADR 0004: Keep A Deterministic Spine And Add Bounded Exploratory Evidence Nodes
 
-- Status: Proposed
+- Status: Accepted (incremental rollout)
 - Date: 2026-03-10
 - Related ADRs:
   - `docs/adr/0001-artifact-oriented-investigation-workflow.md`
@@ -83,6 +83,47 @@ may change how investigation results are rendered, but they must not change:
 - reconciliation
 - canonical investigation semantics
 
+## Updated Rollout Reality
+
+The original intended proving order for bounded exploration was:
+
+- workload first
+- service later
+- node later
+
+That rollout order has already shifted in implementation:
+
+- deterministic service-alert evidence hardening landed before exploratory generalization was complete
+- a bounded service follow-up scout landed early because it closed a real product-quality gap
+- bounded node scout work is now in progress
+
+This changes rollout order, not architecture.
+
+The durable architectural rule remains:
+
+- the investigation spine stays deterministic
+- exploratory behavior stays fenced inside approved evidence-plane seams
+- typed artifact and reconciliation contracts stay unchanged
+
+## Baseline Hardening Versus Exploratory Evidence
+
+Bounded exploratory evidence is not the same thing as improving deterministic baseline evidence collection.
+
+The system should continue to improve:
+
+- deterministic baseline evidence quality
+- alert-specific evidence shaping
+- target-specific evidence coverage
+- deterministic peer transport and fallback behavior
+
+Exploratory behavior begins only after:
+
+- baseline evidence has been gathered
+- adequacy has been evaluated
+- a bounded scout or bounded follow-up seam is entered
+
+This distinction matters because baseline hardening improves the default path, while exploratory behavior spends extra bounded runtime only when the baseline is weak, contradictory, or blocked.
+
 ## What "Bounded Exploratory Evidence" Means
 
 Bounded exploratory evidence is allowed only when all of the following remain true:
@@ -109,6 +150,14 @@ The downstream planner and reconciliation seams must still consume the same type
 - `EvidenceBundle`
 - `StepArtifact`
 
+Exploratory behavior may add an intermediate scout-local probe ledger or result summary for observability, but that seam remains transient.
+
+The downstream contracts still remain:
+
+- `SubmittedStepArtifact`
+- `EvidenceBundle`
+- planner-owned reconciliation into `StepArtifact` and `EvidenceBatchExecution`
+
 This ADR does not require that bounded exploration be implemented by an LLM-driven scout immediately.
 
 Bounded exploratory evidence may later be implemented by:
@@ -127,6 +176,50 @@ The architectural requirement is:
 
 not any one specific mechanism.
 
+## Scout Policy And Leading Context
+
+Bounded exploratory seams may consume a small, product-owned leading-context bundle derived from:
+
+- static scout policy
+- step- or plane-specific policy
+- small runtime-derived hints from baseline evidence and adequacy
+- planner-emitted execution-facing step inputs
+
+Illustratively, that seam may look like:
+
+```python
+@dataclass(frozen=True)
+class ExploratoryNodeContext:
+    policy: ExploratoryScoutPolicy
+    hints: ScoutHints
+    baseline_summary: BaselineEvidenceSummary
+    step_id: str
+    requested_capability: str
+    execution_inputs: StepExecutionInputs
+```
+
+The important point is not any one exact type name.
+The important point is that bounded exploratory nodes should consume:
+
+- structured policy
+- structured runtime hints
+- canonical execution inputs already emitted by product-owned planning
+
+This seam is:
+
+- transient runtime input
+- product-owned
+- small and inspectable
+
+It is not:
+
+- a second semantic model beside `ReportingExecutionContext`
+- user-authored free-form prompt tuning
+- host-wrapper-owned troubleshooting logic
+
+The baseline summary is intentionally separate from the full evidence artifact.
+Exploratory nodes should receive a compact view of what is already known and what is still missing rather than depending on arbitrary prompt reconstruction from raw runtime state.
+
 ## Preferred Pattern
 
 The preferred near-term pattern is:
@@ -138,6 +231,19 @@ The preferred near-term pattern is:
 5. deterministic batch progression and rendering
 
 This is intentionally narrower than making the whole investigation graph agentic.
+
+The flexibility lives only in:
+
+- which approved probe to try next
+- the order of those approved probes
+- when the bounded scout has seen enough and should stop
+
+The flexibility does not extend to:
+
+- changing the overall investigation plan
+- inventing new tool families or MCP servers
+- changing artifact or reconciliation contracts
+- continuing beyond bounded budgets
 
 ## Adequacy Outcome Taxonomy
 
@@ -159,16 +265,22 @@ Why this matters:
 - `contradictory` means the evidence conflicts and bounded follow-up may be needed
 - `blocked` means collection limitations dominate and the system should degrade honestly rather than pretending evidence is complete
 
+These outcomes are the deterministic control seam between:
+
+- immediate artifact materialization
+- bounded exploration
+- honest partial degradation
+
 ## Initial Scope
 
-The first place to apply this is:
+The first proving model for this pattern is:
 
 - `workload_evidence_plane`
 
-Why workload first:
+Why workload was the first intended proving case:
 
-- it is the most mature evidence path today
-- it is where declarative-path flexibility has been most obviously useful
+- it is the most mature evidence path
+- it is where declarative-path flexibility was most obviously useful
 - it has the clearest bounded tool set
   - `resources_get`
   - `events_list`
@@ -182,10 +294,9 @@ The following should remain deterministic for now:
 - `rank_hypotheses`
 - `render_investigation_report`
 
-The following may later adopt bounded exploratory behavior after workload proving:
+- broad service and node exploration should still be policy-gated and incremental rather than assumed everywhere by default
 
-- `service_evidence_plane`
-- `node_evidence_plane`
+Service and node evidence may adopt the same bounded pattern incrementally where product-quality needs justify it, but that does not change the architectural rule that the flexibility stays local, budgeted, typed, and inspectable.
 
 ## Desired State
 
@@ -200,8 +311,8 @@ The desired state is:
 
 Representative examples of desired future behavior:
 
-1. if baseline workload evidence is already strong, materialize immediately
-2. if baseline workload evidence is weak, let a bounded scout choose one or two more approved probes
+1. if baseline evidence is already strong, materialize immediately
+2. if baseline evidence is weak or contradictory, let a bounded scout choose one or two more approved probes
 3. if evidence is still insufficient, return a partial but honest artifact
 4. if service or node follow-up is needed, route only through pre-approved graph branches
 
@@ -218,9 +329,10 @@ The next implementation slices should follow this order:
 
 1. add step-level flexibility policy in product-owned execution policy
 2. add deterministic evidence-adequacy evaluation
-3. add a bounded workload evidence-scout subgraph
-4. route the main orchestrator to use that subgraph only when adequacy fails
-5. add presentation profiles as a separate downstream concern
+3. formalize the bounded scout input seam with policy, runtime hints, and a compact baseline evidence summary
+4. add bounded scout paths for approved evidence planes
+5. route the main orchestrator to use those scout paths only when adequacy fails
+6. add presentation profiles as a separate downstream concern
 
 ## Observability And Provenance Expectations
 
@@ -231,6 +343,7 @@ The system should preserve enough traceability to explain:
 - why exploration was entered
 - which bounded probe path actually ran
 - what budget was consumed
+- why the scout stopped
 - what final route or routes satisfied the step
 
 The current `actual_route` seam remains important, but exploratory behavior may require richer provenance and runtime trace detail later.
@@ -256,7 +369,7 @@ This ADR does not decide:
 
 - whether the BYO shadow lane should become the default hosted runtime
 - when kagent-backed checkpointing should become the default checkpoint mode
-- whether service and node evidence should become bounded-exploratory immediately
+- exactly which service and node seams should adopt bounded exploration next
 - whether public resume APIs should exist
 
 The narrower decision is:

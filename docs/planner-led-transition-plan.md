@@ -60,6 +60,26 @@ What is still missing:
 - stronger real-cluster validation around alert and init-container cases
 - clearer observability of which peer tool surfaces the agent actually chose during a run
 
+## Current Status After Transport And Scout Expansion
+
+Recent implementation work clarified which parts of the flexibility story are already real and which parts still need formalization.
+
+What is now true:
+
+- peer transport unification across workload, service, and node evidence paths is in place
+- the in-process LangGraph shell and checkpoint/resume seams are in place
+- the shadow BYO lane exists as an additive validation path rather than the default runtime
+- deterministic baseline service-alert evidence collection improved materially
+- a bounded service follow-up scout landed earlier than originally sequenced because it addressed a real product-quality gap
+- bounded node scout work is now in progress
+- the first orchestrator-side exploration review interrupt now exists for the workload scout path
+
+What this means:
+
+- bounded exploration is no longer only a future idea
+- the remaining work is now about unifying the bounded-scout pattern, policy inputs, and observability rather than proving the concept from scratch
+- the rollout order changed, but the underlying architecture did not
+
 ## Post-Slice-7 Validation Findings
 
 Recent homelab validation changed the shape of the remaining work:
@@ -863,22 +883,22 @@ That directive is now captured in:
 
 ## Recommended Next Slices
 
-### Slice 11: Evidence Adequacy Gate
+### Slice 11: Evidence Adequacy Contract
 
-Status: Proposed
+Status: In Progress
 
 Goal:
 
-- add a deterministic adequacy check after baseline evidence collection so the runtime can distinguish:
+- formalize and unify the deterministic adequacy contract after baseline evidence collection so the runtime can distinguish:
   - strong enough evidence
   - weak or contradictory evidence
   - blocked evidence
 
 Delivered in this slice should be:
 
-- a product-owned adequacy evaluator for evidence bundles
-- explicit adequacy outcomes that can later drive routing
-- tests proving strong workload evidence short-circuits without extra exploration
+- a product-owned adequacy evaluator that is shared coherently across workload, service, and node scout paths
+- explicit adequacy outcomes that drive bounded routing decisions and honest degradation
+- tests proving strong baseline evidence short-circuits without extra exploration
 
 This slice should remain:
 
@@ -886,34 +906,59 @@ This slice should remain:
 - product-owned
 - upstream of any bounded agentic scout
 
-### Slice 12: Bounded Workload Evidence Scout
+### Slice 12: Bounded Scout Generalization
+
+Status: In Progress
+
+Goal:
+
+- consolidate the bounded-scout pattern across approved evidence planes without reopening raw tool choreography
+
+Delivered in this slice should be:
+
+- bounded scout units remain fenced to approved seams only
+- workload remains the clearest proving case for extra peer discovery
+- service follow-up scout behavior is aligned with the same bounded policy model
+- node scout work finishes against the same bounded policy model
+- approved review/interrupt seams stay runtime-local and do not alter `ReportingExecutionContext`
+- deterministic materialization still returns `SubmittedStepArtifact`
+
+Validation gate:
+
+- baseline cases still behave deterministically when evidence is already strong
+- bounded scout behavior improves weak or contradictory evidence cases without reopening raw tool choreography
+- output contracts and provenance remain stable
+
+### Slice 13: Scout Policy And Leading-Context Configuration
 
 Status: Proposed
 
 Goal:
 
-- allow exploratory workload evidence gathering only inside a bounded workload-evidence seam
+- provide a product-owned, structured leading-context seam for bounded scout behavior
 
 Delivered in this slice should be:
 
-- a small workload evidence-scout subgraph or equivalent bounded runtime unit
-- strict allowlisted tools:
-  - `resources_get`
-  - `events_list`
-  - `pods_log`
-  - `pods_list_in_namespace`
-- strict budgets:
-  - max tool calls
-  - max runtime
-- deterministic materialization back into `SubmittedStepArtifact`
+- explicit scout policy inputs such as:
+  - allowlisted tools
+  - budgets
+  - stop conditions
+  - probe-ordering preferences
+- small runtime-derived scout hints from baseline evidence and adequacy
+- a compact baseline evidence summary for scout nodes rather than ad hoc prompt reconstruction
+- a shared scout input seam across workload/service/node bounded scouts
+- clear boundaries on what remains fixed:
+  - artifact contracts
+  - reconciliation semantics
+  - final report semantics
 
 Validation gate:
 
-- baseline workload cases still behave deterministically when evidence is already strong
-- bounded scout behavior improves weak workload cases without reopening raw tool choreography
-- output contracts and provenance remain stable
+- scout behavior remains configurable through product-owned structured policy rather than free-form prompt tuning
+- workload/service/node scout paths can consume the same style of bounded input context
+- observability remains sufficient to explain why a scout entered, what it tried, and why it stopped
 
-### Slice 13: Presentation Profiles
+### Slice 14: Presentation Profiles
 
 Status: In Progress
 
@@ -945,16 +990,16 @@ The current intended distinction is:
 - initial shadow validation in real environments in progress
 - hosted checkpoint/resume semantics still separate from this flexibility work
 - promotion beyond shadow still explicitly deferred
+- service scout landing earlier than originally sequenced changed rollout order, not architecture
 
 ## Updated Priority Order
 
 The next implementation order should now be:
 
-1. evidence adequacy gate
-2. bounded workload evidence scout
-3. presentation profiles
-4. only later:
-   - bounded service evidence exploration
-   - bounded node evidence exploration
+1. formalize and unify the evidence adequacy contract
+2. finish and align the bounded scout pattern across workload, service, and node seams
+3. add structured scout policy and leading-context configuration
+4. presentation profiles
+5. only later:
    - human-in-the-loop interrupts
    - broader hosted checkpoint/resume work for exploratory subgraphs
