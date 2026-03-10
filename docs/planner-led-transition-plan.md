@@ -161,6 +161,18 @@ The future BYO question is intentionally sequenced after those steps:
 
 So the current plan does not require an immediate BYO move, but it does keep that as the preferred later deployment direction once the orchestration core and transport split are stable.
 
+One important planning note:
+
+- the near-term path is intentionally less flexible at the prompt/tool layer
+- that is a feature, not a regression, because prompt-owned orchestration proved unreliable
+- the place where execution flexibility is expected to return is the later LangGraph shell phase
+  - richer branching
+  - checkpointed resume
+  - bounded retries
+  - clearer stop/continue decisions
+
+So we should not measure the current deterministic orchestration layer against “can the model improvise more tool paths again?” The intended later flexibility comes from the execution shell, not from reopening raw prompt choreography.
+
 ### Ordered Follow-On After The Orchestration-Core-First Merge
 
 The intended sequence after the orchestration-core-first merge is:

@@ -601,6 +601,40 @@ def test_normalize_alert_input_keeps_pod_alerts_in_workload_scope_when_service_l
     assert normalized.service_name is None
 
 
+def test_normalize_alert_input_infers_statefulset_target_from_labels() -> None:
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="StatefulSetReplicasMismatch",
+            labels={
+                "namespace": "databases",
+                "statefulset": "postgres",
+            },
+        )
+    )
+
+    assert normalized.namespace == "databases"
+    assert normalized.target == "statefulset/postgres"
+    assert normalized.scope == "workload"
+    assert normalized.profile == "workload"
+    assert any("statefulset labels" in note for note in normalized.normalization_notes)
+
+
+def test_normalize_alert_input_infers_statefulset_target_from_text() -> None:
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="StatefulSetReplicasMismatch",
+            annotations={"summary": "StatefulSet postgres has unavailable replicas"},
+            labels={"namespace": "databases"},
+        )
+    )
+
+    assert normalized.namespace == "databases"
+    assert normalized.target == "statefulset/postgres"
+    assert normalized.scope == "workload"
+    assert normalized.profile == "workload"
+    assert any("alert text" in note for note in normalized.normalization_notes)
+
+
 def test_normalize_alert_input_does_not_treat_app_label_as_concrete_target() -> None:
     with pytest.raises(ValueError, match="target could not be inferred from alert input"):
         normalize_alert_input(

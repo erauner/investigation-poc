@@ -69,6 +69,17 @@ This means:
 - BYO LangGraph hosting through kagent is the preferred future deployment direction if hosted resumable execution proves worth the added operational complexity
 - that BYO move is a later deployment step, not the first architectural step
 
+This is intentionally a two-stage flexibility model:
+
+- near-term:
+  - reduce flexibility in the core happy path by moving orchestration into deterministic code
+  - do not return to prompt-owned raw MCP choreography for routine investigations
+- later:
+  - reintroduce richer execution flexibility through the LangGraph shell itself
+  - use graph nodes, bounded branches, retries, resume, and checkpointed state transitions as the controlled place where the runtime becomes more capable again
+
+So the expected place where the system becomes more flexible is not the prompt/tool surface. It is the future execution shell.
+
 LangGraph is not intended to become:
 
 - the owner of plan semantics
@@ -83,7 +94,17 @@ Instead, LangGraph should provide:
 - resumability
 - replay/debuggability
 - bounded retry/fallback behavior
+- richer controlled branching than the current bounded hand-written loop
 - a clean future path to BYO hosted execution
+
+This is the main future capability gain beyond the orchestration-core-first merge:
+
+- today, the orchestrator is intentionally narrow and mostly linear
+- later, the LangGraph shell is expected to become the place where more flexible investigation control lives
+  - continue or stop based on richer state
+  - resume a partially completed run
+  - branch to follow-up evidence batches with checkpointed state
+  - retry or degrade gracefully without returning to agent-improvised raw tool choreography
 
 ## What Stays Product-Owned
 

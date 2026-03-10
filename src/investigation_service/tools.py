@@ -69,6 +69,7 @@ def _infer_target_from_text(text: str | None) -> str | None:
     patterns = [
         (r"\bpod\s+([a-z0-9][a-z0-9\-\.]*)\b", "pod"),
         (r"\bdeployment\s+([a-z0-9][a-z0-9\-\.]*)\b", "deployment"),
+        (r"\bstatefulset\s+([a-z0-9][a-z0-9\-\.]*)\b", "statefulset"),
         (r"\bservice\s+([a-z0-9][a-z0-9\-\.]*)\b", "service"),
         (r"\bnode\s+([a-z0-9][a-z0-9\-\.]*)\b", "node"),
     ]
@@ -317,7 +318,7 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
             target = f"deployment/{deployment_name}"
             notes.append("target inferred from deployment labels")
         elif statefulset_name:
-            target = f"deployment/{statefulset_name}"
+            target = f"statefulset/{statefulset_name}"
             notes.append("target inferred from statefulset labels")
         elif daemonset_name:
             target = f"deployment/{daemonset_name}"
