@@ -183,6 +183,14 @@ Concretely, the later flexibility we are working toward is:
 That is the form of flexibility the later LangGraph shell should add.
 It is not a plan to reintroduce free-form prompt-owned raw MCP choreography into the main happy path.
 
+The first practical LangGraph step is now narrower than the full future shell:
+
+- keep `run_orchestrated_investigation(...)` as the public facade
+- compile the existing orchestrator loop into a small in-process LangGraph graph
+- keep `ReportingExecutionContext` as the authoritative runtime snapshot inside graph state
+- add optional checkpointer hooks and thread/checkpoint invoke config for tests and local proving
+- do not add public resume APIs, hosted execution, or a BYO deployment cutover yet
+
 ### Ordered Follow-On After The Orchestration-Core-First Merge
 
 The intended sequence after the orchestration-core-first merge is:
@@ -210,11 +218,16 @@ The intended sequence after the orchestration-core-first merge is:
    - clarify their longer-term support/deprecation status once the high-level path is stable on peer MCP transport
 
 6. real LangGraph execution shell
-   - compile the orchestration core into a true LangGraph runtime
-   - add checkpointing/resume support
+   - first compile the orchestration core into a true in-process LangGraph runtime
    - keep `investigation_service` as the semantic owner
+   - add optional checkpoint hooks before any public resume surface
+   - validate graph parity against the current runtime path
 
-7. optional shadow BYO LangGraph agent
+7. checkpointed/resumable LangGraph follow-on
+   - add persistent kagent-backed checkpointing if resumable execution is worth the operational cost
+   - add resume-facing runtime seams only after a real thread identity and hosting boundary exist
+
+8. optional shadow BYO LangGraph agent
    - package the LangGraph-backed runtime as a BYO agent only after orchestration and transport are stable
    - compare it side by side with the declarative path before deciding on any hosting cutover
 

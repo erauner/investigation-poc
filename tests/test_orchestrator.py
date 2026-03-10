@@ -1,4 +1,6 @@
 from investigation_orchestrator.entrypoint import run_orchestrated_investigation
+from investigation_orchestrator.checkpointing import GraphCheckpointConfig, create_in_memory_checkpointer
+from investigation_orchestrator.graph import get_investigation_graph_state
 from investigation_service.models import (
     ActiveEvidenceBatchContract,
     AdvanceInvestigationRuntimeResponse,
@@ -16,6 +18,7 @@ from investigation_service.models import (
     SubmittedStepArtifact,
 )
 import investigation_orchestrator.entrypoint as entrypoint
+import pytest
 
 
 def _incident() -> BuildInvestigationPlanRequest:
@@ -316,6 +319,57 @@ def test_run_orchestrated_investigation_bypasses_terminal_render_batch(monkeypat
     assert report.target == "pod/crashy-abc123"
 
 
+def test_run_orchestrated_investigation_renders_immediately_when_no_active_batch(monkeypatch) -> None:
+    incident = _incident()
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+    monkeypatch.setattr(
+        entrypoint,
+        "get_active_batch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("get_active_batch should not run when no active batch remains")),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="pod/crashy-abc123",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=["panic: startup failed"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="Inspect logs and recent deployment changes before taking write actions.",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=["alertname=PodCrashLooping"],
+            tool_path_trace=None,
+        ),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "find_unhealthy_pod",
+        lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})(),
+    )
+
+    report = run_orchestrated_investigation(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+        )
+    )
+
+    assert report.target == "pod/crashy-abc123"
+
+
 def test_run_orchestrated_investigation_fails_when_budget_exhausted_with_non_render_work(monkeypatch) -> None:
     incident = _incident()
     monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id="batch-1"))
@@ -465,3 +519,189 @@ def test_run_orchestrated_investigation_preserves_render_request_fields(monkeypa
     assert preserved.correlation_window_minutes == 123
     assert preserved.correlation_limit == 7
     assert preserved.anchor_timestamp == "2026-03-09T12:00:00Z"
+
+
+def test_run_orchestrated_investigation_persists_graph_state_with_checkpointer(monkeypatch) -> None:
+    incident = _incident()
+    checkpointer = create_in_memory_checkpointer()
+    checkpoint_config = GraphCheckpointConfig(
+        thread_id="test-orchestrator-thread",
+    )
+
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="deployment/crashy",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=["evidence"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="next",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=[],
+            tool_path_trace=None,
+        ),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "find_unhealthy_pod",
+        lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})(),
+    )
+
+    report = entrypoint._run_orchestrated_investigation_graph(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+        ),
+        checkpointer=checkpointer,
+        checkpoint_config=checkpoint_config,
+    )
+
+    snapshot = get_investigation_graph_state(
+        deps=entrypoint._runtime_deps(),
+        checkpointer=checkpointer,
+        checkpoint_config=checkpoint_config,
+    )
+
+    assert report.target == "deployment/crashy"
+    assert snapshot.config["configurable"]["thread_id"] == "test-orchestrator-thread"
+    assert snapshot.values["execution_context"].updated_plan.active_batch_id is None
+    assert snapshot.values["final_report"].target == "deployment/crashy"
+
+
+def test_internal_graph_runner_rejects_checkpoint_config_without_checkpointer(monkeypatch) -> None:
+    incident = _incident()
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="deployment/crashy",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=["evidence"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="next",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=[],
+            tool_path_trace=None,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="checkpoint_config requires a checkpointer"):
+        entrypoint._run_orchestrated_investigation_graph(
+            InvestigationReportRequest(
+                cluster=incident.cluster,
+                namespace=incident.namespace,
+                target=incident.target,
+                profile=incident.profile,
+                lookback_minutes=incident.lookback_minutes,
+                alertname=incident.alertname,
+                labels=incident.labels,
+                annotations=incident.annotations,
+            ),
+            checkpoint_config=GraphCheckpointConfig(thread_id="test-thread"),
+        )
+
+
+def test_internal_graph_runner_rejects_checkpointer_without_explicit_thread_id(monkeypatch) -> None:
+    incident = _incident()
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="deployment/crashy",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=["evidence"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="next",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=[],
+            tool_path_trace=None,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="explicit thread_id is required"):
+        entrypoint._run_orchestrated_investigation_graph(
+            InvestigationReportRequest(
+                cluster=incident.cluster,
+                namespace=incident.namespace,
+                target=incident.target,
+                profile=incident.profile,
+                lookback_minutes=incident.lookback_minutes,
+                alertname=incident.alertname,
+                labels=incident.labels,
+                annotations=incident.annotations,
+            ),
+            checkpointer=create_in_memory_checkpointer(),
+        )
+
+
+def test_internal_graph_runner_rejects_empty_thread_id_with_checkpointer(monkeypatch) -> None:
+    incident = _incident()
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="deployment/crashy",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=["evidence"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="next",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=[],
+            tool_path_trace=None,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="thread_id is required"):
+        entrypoint._run_orchestrated_investigation_graph(
+            InvestigationReportRequest(
+                cluster=incident.cluster,
+                namespace=incident.namespace,
+                target=incident.target,
+                profile=incident.profile,
+                lookback_minutes=incident.lookback_minutes,
+                alertname=incident.alertname,
+                labels=incident.labels,
+                annotations=incident.annotations,
+            ),
+            checkpointer=create_in_memory_checkpointer(),
+            checkpoint_config=GraphCheckpointConfig(),
+        )

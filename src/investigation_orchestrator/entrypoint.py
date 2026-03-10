@@ -9,6 +9,10 @@ from investigation_service.tools import find_unhealthy_pod
 
 from .control_plane import advance_batch, get_active_batch, render_report, seed_context
 from .evidence_runner import run_required_external_steps
+from .checkpointing import GraphCheckpointConfig
+from .graph import invoke_investigation_graph
+from .graph_nodes import OrchestratorRuntimeDeps
+from .state import build_initial_state
 
 
 def _incident_from_request(req: InvestigationReportRequest) -> BuildInvestigationPlanRequest:
@@ -72,39 +76,48 @@ def _maybe_attach_resolved_pod_context(
     )
 
 
+def _runtime_deps() -> OrchestratorRuntimeDeps:
+    return OrchestratorRuntimeDeps(
+        seed_context=seed_context,
+        get_active_batch=get_active_batch,
+        advance_batch=advance_batch,
+        render_report=render_report,
+        run_required_external_steps=run_required_external_steps,
+        active_batch_is_render_only=_active_batch_is_render_only,
+    )
+
+
+def _run_orchestrated_investigation_graph(
+    req: InvestigationReportRequest,
+    *,
+    max_batches: int = 2,
+    checkpointer=None,
+    checkpoint_config: GraphCheckpointConfig | None = None,
+) -> InvestigationReport:
+    incident = _incident_from_request(req)
+    final_state = invoke_investigation_graph(
+        build_initial_state(
+            req,
+            incident,
+            remaining_batch_budget=max_batches,
+        ),
+        deps=_runtime_deps(),
+        checkpointer=checkpointer,
+        checkpoint_config=checkpoint_config,
+    )
+    report = final_state["final_report"]
+    if report is None:
+        raise ValueError("orchestration graph completed without rendering a final report")
+    return report
+
+
 def run_orchestrated_investigation(
     req: InvestigationReportRequest,
     *,
     max_batches: int = 2,
 ) -> InvestigationReport:
-    incident = _incident_from_request(req)
-    execution_context = seed_context(incident, allow_bounded_fallback_execution=False)
-    remaining_batch_budget = max_batches
-
-    while True:
-        if execution_context.updated_plan.active_batch_id is None:
-            break
-        if _active_batch_is_render_only(execution_context.updated_plan):
-            break
-        if remaining_batch_budget <= 0:
-            raise ValueError("orchestrator stopped with non-render work still pending")
-
-        active_batch = get_active_batch(incident, execution_context)
-        if active_batch is None:
-            break
-
-        submitted_steps = run_required_external_steps(active_batch)
-        if any(step.execution_mode == "external_preferred" for step in active_batch.steps) and not submitted_steps:
-            raise ValueError("required external steps were not materialized")
-
-        advance_response = advance_batch(
-            incident,
-            execution_context,
-            submitted_steps=submitted_steps,
-            batch_id=active_batch.batch_id,
-        )
-        execution_context = advance_response.execution_context
-        remaining_batch_budget -= 1
-
-    report = render_report(req, execution_context)
+    report = _run_orchestrated_investigation_graph(
+        req,
+        max_batches=max_batches,
+    )
     return _maybe_attach_resolved_pod_context(req, report)
