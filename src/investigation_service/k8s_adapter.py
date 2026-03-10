@@ -583,7 +583,14 @@ def find_unhealthy_workloads(
 
 
 def get_related_events(target: TargetRef, limit: int = 20, cluster: ResolvedCluster | None = None) -> list[str]:
-    event_targets: list[tuple[str | None, str]] = [(target.kind.capitalize(), target.name)]
+    kind_map = {
+        "pod": "Pod",
+        "deployment": "Deployment",
+        "statefulset": "StatefulSet",
+        "service": "Service",
+        "node": "Node",
+    }
+    event_targets: list[tuple[str | None, str]] = [(kind_map.get(target.kind), target.name)]
     if target.kind in {"deployment", "statefulset"}:
         pod_name = _call_with_optional_cluster(
             _first_pod_for_workload,
