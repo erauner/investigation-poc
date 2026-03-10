@@ -225,8 +225,10 @@ The intended sequence after the orchestration-core-first merge is:
    - validate graph parity against the current runtime path
 
 7. checkpointed/resumable LangGraph follow-on
+   - the in-process shell now includes internal thread identity resolution, checkpoint-resume tests at graph-node boundaries, and minimal runtime observability
+   - keep public resume APIs deferred
    - add persistent kagent-backed checkpointing if resumable execution is worth the operational cost
-   - add resume-facing runtime seams only after a real thread identity and hosting boundary exist
+   - add caller-facing resume/runtime seams only after a real hosted thread identity boundary exists
 
 8. optional shadow BYO LangGraph agent
    - package the LangGraph-backed runtime as a BYO agent only after orchestration and transport are stable

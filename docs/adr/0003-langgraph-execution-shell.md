@@ -216,6 +216,9 @@ What is now true:
 - `run_orchestrated_investigation(...)` is the stable public facade and uses the in-process LangGraph shell internally
 - graph state remains a thin wrapper around `ReportingExecutionContext`
 - checkpoint configuration is behind an orchestrator-side seam and is exercised in tests with in-memory checkpointing
+- the orchestrator now has an explicit internal thread identity seam for checkpointed graph execution
+- checkpoint-resume behavior is exercised in tests from real graph-node boundaries rather than only through terminal state inspection
+- minimal redacted runtime observability exists around graph run start/finish, node transitions, and checkpoint interruption/resume boundaries
 - workload, service, and node external-preferred evidence steps now use orchestrator-owned peer MCP transport first
 - bounded internal fallback remains planner-owned inside product code rather than living in the orchestrator happy path
 
@@ -240,15 +243,14 @@ Before introducing a shadow BYO LangGraph agent through kagent, the following sh
 
 The remaining practical gates before a BYO shadow-hosting slice are:
 
-- add a small runtime seam for explicit thread identity resolution
-- add checkpoint-resume tests at graph-node boundaries, not only checkpoint state inspection
-- add minimal runtime observability around thread ID, node transition, and checkpoint boundary
+- choose the caller-facing thread identity strategy at the hosted runtime boundary
+- keep public resume APIs deferred until that hosting boundary exists
 - package the BYO runtime as a separate outer hosting layer rather than folding kagent-specific code into `investigation_orchestrator`
 
 Until those gates are closed, the repo should be treated as:
 
-- architecturally ready for BYO preparation
-- not yet fully ready for a production-worthy BYO shadow rollout
+- architecturally ready for BYO shadow-hosting preparation
+- not yet fully ready for a production-worthy BYO shadow rollout until the hosted thread identity boundary is explicit
 
 ## Immediate Follow-On After The Orchestration-Core-First Merge
 
@@ -363,6 +365,39 @@ This avoids changing:
 - orchestration logic
 
 all at once.
+
+## After Shadow Validation
+
+If the shadow BYO LangGraph agent proves operationally worthwhile, the expected next move is:
+
+- promote the BYO LangGraph agent to the preferred hosted runtime path
+- keep `investigation_service` as the semantic/control-plane owner
+- keep `investigation_orchestrator` as the reusable execution engine
+- keep peer MCP servers as the evidence-plane transport boundary
+
+That promotion should mean:
+
+- the same orchestration core is reused
+- the main change is the outer hosting/runtime model
+- resumable execution and checkpoint-backed recovery become normal runtime capabilities of the preferred path
+
+It should **not** mean:
+
+- moving investigation semantics into the hosted agent wrapper
+- reopening prompt-owned MCP choreography as the routine happy path
+- replacing peer MCP servers with direct ad hoc evidence collection in prompts
+
+The most likely steady-state outcome after successful shadow validation is:
+
+- BYO LangGraph becomes the preferred hosted runtime
+- the declarative agent path is retained temporarily as a comparison, fallback, or rollback lane
+- public resume or session-facing APIs are considered only after the hosted thread identity model is stable and proven useful
+
+The precise retirement/deprecation timing for the declarative runtime remains a follow-on decision, but the intended direction is:
+
+- shadow first
+- preferred-runtime promotion second
+- declarative-path demotion or retirement only after hosted parity, observability, and rollback confidence are strong enough
 
 ## Future Deployment Direction
 
