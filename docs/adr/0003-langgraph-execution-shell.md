@@ -231,6 +231,32 @@ What is still intentionally deferred:
 
 So the architecture is now at the point where a future BYO LangGraph move should be treated as a hosting/runtime packaging step, not as a semantic rewrite.
 
+## Current Status After The Local Shadow BYO Slice
+
+The repo has now completed the first additive local shadow-hosting slice for the BYO direction.
+
+What is now true:
+
+- a separate `investigation_shadow_runtime` package exists as an outer host layer
+- that host calls the orchestrator library directly rather than routing back through `investigation_service.mcp_server`
+- a small stable host-facing orchestrator API now exists so the host does not depend on private `_run_*` helpers or exception-only interruption detection
+- local kind packaging now supports a separate shadow BYO agent beside the current declarative `incident-triage` path
+- local shadow validation is now repeatable on a warm kind cluster and includes output-quality assertions rather than only health checks
+- deterministic host-side formatting is now applied from `InvestigationReport` so the shadow lane can be compared side by side with the declarative lane
+
+What is intentionally true only for local validation right now:
+
+- the local shadow lane uses `SHADOW_CHECKPOINT_MODE=memory`
+- local kind validation proves the hosted packaging boundary and direct-orchestrator call path
+- local kind validation does not yet prove the real kagent-backed checkpoint path
+
+What remains to close before treating the BYO path as more than a local shadow proof:
+
+- validate the shadow lane in homelab/GitOps as a separate hosted runtime
+- choose and document the hosted thread identity boundary explicitly
+- exercise real kagent-backed checkpoint storage in the outer host layer
+- strengthen side-by-side hosted observability so invoke/resume behavior is inspectable without guesswork
+
 ## Readiness Gates Before Any BYO Shadow Agent
 
 Before introducing a shadow BYO LangGraph agent through kagent, the following should be true:
@@ -251,6 +277,14 @@ Until those gates are closed, the repo should be treated as:
 
 - architecturally ready for BYO shadow-hosting preparation
 - not yet fully ready for a production-worthy BYO shadow rollout until the hosted thread identity boundary is explicit
+
+Those original gates are now satisfied for a local shadow-hosting proof.
+
+The next practical gates after this local slice are:
+
+- prove the same shadow runtime shape in homelab/GitOps
+- validate real hosted checkpoint behavior there rather than only in-memory local checkpoints
+- keep public resume APIs deferred until the hosted thread identity strategy is explicit and stable
 
 ## Immediate Follow-On After The Orchestration-Core-First Merge
 
@@ -398,6 +432,12 @@ The precise retirement/deprecation timing for the declarative runtime remains a 
 - shadow first
 - preferred-runtime promotion second
 - declarative-path demotion or retirement only after hosted parity, observability, and rollback confidence are strong enough
+
+After the local shadow slice, "shadow first" should now be read concretely as:
+
+- local kind proof first: completed
+- homelab/GitOps side-by-side hosted proof second: next
+- preferred-runtime promotion only after hosted checkpoint behavior, observability, and rollback confidence are good enough
 
 ## Future Deployment Direction
 
