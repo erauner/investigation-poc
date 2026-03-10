@@ -795,7 +795,7 @@ def test_service_follow_up_step_clears_stale_prometheus_failure_limitations_afte
                     target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
                     object_state={"kind": "service", "name": "api"},
                     events=["Warning Unhealthy service/api"],
-                    limitations=[],
+                    limitations=["runtime data limited to namespace scope"],
                     tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
                 )
             },
@@ -808,7 +808,11 @@ def test_service_follow_up_step_clears_stale_prometheus_failure_limitations_afte
     assert artifact.evidence_bundle is not None
     assert "prometheus peer failed: prom down" not in artifact.evidence_bundle.limitations
     assert "prometheus unavailable or returned no usable results" not in artifact.evidence_bundle.limitations
-    assert artifact.attempted_routes[0].mcp_server == "kubernetes-mcp-server"
+    assert "runtime data limited to namespace scope" in artifact.evidence_bundle.limitations
+    assert [route.tool_path for route in artifact.attempted_routes] == [
+        ["kubernetes-mcp-server", "resources_get", "events_list"],
+        ["prometheus-mcp-server"],
+    ]
 
 
 def test_service_follow_up_step_keeps_baseline_when_range_scout_does_not_improve(monkeypatch) -> None:
