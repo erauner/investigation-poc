@@ -7,8 +7,7 @@ RUN apk add --no-cache kubectl
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir .
 
 EXPOSE 8080
 
