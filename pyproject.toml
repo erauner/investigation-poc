@@ -20,6 +20,8 @@ dependencies = [
   "langchain-core>=0.3.0",
   "kagent-core==0.7.23",
   "kagent-langgraph>=0.1.0",
+  "opentelemetry-instrumentation-fastapi==0.59b0",
+  "opentelemetry-instrumentation-httpx==0.59b0",
 ]
 
 [project.optional-dependencies]
