@@ -167,8 +167,11 @@ assert node_steps, report
 provenance = node_steps[0]["provenance"]
 assert provenance["requested_capability"] == "node_evidence_plane", provenance
 assert provenance["actual_route"]["source_kind"] == "peer_mcp", provenance
-assert provenance["actual_route"]["mcp_server"] == "prometheus-mcp-server", provenance
 assert provenance["route_satisfaction"] in {"preferred", "fallback"}, provenance
+if provenance["route_satisfaction"] == "preferred":
+    assert provenance["actual_route"]["mcp_server"] == "prometheus-mcp-server", provenance
+else:
+    assert provenance["actual_route"]["mcp_server"] == "kubernetes-mcp-server", provenance
 PY
 
 echo "==> Local node validation passed"
