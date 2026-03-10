@@ -1081,6 +1081,46 @@ def test_update_investigation_plan_inserts_one_service_follow_up_for_inconclusiv
     assert rank_step.status == "deferred"
 
 
+def test_update_investigation_plan_does_not_insert_service_follow_up_for_adequate_workload_evidence() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api", service_name="api"),
+        _deps([]),
+    )
+
+    updated = update_investigation_plan(
+        UpdateInvestigationPlanRequest(
+            plan=plan,
+            execution=EvidenceBatchExecution(
+                batch_id="batch-1",
+                executed_step_ids=["collect-target-evidence", "collect-change-candidates"],
+                artifacts=[
+                    {
+                        "step_id": "collect-target-evidence",
+                        "plane": "workload",
+                        "artifact_type": "evidence_bundle",
+                        "evidence_bundle": _bundle(
+                            findings=[
+                                Finding(
+                                    severity="critical",
+                                    source="k8s",
+                                    title="CrashLoopBackOff",
+                                    evidence="pod is crash looping",
+                                )
+                            ]
+                        ),
+                        "summary": ["CrashLoopBackOff"],
+                        "limitations": [],
+                    }
+                ],
+            ),
+        )
+    )
+
+    assert updated.active_batch_id is None
+    assert all(step.id != "collect-service-follow-up-evidence" for step in updated.steps)
+    assert next(batch for batch in updated.evidence_batches if batch.id == "batch-2").status == "pending"
+
+
 def test_execute_investigation_step_rejects_factual_mode_for_slice_two() -> None:
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(objective="factual", question="What uses the most CPU?"),
