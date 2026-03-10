@@ -4,6 +4,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 ProfileType = Literal["workload", "service", "otel-pipeline"]
+PresentationProfileType = Literal["operator_summary", "incident_report", "debug_trace", "explain_more"]
 ScopeType = Literal["workload", "service", "node", "otel-pipeline"]
 InvestigationMode = Literal["alert_rca", "targeted_rca", "factual_analysis"]
 PlanStatus = Literal["pending", "completed", "deferred"]

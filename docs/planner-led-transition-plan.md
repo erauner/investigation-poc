@@ -915,7 +915,7 @@ Validation gate:
 
 ### Slice 13: Presentation Profiles
 
-Status: Proposed
+Status: In Progress
 
 Goal:
 
@@ -929,6 +929,7 @@ Delivered in this slice should be:
   - `debug_trace`
   - `explain_more`
 - downstream formatting that does not alter investigation semantics
+- internal-only first rollout through shared presentation helpers consumed by the shadow runtime formatter before any public API exposure
 
 Validation gate:
 
