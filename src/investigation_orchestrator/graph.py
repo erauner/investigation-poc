@@ -337,7 +337,7 @@ def update_investigation_graph_state(
         interrupt_after=interrupt_after,
         enable_exploration_review_interrupt=enable_exploration_review_interrupt,
     )
-    config = build_graph_config(checkpoint_config)
+    config = build_graph_config(_state_read_checkpoint_config(checkpoint_config))
     graph.update_state(config, values, as_node=as_node)
     snapshot = graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
     return snapshot.values

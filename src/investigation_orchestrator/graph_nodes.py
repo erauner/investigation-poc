@@ -99,6 +99,8 @@ def apply_exploration_review_node(
     pending_review = state["pending_exploration_review"]
     if pending_review is None:
         raise ValueError("pending exploration review must be present before applying review decision")
+    if pending_review.decision is None:
+        raise ValueError("pending exploration review is still awaiting decision")
     artifact = deps.apply_pending_exploration_review(pending_review)
     return {
         "submitted_steps": [*state["submitted_steps"], artifact],

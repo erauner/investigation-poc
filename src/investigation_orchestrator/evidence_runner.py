@@ -327,6 +327,7 @@ def collect_external_steps(
             submissions.extend(result.submitted_steps)
             if result.pending_exploration_review is not None and pending_review is None:
                 pending_review = result.pending_exploration_review
+                break
             elif not result.submitted_steps and result.pending_exploration_review is None:
                 skipped_workload_steps += 1
             continue
