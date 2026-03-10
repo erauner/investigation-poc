@@ -1,3 +1,8 @@
+from dataclasses import dataclass
+from typing import Literal
+
+from langgraph.checkpoint.base import BaseCheckpointSaver
+
 from investigation_service.models import (
     BuildInvestigationPlanRequest,
     FindUnhealthyPodRequest,
@@ -8,11 +13,32 @@ from investigation_service.models import (
 from investigation_service.tools import find_unhealthy_pod
 
 from .control_plane import advance_batch, get_active_batch, render_report, seed_context
-from .evidence_runner import run_required_external_steps
 from .checkpointing import GraphCheckpointConfig, resolve_checkpoint_config
-from .graph import invoke_investigation_graph, resume_investigation_graph
+from .evidence_runner import run_required_external_steps
+from .graph import get_investigation_graph_state, invoke_investigation_graph, resume_investigation_graph
 from .graph_nodes import OrchestratorRuntimeDeps
-from .state import build_initial_state
+from .state import OrchestrationState, build_initial_state
+
+
+@dataclass(frozen=True)
+class OrchestratorRuntimeConfig:
+    max_batches: int = 2
+    checkpointer: BaseCheckpointSaver | None = None
+    checkpoint_config: GraphCheckpointConfig | None = None
+    thread_id: str | None = None
+    checkpoint_ns: str | None = None
+    checkpoint_id: str | None = None
+    interrupt_before: tuple[str, ...] | list[str] = ()
+    interrupt_after: tuple[str, ...] | list[str] = ()
+
+
+@dataclass(frozen=True)
+class OrchestratorRuntimeResult:
+    status: Literal["completed", "interrupted"]
+    state: OrchestrationState
+    final_report: InvestigationReport | None
+    checkpoint_config: GraphCheckpointConfig | None
+    next_nodes: tuple[str, ...] = ()
 
 
 def _incident_from_request(req: InvestigationReportRequest) -> BuildInvestigationPlanRequest:
@@ -87,6 +113,125 @@ def _runtime_deps() -> OrchestratorRuntimeDeps:
     )
 
 
+def _runtime_result(
+    *,
+    state: OrchestrationState,
+    checkpoint_config: GraphCheckpointConfig | None,
+    next_nodes: tuple[str, ...] = (),
+) -> OrchestratorRuntimeResult:
+    report = state["final_report"]
+    if report is not None:
+        return OrchestratorRuntimeResult(
+            status="completed",
+            state=state,
+            final_report=report,
+            checkpoint_config=checkpoint_config,
+            next_nodes=(),
+        )
+    return OrchestratorRuntimeResult(
+        status="interrupted",
+        state=state,
+        final_report=None,
+        checkpoint_config=checkpoint_config,
+        next_nodes=next_nodes,
+    )
+
+
+def _resolved_next_nodes(
+    *,
+    checkpointer: BaseCheckpointSaver | None,
+    checkpoint_config: GraphCheckpointConfig | None,
+    interrupt_before: tuple[str, ...] | list[str],
+    interrupt_after: tuple[str, ...] | list[str],
+) -> tuple[str, ...]:
+    if checkpointer is None or checkpoint_config is None:
+        return ()
+    snapshot = get_investigation_graph_state(
+        deps=_runtime_deps(),
+        checkpointer=checkpointer,
+        checkpoint_config=checkpoint_config,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+    )
+    return tuple(snapshot.next)
+
+
+def run_orchestrated_investigation_runtime(
+    req: InvestigationReportRequest,
+    *,
+    runtime: OrchestratorRuntimeConfig | None = None,
+) -> OrchestratorRuntimeResult:
+    runtime = runtime or OrchestratorRuntimeConfig()
+    incident = _incident_from_request(req)
+    resolved_checkpoint_config = resolve_checkpoint_config(
+        checkpoint_config=runtime.checkpoint_config,
+        thread_id=runtime.thread_id,
+        checkpoint_ns=runtime.checkpoint_ns,
+        checkpoint_id=runtime.checkpoint_id,
+        require_thread_id=runtime.checkpointer is not None,
+    )
+    final_state = invoke_investigation_graph(
+        build_initial_state(
+            req,
+            incident,
+            remaining_batch_budget=runtime.max_batches,
+        ),
+        deps=_runtime_deps(),
+        checkpointer=runtime.checkpointer,
+        checkpoint_config=resolved_checkpoint_config,
+        interrupt_before=runtime.interrupt_before,
+        interrupt_after=runtime.interrupt_after,
+    )
+    next_nodes = ()
+    if final_state["final_report"] is None:
+        next_nodes = _resolved_next_nodes(
+            checkpointer=runtime.checkpointer,
+            checkpoint_config=resolved_checkpoint_config,
+            interrupt_before=runtime.interrupt_before,
+            interrupt_after=runtime.interrupt_after,
+        )
+    return _runtime_result(
+        state=final_state,
+        checkpoint_config=resolved_checkpoint_config,
+        next_nodes=next_nodes,
+    )
+
+
+def resume_orchestrated_investigation_runtime(
+    *,
+    runtime: OrchestratorRuntimeConfig,
+) -> OrchestratorRuntimeResult:
+    resolved_checkpoint_config = resolve_checkpoint_config(
+        checkpoint_config=runtime.checkpoint_config,
+        thread_id=runtime.thread_id,
+        checkpoint_ns=runtime.checkpoint_ns,
+        checkpoint_id=runtime.checkpoint_id,
+        require_thread_id=True,
+    )
+    if runtime.checkpointer is None:
+        raise ValueError("checkpointer is required when resuming orchestrated investigations")
+    final_state = resume_investigation_graph(
+        deps=_runtime_deps(),
+        checkpointer=runtime.checkpointer,
+        checkpoint_config=resolved_checkpoint_config,
+        interrupt_before=runtime.interrupt_before,
+        interrupt_after=runtime.interrupt_after,
+    )
+    next_nodes = ()
+    if final_state["final_report"] is None:
+        next_nodes = _resolved_next_nodes(
+            checkpointer=runtime.checkpointer,
+            checkpoint_config=resolved_checkpoint_config,
+            interrupt_before=runtime.interrupt_before,
+            interrupt_after=runtime.interrupt_after,
+        )
+    return _runtime_result(
+        state=final_state,
+        checkpoint_config=resolved_checkpoint_config,
+        next_nodes=next_nodes,
+    )
+
+
 def _run_orchestrated_investigation_graph(
     req: InvestigationReportRequest,
     *,
@@ -99,30 +244,22 @@ def _run_orchestrated_investigation_graph(
     interrupt_before: tuple[str, ...] | list[str] = (),
     interrupt_after: tuple[str, ...] | list[str] = (),
 ) -> InvestigationReport:
-    incident = _incident_from_request(req)
-    resolved_checkpoint_config = resolve_checkpoint_config(
-        checkpoint_config=checkpoint_config,
-        thread_id=thread_id,
-        checkpoint_ns=checkpoint_ns,
-        checkpoint_id=checkpoint_id,
-        require_thread_id=checkpointer is not None,
-    )
-    final_state = invoke_investigation_graph(
-        build_initial_state(
-            req,
-            incident,
-            remaining_batch_budget=max_batches,
+    result = run_orchestrated_investigation_runtime(
+        req,
+        runtime=OrchestratorRuntimeConfig(
+            max_batches=max_batches,
+            checkpointer=checkpointer,
+            checkpoint_config=checkpoint_config,
+            thread_id=thread_id,
+            checkpoint_ns=checkpoint_ns,
+            checkpoint_id=checkpoint_id,
+            interrupt_before=interrupt_before,
+            interrupt_after=interrupt_after,
         ),
-        deps=_runtime_deps(),
-        checkpointer=checkpointer,
-        checkpoint_config=resolved_checkpoint_config,
-        interrupt_before=interrupt_before,
-        interrupt_after=interrupt_after,
     )
-    report = final_state["final_report"]
-    if report is None:
+    if result.final_report is None:
         raise ValueError("orchestration graph completed without rendering a final report")
-    return report
+    return result.final_report
 
 
 def _resume_orchestrated_investigation_graph(
@@ -136,23 +273,20 @@ def _resume_orchestrated_investigation_graph(
     interrupt_before: tuple[str, ...] | list[str] = (),
     interrupt_after: tuple[str, ...] | list[str] = (),
 ) -> InvestigationReport:
-    resolved_checkpoint_config = resolve_checkpoint_config(
-        checkpoint_config=checkpoint_config,
-        thread_id=thread_id,
-        checkpoint_ns=checkpoint_ns,
-        checkpoint_id=checkpoint_id,
-        require_thread_id=True,
+    result = resume_orchestrated_investigation_runtime(
+        runtime=OrchestratorRuntimeConfig(
+            checkpointer=checkpointer,
+            checkpoint_config=checkpoint_config,
+            thread_id=thread_id,
+            checkpoint_ns=checkpoint_ns,
+            checkpoint_id=checkpoint_id,
+            interrupt_before=interrupt_before,
+            interrupt_after=interrupt_after,
+        )
     )
-    final_state = resume_investigation_graph(
-        deps=_runtime_deps(),
-        checkpointer=checkpointer,
-        checkpoint_config=resolved_checkpoint_config,
-        interrupt_before=interrupt_before,
-        interrupt_after=interrupt_after,
-    )
-    report = final_state["final_report"]
-    if report is None:
+    if result.final_report is None:
         raise ValueError("orchestration graph resumed without rendering a final report")
+    report = result.final_report
     if req is None:
         return report
     return _maybe_attach_resolved_pod_context(req, report)

@@ -132,6 +132,21 @@ Expected result:
 - `Related Data` contains only correlated changes or the empty-note
 - `Limitations` does not repeat the empty correlated-change note
 
+### 4b. Run the shadow BYO lane side by side
+
+```bash
+OPENAI_API_KEY=sk-... make kind-install-kagent-shadow
+make kagent-shadow-test TASK="Investigate the unhealthy pod in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step."
+```
+
+Or use the one-shot validation target:
+
+```bash
+OPENAI_API_KEY=sk-... make kind-validate-shadow
+```
+
+This keeps the existing declarative `incident-triage` lane intact and adds `incident-triage-shadow` as an additive BYO host for parity checks.
+
 ### 5. Cleanup
 
 ```bash

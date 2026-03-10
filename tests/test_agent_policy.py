@@ -107,6 +107,14 @@ def test_k8s_kustomization_includes_agent_manifest() -> None:
     assert "agent.yaml" in manifest["resources"]
 
 
+def test_shadow_agent_manifest_uses_byo_lane() -> None:
+    manifest = _load_yaml("k8s/shadow/agent.yaml")
+
+    assert manifest["spec"]["type"] == "BYO"
+    assert manifest["metadata"]["name"] == "incident-triage-shadow"
+    assert manifest["spec"]["byo"]["deployment"]["image"].startswith("ghcr.io/erauner/investigation-shadow-runtime:")
+
+
 def test_agent_manifest_uses_narrow_planner_led_tool_catalog() -> None:
     manifest = _load_yaml("k8s/agent.yaml")
     tools = manifest["spec"]["declarative"]["tools"]

@@ -1,0 +1,9 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: incident-triage-shadow
+  namespace: kagent
+spec:
+  byo:
+    deployment:
+      image: investigation-shadow-runtime:local

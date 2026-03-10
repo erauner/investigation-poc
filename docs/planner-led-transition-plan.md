@@ -234,6 +234,49 @@ The intended sequence after the orchestration-core-first merge is:
    - package the LangGraph-backed runtime as a BYO agent only after orchestration and transport are stable
    - compare it side by side with the declarative path before deciding on any hosting cutover
 
+### Current Status After The Local Shadow BYO Slice
+
+Status: Completed locally, not yet promoted beyond shadow
+
+Delivered:
+
+- a separate outer host package now exists in `src/investigation_shadow_runtime/`
+- the BYO host calls the orchestrator library directly rather than re-entering through the HTTP or MCP route surface
+- a stable host-facing orchestrator runtime API now exists so the host does not depend on private `_run_*` helpers
+- local kind packaging now includes a separate shadow agent and validation lane
+- the local shadow validator now reuses a warm cluster and asserts report quality as well as runtime completion
+- the live local shadow lane now runs end to end for the vague unhealthy-pod prompt and returns deterministic five-section output
+
+What remains intentionally deferred in this slice:
+
+- real kagent-backed checkpoint storage in local kind
+- caller-facing hosted thread identity
+- public resume APIs
+- any default-path cutover away from the declarative agent
+
+What this means:
+
+- the repo is now past "should we package a shadow BYO lane at all?"
+- the next question is not local packaging
+- the next question is whether the same hosted boundary behaves correctly in homelab/GitOps with real hosted checkpoint semantics
+
+### Recommended Next Slice After The Local Shadow Proof
+
+Status: Proposed
+
+The next implementation move should now be:
+
+1. deploy the shadow BYO lane through homelab GitOps as a separate hosted runtime and separate agent
+2. validate the hosted thread/checkpoint boundary there
+3. keep the declarative path as the default lane while comparing both paths side by side
+4. defer any preferred-runtime promotion until hosted checkpoint behavior, observability, and rollback confidence are strong enough
+
+This keeps the intended ADR 0003 sequence intact:
+
+- additive host packaging first
+- hosted proof second
+- promotion decision last
+
 ## Completed Slices
 
 ### Slice 1: Add Explicit Planning Artifacts

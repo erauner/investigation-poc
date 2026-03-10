@@ -13,15 +13,22 @@ dependencies = [
   "uvicorn[standard]>=0.30.0",
   "pydantic>=2.8.0",
   "mcp>=1.26.0",
+  "httpx>=0.27.0",
+  "openai>=1.0.0",
   "PyYAML>=6.0.0",
   "langgraph>=1.0.10,<2.0.0",
+  "langchain-core>=0.3.0",
+  "kagent-core==0.7.23",
+  "kagent-langgraph>=0.1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
-  "httpx>=0.27.0",
 ]
+
+[project.scripts]
+investigation-shadow-runtime = "investigation_shadow_runtime.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

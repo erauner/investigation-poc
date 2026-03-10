@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-enable-http-debug kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-metrics kind-validate-service-metrics kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
+.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-enable-http-debug kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -9,6 +9,7 @@ K8S_OVERLAY ?= k8s-overlays/local-kind
 HOST_PROMETHEUS_OVERLAY ?= k8s-overlays/local-kind-host-prometheus
 HTTP_DEBUG_OVERLAY ?= k8s-overlays/local-kind-optional-http
 INVESTIGATION_IMAGE ?= investigation-poc:local
+SHADOW_IMAGE ?= investigation-shadow-runtime:local
 METRICS_SMOKE_IMAGE ?= metrics-smoke-app:local
 HOMELAB_OPERATOR_DIR ?= ../homelab-operator
 OPERATOR_IMAGE ?= homelab-operator:local
@@ -48,6 +49,24 @@ kind-build-investigation-image:
 kind-load-investigation-image:
 	@kind load docker-image "$(INVESTIGATION_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
 
+kind-build-shadow-image:
+	@docker build -f Dockerfile.shadow -t "$(SHADOW_IMAGE)" .
+
+kind-load-shadow-image:
+	@kind load docker-image "$(SHADOW_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
+
+kind-sync-shadow-runtime:
+	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/incident-triage-shadow --timeout=180s
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/incident-triage-shadow --timeout=180s
+	@kubectl -n "$(KAGENT_NAMESPACE)" set image deploy/incident-triage-shadow kagent="$(SHADOW_IMAGE)"
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/incident-triage-shadow
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/incident-triage-shadow --timeout=180s
+	@actual_image="$$(kubectl -n "$(KAGENT_NAMESPACE)" get deploy/incident-triage-shadow -o jsonpath='{.spec.template.spec.containers[0].image}')"; \
+	if [ "$$actual_image" != "$(SHADOW_IMAGE)" ]; then \
+		echo "Shadow deployment image mismatch: expected $(SHADOW_IMAGE), got $$actual_image"; \
+		exit 1; \
+	fi
+
 kind-build-metrics-smoke-image:
 	@docker build -t "$(METRICS_SMOKE_IMAGE)" testapps/metrics_smoke
 
@@ -60,6 +79,10 @@ kagent-smoke-apply:
 kagent-smoke-test:
 	@TASK="$${TASK:-List pods in namespace kagent-smoke and tell me which one is unhealthy.}"; \
 	./scripts/invoke-local.sh "$$TASK"
+
+kagent-shadow-test:
+	@TASK="$${TASK:-Investigate the unhealthy pod in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"; \
+	./scripts/invoke-shadow-local.sh "$$TASK"
 
 kagent-smoke-clean:
 	@./scripts/smoke-workload.sh delete
@@ -126,6 +149,17 @@ kind-install-kagent:
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-mcp-server --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/incident-triage --timeout=180s
 
+kind-install-kagent-shadow:
+	@if [ "$$(kubectl config current-context)" != "$(KIND_CONTEXT)" ]; then \
+		echo "Current context is '$$(kubectl config current-context)'; expected '$(KIND_CONTEXT)'"; \
+		echo "Run: make kind-up"; \
+		exit 1; \
+	fi
+	@$(MAKE) kind-build-shadow-image
+	@$(MAKE) kind-load-shadow-image
+	@kubectl apply -k k8s-overlays/local-kind-shadow
+	@$(MAKE) kind-sync-shadow-runtime
+
 kind-install-operator:
 	@KIND_CLUSTER_NAME="$(KIND_CLUSTER_NAME)" KIND_CONTEXT="$(KIND_CONTEXT)" HOMELAB_OPERATOR_DIR="$(HOMELAB_OPERATOR_DIR)" OPERATOR_IMAGE="$(OPERATOR_IMAGE)" ./scripts/operator-install.sh
 
@@ -160,6 +194,9 @@ operator-metrics-smoke-clean:
 
 kind-validate:
 	@./scripts/kind-validate.sh
+
+kind-validate-shadow:
+	@./scripts/kind-validate-shadow.sh
 
 kind-validate-metrics:
 	@./scripts/kind-validate-metrics.sh
