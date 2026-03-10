@@ -257,6 +257,62 @@ What remains to close before treating the BYO path as more than a local shadow p
 - exercise real kagent-backed checkpoint storage in the outer host layer
 - strengthen side-by-side hosted observability so invoke/resume behavior is inspectable without guesswork
 
+## Current Status After Initial Homelab Shadow Validation
+
+The repo has now crossed the next important threshold after the local shadow proof:
+
+- the shadow BYO lane has completed real homelab invocations through Claude Code and the kagent controller MCP path
+- the vague unhealthy-pod workload path is now operationally credible in hosted form
+- the shadow lane is still running with `SHADOW_CHECKPOINT_MODE=memory`
+- the hosted kagent-backed checkpoint path remains a separate unresolved integration problem
+
+The most important new result is that the next weakness is no longer hosting for the workload path.
+The next weakness is evidence quality parity across investigation modes.
+
+What the current hosted validation proves:
+
+- workload investigation through the shadow lane can resolve a vague pod target and produce a structured five-section answer
+- the hosted shadow lane is now comparable to the declarative lane for the simple crashloop workload case
+
+What the current hosted validation also proves:
+
+- service-alert investigation is materially weaker than workload investigation
+- the system can produce a structurally correct answer for a service alert while still being semantically weak
+- shadow-hosting success must not be mistaken for service-evidence quality success
+
+## Service-Alert Weakness And Desired State
+
+The current weak point is not that the system cannot host the shadow lane.
+The weak point is that service-alert investigation depends on a weaker evidence pipeline than the workload path.
+
+Today the service-alert path still relies on a fragile combination of:
+
+- alert normalization that must derive a useful service investigation target from alert-shaped text
+- service-level Prometheus evidence whose metric names and label assumptions may not match real homelab telemetry consistently
+- Kubernetes fallback that may fail to infer useful deployment, selector, or pod context from the service-oriented inputs
+- final rendering that can degrade to "service signals inconclusive" even when hosting and control-plane orchestration are functioning correctly
+
+That is why the crashloop workload case can work well while a real `EnvoyHighErrorRate` case remains weak.
+These are different evidence paths with different maturity levels.
+
+The desired state is:
+
+- alert normalization preserves the original alert facts while producing an explicit execution-facing service target
+- service investigations always attempt Prometheus evidence using label and metric conventions that are validated against the real cluster
+- when service metrics are weak or absent, Kubernetes fallback still returns useful service-to-workload context rather than only generic failure notes
+- service-alert reports remain honest about ambiguity, but they should fail "informatively" rather than collapsing to a near-empty evidence set
+- hosted shadow and declarative lanes should be judged on the same semantic quality bar for:
+  - vague workload prompts
+  - alert-shaped workload prompts
+  - service alerts
+  - node alerts
+
+The architectural implication is:
+
+- shadow hosting should now be treated as sufficiently proven for workload parity exploration
+- the next product-quality slice should focus on service-alert normalization and service-evidence collection correctness
+- promotion beyond shadow should remain blocked until service and alert quality are closer to workload quality
+
 ## Readiness Gates Before Any BYO Shadow Agent
 
 Before introducing a shadow BYO LangGraph agent through kagent, the following should be true:

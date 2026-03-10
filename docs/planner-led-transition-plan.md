@@ -548,6 +548,18 @@ What is still open in Slice 8:
   - narrower `investigation-mcp-server` allowlist
 - public MCP and HTTP surfaces still export some planner-owned evidence helpers that are no longer part of the intended agent vocabulary
 - local wrappers and policy tests still need to encode the new peer evidence-plane contract more explicitly
+- service-alert investigation quality is still behind workload quality in real hosted validation:
+  - the vague unhealthy-pod crashloop path now works cleanly through the hosted shadow lane
+  - a real `EnvoyHighErrorRate` alert can still degrade to "Service Signals Inconclusive"
+  - that weakness appears in alert normalization, service-level Prometheus evidence, and Kubernetes fallback for service context rather than in shadow hosting itself
+
+Immediate desired state for the remaining Slice 8 work:
+
+- preserve the original alert facts while producing an explicit execution-facing service target
+- validate service Prometheus query assumptions against real homelab metric labels instead of assuming one generic label shape
+- make Kubernetes fallback for service investigations return useful selector/deployment/pod context when metrics are weak
+- ensure service-alert failures degrade honestly but informatively rather than collapsing to mostly-empty evidence
+- compare declarative and shadow lanes on the same service-alert prompts before any promotion discussion
 
 ### Slice 9: External Evidence Handoff And Reconciliation
 
