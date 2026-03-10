@@ -390,6 +390,150 @@ def test_run_orchestrated_investigation_forwards_workload_peer_failure_metadata(
     assert report.target == "pod/crashy-abc123"
 
 
+def test_run_orchestrated_investigation_forwards_service_peer_failure_metadata(monkeypatch) -> None:
+    incident = _incident().model_copy(update={"target": "service/api", "profile": "service", "service_name": "api"})
+    captured = {"submitted": None}
+
+    monkeypatch.setattr(
+        entrypoint,
+        "find_unhealthy_pod",
+        lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})(),
+    )
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context())
+    monkeypatch.setattr(
+        entrypoint,
+        "get_active_batch",
+        lambda *_args, **_kwargs: ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect service evidence",
+            subject=InvestigationSubject(
+                source="manual",
+                kind="target",
+                summary="Investigate service/api",
+                requested_target="service/api",
+                alertname=None,
+            ),
+            canonical_target=InvestigationTarget(
+                source="manual",
+                scope="service",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="service/api",
+                target="service/api",
+                service_name="api",
+                node_name=None,
+                profile="service",
+                lookback_minutes=15,
+                normalization_notes=[],
+            ),
+            steps=[
+                EvidenceStepContract(
+                    step_id="collect-target-evidence",
+                    title="Collect service evidence",
+                    plane="service",
+                    artifact_type="evidence_bundle",
+                    requested_capability="service_evidence_plane",
+                    preferred_mcp_server="prometheus-mcp-server",
+                    preferred_tool_names=["execute_query"],
+                    fallback_mcp_server="kubernetes-mcp-server",
+                    fallback_tool_names=["resources_get", "events_list"],
+                    execution_mode="external_preferred",
+                    execution_inputs=StepExecutionInputs(
+                        request_kind="service_context",
+                        cluster="erauner-home",
+                        namespace="operator-smoke",
+                        target="service/api",
+                        profile="service",
+                        service_name="api",
+                        lookback_minutes=15,
+                    ),
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "run_required_external_steps",
+        lambda _batch: [
+            SubmittedStepArtifact(
+                step_id="collect-target-evidence",
+                actual_route={
+                    "source_kind": "peer_mcp",
+                    "mcp_server": "prometheus-mcp-server",
+                    "tool_name": None,
+                    "tool_path": ["prometheus-mcp-server"],
+                },
+                attempted_routes=[
+                    {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "prometheus-mcp-server",
+                        "tool_name": None,
+                        "tool_path": ["prometheus-mcp-server"],
+                    },
+                    {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "kubernetes-mcp-server",
+                        "tool_name": None,
+                        "tool_path": ["kubernetes-mcp-server"],
+                    },
+                ],
+                limitations=["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
+            )
+        ],
+    )
+
+    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+        captured["submitted"] = submitted_steps
+        return AdvanceInvestigationRuntimeResponse(
+            execution_context=_context(active_batch_id=None),
+            next_active_batch=None,
+        )
+
+    monkeypatch.setattr(entrypoint, "advance_batch", fake_advance)
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="service",
+            target="service/api",
+            diagnosis="Service instability detected",
+            confidence="medium",
+            evidence=["Elevated error rate"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="Inspect service metrics and dependent workloads before taking write actions.",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=[],
+            tool_path_trace=None,
+        ),
+    )
+
+    report = run_orchestrated_investigation(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            service_name=incident.service_name,
+            lookback_minutes=incident.lookback_minutes,
+        )
+    )
+
+    assert captured["submitted"] is not None
+    assert captured["submitted"][0].actual_route.mcp_server == "prometheus-mcp-server"
+    assert [route.mcp_server for route in captured["submitted"][0].attempted_routes] == [
+        "prometheus-mcp-server",
+        "kubernetes-mcp-server",
+    ]
+    assert "prometheus peer failed: prom down" in captured["submitted"][0].limitations
+    assert report.target == "service/api"
+
+
 def test_run_orchestrated_investigation_bypasses_terminal_render_batch(monkeypatch) -> None:
     incident = _incident()
     monkeypatch.setattr(
