@@ -421,6 +421,30 @@ def test_get_active_evidence_batch_contract_exposes_execution_inputs() -> None:
     assert contract.steps[1].execution_inputs.request_kind == "change_candidates"
 
 
+def test_get_active_evidence_batch_contract_uses_service_context_for_service_targets() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="service/api", profile="service", service_name="api"),
+        _deps([]),
+    )
+
+    contract = get_active_evidence_batch_contract(
+        GetActiveEvidenceBatchRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(
+                namespace="default",
+                target="service/api",
+                profile="service",
+                service_name="api",
+            ),
+        )
+    )
+
+    assert contract.steps[0].step_id == "collect-target-evidence"
+    assert contract.steps[0].execution_inputs.request_kind == "service_context"
+    assert contract.steps[0].execution_inputs.target == "service/api"
+    assert contract.steps[0].execution_inputs.service_name == "api"
+
+
 def test_submit_evidence_step_artifacts_reconciles_partial_batch_without_completing_it() -> None:
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),

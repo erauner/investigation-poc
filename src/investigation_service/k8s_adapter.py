@@ -259,9 +259,115 @@ def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) ->
             runtime_pod = get_k8s_object(runtime_target, cluster=cluster)
             if not runtime_pod.get("error"):
                 response = normalize_k8s_object_payload(parsed, target, runtime_pod=runtime_pod)
+    if target.kind == "service" and target.namespace:
+        response.update(get_service_topology(target.namespace, target.name, cluster=cluster))
     if target.kind == "node":
         response["top_pods_by_memory_request"] = _top_pods_for_node(target.name, cluster=cluster)
     return response
+
+
+def _pod_matches_selector(pod: dict, selector: dict[str, str]) -> bool:
+    if not selector:
+        return False
+    labels = pod.get("metadata", {}).get("labels", {}) or {}
+    return all(labels.get(key) == value for key, value in selector.items())
+
+
+def _pod_restart_count(pod: dict) -> int:
+    statuses = pod.get("status", {}).get("containerStatuses", []) or []
+    return sum(item.get("restartCount", 0) for item in statuses)
+
+
+def _pod_ready(pod: dict) -> bool:
+    statuses = pod.get("status", {}).get("containerStatuses", []) or []
+    if not statuses:
+        return False
+    return all(item.get("ready", False) for item in statuses)
+
+
+def _workload_ref_from_owner_references(owner_references: list[dict]) -> dict[str, str] | None:
+    for owner in owner_references or []:
+        kind = owner.get("kind")
+        name = owner.get("name")
+        if not kind or not name:
+            continue
+        if kind in {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}:
+            return {"kind": kind.lower(), "name": name}
+        if kind == "ReplicaSet" and name:
+            parts = name.rsplit("-", 1)
+            workload_name = parts[0] if len(parts) == 2 else name
+            return {"kind": "deployment", "name": workload_name}
+    return None
+
+
+def summarize_service_topology(service: dict, pods: list[dict], *, max_pods: int = 5) -> dict:
+    selector = service.get("spec", {}).get("selector", {}) or {}
+    summary = {
+        "selector": selector,
+        "matchedPodCount": 0,
+        "readyPodCount": 0,
+        "matchedPods": [],
+        "matchedWorkloads": [],
+    }
+    if not selector:
+        return summary
+
+    matched_pods = [pod for pod in pods if _pod_matches_selector(pod, selector)]
+    workloads: dict[tuple[str, str], dict[str, str]] = {}
+    rendered_pods: list[dict] = []
+    ready_pod_count = 0
+    for pod in matched_pods:
+        metadata = pod.get("metadata", {}) or {}
+        status = pod.get("status", {}) or {}
+        workload = _workload_ref_from_owner_references(metadata.get("ownerReferences") or [])
+        if workload:
+            workloads[(workload["kind"], workload["name"])] = workload
+        ready = _pod_ready(pod)
+        if ready:
+            ready_pod_count += 1
+        rendered_pods.append(
+            {
+                "name": metadata.get("name"),
+                "phase": status.get("phase"),
+                "ready": ready,
+                "restartCount": _pod_restart_count(pod),
+                "workload": workload,
+            }
+        )
+
+    rendered_pods.sort(key=lambda item: (item["ready"], -(item["restartCount"] or 0), item["name"] or ""))
+    summary["matchedPodCount"] = len(matched_pods)
+    summary["readyPodCount"] = ready_pod_count
+    summary["matchedPods"] = rendered_pods[:max_pods]
+    summary["matchedWorkloads"] = sorted(workloads.values(), key=lambda item: (item["kind"], item["name"]))
+    return summary
+
+
+def get_service_topology(
+    namespace: str,
+    service_name: str,
+    cluster: ResolvedCluster | None = None,
+) -> dict:
+    ok, service_json = _call_with_optional_cluster(
+        _run_kubectl,
+        ["-n", namespace, "get", "service", service_name, "-o", "json"],
+        cluster=cluster,
+    )
+    if not ok:
+        return {}
+    ok, pods_json = _call_with_optional_cluster(
+        _run_kubectl,
+        ["-n", namespace, "get", "pods", "-o", "json"],
+        cluster=cluster,
+    )
+    if not ok:
+        return {}
+    try:
+        service = json.loads(service_json)
+        pods = json.loads(pods_json).get("items", [])
+    except json.JSONDecodeError:
+        return {}
+    return summarize_service_topology(service, pods)
 
 
 def _parse_memory_to_bytes(raw: str | None) -> int:
