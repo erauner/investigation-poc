@@ -30,6 +30,8 @@ from kagent.core.a2a import KAgentRequestContextBuilder, get_a2a_max_content_len
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph.state import CompiledStateGraph
 
+from .settings import get_shadow_debug_endpoints_enabled
+
 logger = logging.getLogger(__name__)
 
 
@@ -205,6 +207,7 @@ def build_shadow_app(
             logger.exception("Failed to configure tracing")
 
     app.add_route("/health", methods=["GET"], route=health_check)
-    app.add_route("/thread_dump", methods=["GET"], route=thread_dump)
+    if get_shadow_debug_endpoints_enabled():
+        app.add_route("/thread_dump", methods=["GET"], route=thread_dump)
     a2a_app.add_routes_to_app(app)
     return app

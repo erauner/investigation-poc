@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
 from investigation_orchestrator import OrchestratorRuntimeConfig
 from investigation_service.models import CorrelatedChange, EvidenceItem, InvestigationReport
+from investigation_shadow_runtime.a2a_app import build_shadow_app
 from investigation_shadow_runtime.host_adapter import format_shadow_report, parse_shadow_task
 from investigation_shadow_runtime.runner import run_shadow_investigation
 
@@ -31,6 +34,14 @@ def test_parse_shadow_task_supports_alert_blocks() -> None:
     assert request.alertname == "PodCrashLooping"
     assert request.namespace == "kagent-smoke"
     assert request.target == "pod/crashy"
+    assert request.profile == "workload"
+
+
+def test_parse_shadow_task_supports_direct_node_target() -> None:
+    request = parse_shadow_task("Investigate node/worker3 for memory pressure.")
+
+    assert request.target == "node/worker3"
+    assert request.node_name == "worker3"
     assert request.profile == "workload"
 
 
@@ -143,3 +154,65 @@ def test_run_shadow_investigation_formats_orchestrator_report(monkeypatch) -> No
     assert result.runtime_status == "completed"
     assert "## Diagnosis" in result.markdown
     assert "CrashLoopBackOff" in result.markdown
+
+
+def test_run_shadow_investigation_applies_pod_compatibility(monkeypatch) -> None:
+    def fake_run(_req, *, runtime=None):
+        assert isinstance(runtime, OrchestratorRuntimeConfig)
+        return type(
+            "Result",
+            (),
+            {
+                "status": "completed",
+                "final_report": InvestigationReport(
+                    cluster="erauner-home",
+                    scope="workload",
+                    target="pod/crashy",
+                    diagnosis="CrashLoopBackOff",
+                    confidence="high",
+                    evidence=["Container exits immediately."],
+                    related_data=[],
+                    limitations=[],
+                    recommended_next_step="Inspect the failing container command.",
+                ),
+                "next_nodes": (),
+            },
+        )()
+
+    monkeypatch.setattr("investigation_shadow_runtime.runner.run_orchestrated_investigation_runtime", fake_run)
+    monkeypatch.setattr(
+        "investigation_shadow_runtime.runner._maybe_attach_resolved_pod_context",
+        lambda req, report: report.model_copy(
+            update={"evidence": [*report.evidence, "Resolved concrete crash-looping pod: pod/crashy-abc123"]}
+        ),
+    )
+
+    result = run_shadow_investigation(
+        "Alert: PodCrashLooping\nNamespace: kagent-smoke\nPod: crashy",
+        runtime=OrchestratorRuntimeConfig(),
+    )
+
+    assert "Resolved concrete crash-looping pod: pod/crashy-abc123" in result.markdown
+
+
+def test_build_shadow_app_disables_thread_dump_by_default() -> None:
+    config = SimpleNamespace(app_name="incident-triage-shadow")
+    app = build_shadow_app(
+        graph=None,  # type: ignore[arg-type]
+        agent_card={
+            "name": "incident-triage-shadow",
+            "description": "test",
+            "url": "http://example.com",
+            "version": "0.1.0",
+            "defaultInputModes": ["text"],
+            "defaultOutputModes": ["text"],
+            "capabilities": {},
+            "skills": [],
+        },
+        config=config,  # type: ignore[arg-type]
+        tracing=False,
+    )
+
+    paths = {route.path for route in app.routes}
+    assert "/health" in paths
+    assert "/thread_dump" not in paths

@@ -23,3 +23,8 @@ def get_shadow_checkpoint_mode() -> str:
     if value in {"memory", "kagent"}:
         return value
     return "kagent"
+
+
+def get_shadow_debug_endpoints_enabled() -> bool:
+    value = os.getenv("SHADOW_DEBUG_ENDPOINTS_ENABLED", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}

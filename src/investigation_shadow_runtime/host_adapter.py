@@ -9,7 +9,7 @@ from investigation_service.settings import get_default_lookback_minutes
 from investigation_service.tools import find_unhealthy_pod
 
 _RESOURCE_PATTERN = re.compile(
-    r"(?P<kind>pod|deployment|statefulset|daemonset|job|service|backend|frontend|cluster)/(?P<name>[a-z0-9][a-z0-9-]*)",
+    r"(?P<kind>pod|deployment|statefulset|daemonset|job|service|backend|frontend|cluster|node)/(?P<name>[a-z0-9][a-z0-9-]*)",
     re.IGNORECASE,
 )
 _NAMESPACE_PATTERN = re.compile(r"\bnamespace\s+(?P<namespace>[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)
@@ -129,9 +129,10 @@ def parse_shadow_task(task: str) -> InvestigationReportRequest:
 
     profile = "workload"
     if node_name is not None or (target and target.startswith("node/")):
-        profile = "node"
         if target is None and node_name is not None:
             target = f"node/{node_name}"
+        if node_name is None and target is not None:
+            node_name = target.split("/", 1)[1]
     elif service_name is not None or (target and target.startswith("service/")):
         profile = "service"
         if target is None and service_name is not None:
