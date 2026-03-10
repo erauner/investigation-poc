@@ -2,7 +2,10 @@
 
 - Status: Draft
 - Date: 2026-03-09
-- Related ADR: `docs/adr/0001-artifact-oriented-investigation-workflow.md`
+- Related ADRs:
+  - `docs/adr/0001-artifact-oriented-investigation-workflow.md`
+  - `docs/adr/0003-langgraph-execution-shell.md`
+  - `docs/adr/0004-bounded-exploratory-evidence.md`
 
 ## Purpose
 
@@ -833,3 +836,113 @@ When the target model is in place, e2e coverage should include:
 - letting change or alert artifacts stay presentational instead of feeding the reasoning loop
 - replacing structured semantics with raw-tool improvisation
 - splitting MCP services before semantic boundaries are stable
+
+## Next Directive After Hosted Shadow Proof
+
+Recent homelab validation now makes the next implementation directive clearer.
+
+What is now sufficiently proven:
+
+- planner-led runtime ownership works
+- the LangGraph execution shell works
+- the shadow BYO lane works against real homelab workload prompts
+- side-by-side comparison with the declarative lane is now possible
+
+What is not yet good enough:
+
+- service-alert evidence quality is still weaker than workload-path quality
+- the current deterministic evidence plane can still feel too compressed compared with the declarative lane when evidence is weak or contradictory
+
+So the next architectural directive is:
+
+> keep the investigation spine deterministic and begin reintroducing flexibility only inside bounded evidence-gathering seams.
+
+That directive is now captured in:
+
+- `docs/adr/0004-bounded-exploratory-evidence.md`
+
+## Recommended Next Slices
+
+### Slice 11: Evidence Adequacy Gate
+
+Status: Proposed
+
+Goal:
+
+- add a deterministic adequacy check after baseline evidence collection so the runtime can distinguish:
+  - strong enough evidence
+  - weak or contradictory evidence
+  - blocked evidence
+
+Delivered in this slice should be:
+
+- a product-owned adequacy evaluator for evidence bundles
+- explicit pass/fail outcomes that can drive routing
+- tests proving strong workload evidence short-circuits without extra exploration
+
+This slice should remain:
+
+- deterministic
+- product-owned
+- upstream of any bounded agentic scout
+
+### Slice 12: Bounded Workload Evidence Scout
+
+Status: Proposed
+
+Goal:
+
+- allow exploratory workload evidence gathering only inside a bounded workload-evidence seam
+
+Delivered in this slice should be:
+
+- a small workload evidence-scout subgraph or equivalent bounded runtime unit
+- strict allowlisted tools:
+  - `resources_get`
+  - `events_list`
+  - `pods_log`
+  - `pods_list_in_namespace`
+- strict budgets:
+  - max tool calls
+  - max runtime
+- deterministic materialization back into `SubmittedStepArtifact`
+
+Validation gate:
+
+- baseline workload cases still behave deterministically when evidence is already strong
+- bounded scout behavior improves weak workload cases without reopening raw tool choreography
+- output contracts and provenance remain stable
+
+### Slice 13: Presentation Profiles
+
+Status: Proposed
+
+Goal:
+
+- separate report presentation flexibility from evidence-gathering flexibility
+
+Delivered in this slice should be:
+
+- rendering profiles such as:
+  - `operator_summary`
+  - `incident_report`
+  - `debug_trace`
+  - `explain_more`
+- downstream formatting that does not alter investigation semantics
+
+Validation gate:
+
+- the same canonical investigation result can be rendered in multiple profiles without changing findings or route provenance
+
+## Updated Priority Order
+
+The next implementation order should now be:
+
+1. evidence adequacy gate
+2. bounded workload evidence scout
+3. presentation profiles
+4. only later:
+   - bounded service evidence exploration
+   - bounded node evidence exploration
+   - human-in-the-loop interrupts
+   - broader hosted checkpoint/resume work for exploratory subgraphs

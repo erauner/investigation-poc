@@ -5,6 +5,7 @@
 - Related ADRs:
   - `docs/adr/0001-artifact-oriented-investigation-workflow.md`
   - `docs/adr/0002-external-step-artifact-submission.md`
+  - `docs/adr/0004-bounded-exploratory-evidence.md`
 
 ## Context
 
@@ -556,3 +557,39 @@ Those remain follow-on decisions.
 The narrower decision here is:
 
 > The future LangGraph path should be execution-shell-first, not semantic-owner-first.
+
+## Follow-On Direction After Initial Shadow Validation
+
+The shadow-hosting proof and recent real-cluster validation changed the next architectural question again.
+
+The main remaining product-quality gap is no longer "should the system use a hosted LangGraph lane at all?" The gap is:
+
+- how to restore useful evidence-discovery flexibility
+- without reopening the whole runtime to prompt-owned raw tool choreography
+
+The intended follow-on direction is now defined in:
+
+- `docs/adr/0004-bounded-exploratory-evidence.md`
+
+That follow-on should be read as the next refinement of this ADR, not a replacement for it.
+
+The combined position is now:
+
+- ADR 0003:
+  - LangGraph is the execution shell
+  - semantic ownership stays in `investigation_service`
+  - the outer runtime spine stays deterministic and checkpointable
+- ADR 0004:
+  - selective evidence-plane nodes may become bounded-exploratory
+  - exploratory behavior must stay inside approved, budgeted, typed seams
+
+So the next place to add flexibility is:
+
+- workload evidence gathering first
+- later service and node evidence if the bounded pattern proves worthwhile
+
+The next place to add flexibility is not:
+
+- the prompt surface
+- free-form raw MCP orchestration
+- semantic logic inside the host wrapper
