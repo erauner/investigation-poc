@@ -10,7 +10,7 @@ from investigation_service.models import (
 )
 from investigation_service import runtime_api
 from investigation_service.tools import collect_node_evidence, collect_service_evidence, collect_workload_evidence
-from .mcp_clients import KubernetesMcpClient, PeerMcpError
+from .mcp_clients import KubernetesMcpClient, PeerMcpError, PrometheusMcpClient
 
 
 def _actual_route(tool_name: str) -> ActualRoute:
@@ -23,15 +23,18 @@ def _actual_route(tool_name: str) -> ActualRoute:
 
 
 def _peer_route(tool_path: list[str]) -> ActualRoute:
+    server = tool_path[0] if tool_path else "kubernetes-mcp-server"
+    tool_name = next((item for item in tool_path[1:] if item), None)
     return ActualRoute(
         source_kind="peer_mcp",
-        mcp_server="kubernetes-mcp-server",
-        tool_name="resources_get",
+        mcp_server=server,
+        tool_name=tool_name,
         tool_path=tool_path,
     )
 
 
 _kubernetes_mcp_client = KubernetesMcpClient()
+_prometheus_mcp_client = PrometheusMcpClient()
 
 
 def _workload_bundle(step: EvidenceStepContract) -> EvidenceBundle:
@@ -96,6 +99,59 @@ def _workload_submission_via_internal_fallback(step: EvidenceStepContract, reaso
     )
 
 
+def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepArtifact:
+    try:
+        metrics_snapshot = _prometheus_mcp_client.collect_service_metrics(step.execution_inputs)
+    except PeerMcpError as prom_exc:
+        try:
+            runtime_snapshot = _kubernetes_mcp_client.collect_service_runtime(step.execution_inputs)
+        except PeerMcpError:
+            raise prom_exc
+        return runtime_api.materialize_service_submission(
+            step,
+            target=runtime_snapshot.target,
+            metrics={"prometheus_available": False},
+            object_state=runtime_snapshot.object_state,
+            events=runtime_snapshot.events,
+            actual_route=_peer_route(runtime_snapshot.tool_path),
+            cluster_alias=runtime_snapshot.cluster_alias,
+            extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
+        )
+
+    if metrics_snapshot.metrics.get("prometheus_available"):
+        return runtime_api.materialize_service_submission(
+            step,
+            target=metrics_snapshot.target,
+            metrics=metrics_snapshot.metrics,
+            actual_route=_peer_route(metrics_snapshot.tool_path),
+            cluster_alias=metrics_snapshot.cluster_alias,
+            extra_limitations=metrics_snapshot.limitations,
+        )
+
+    runtime_snapshot = _kubernetes_mcp_client.collect_service_runtime(step.execution_inputs)
+    limitations = [*metrics_snapshot.limitations, *runtime_snapshot.limitations]
+    return runtime_api.materialize_service_submission(
+        step,
+        target=runtime_snapshot.target,
+        metrics=metrics_snapshot.metrics,
+        object_state=runtime_snapshot.object_state,
+        events=runtime_snapshot.events,
+        actual_route=_peer_route(runtime_snapshot.tool_path),
+        cluster_alias=runtime_snapshot.cluster_alias,
+        extra_limitations=limitations,
+    )
+
+
+def _service_submission_via_internal_fallback(step: EvidenceStepContract, reason: str) -> SubmittedStepArtifact:
+    bundle = _service_bundle(step)
+    limitations = sorted(set([*bundle.limitations, f"peer service MCP fallback: {reason}"]))
+    return SubmittedStepArtifact(
+        step_id=step.step_id,
+        evidence_bundle=bundle.model_copy(update={"limitations": limitations}),
+        actual_route=_actual_route("collect_service_evidence"),
+    )
+
+
 def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact:
     if step.requested_capability == "workload_evidence_plane":
         try:
@@ -103,11 +159,10 @@ def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact:
         except PeerMcpError as exc:
             return _workload_submission_via_internal_fallback(step, str(exc))
     if step.requested_capability == "service_evidence_plane":
-        return SubmittedStepArtifact(
-            step_id=step.step_id,
-            evidence_bundle=_service_bundle(step),
-            actual_route=_actual_route("collect_service_evidence"),
-        )
+        try:
+            return _service_submission_via_peer_mcp(step)
+        except PeerMcpError as exc:
+            return _service_submission_via_internal_fallback(step, str(exc))
     if step.requested_capability == "node_evidence_plane":
         return SubmittedStepArtifact(
             step_id=step.step_id,

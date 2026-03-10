@@ -130,41 +130,34 @@ def collect_service_metrics(
     *,
     prometheus_url: str,
 ) -> tuple[dict, list[str]]:
+    queries = service_metric_queries(namespace, service_name, lookback_minutes)
+    limitations: list[str] = []
+    metrics = {
+        label: _safe_metric(query, limitations, label, prometheus_url)
+        for label, query in queries.items()
+    }
+    return metrics, limitations
+
+
+def service_metric_queries(namespace: str, service_name: str, lookback_minutes: int) -> dict[str, str]:
     lookback = f"{max(lookback_minutes, 1)}m"
     escaped_ns = namespace.replace('"', '\\"')
     effective_service = service_name.replace('"', '\\"')
-    limitations: list[str] = []
-    metrics = {
-        "service_request_rate": _safe_metric(
-            (
-                f'sum(rate(http_server_request_duration_seconds_count{{namespace="{escaped_ns}",service="{effective_service}"}}'
-                f"[{lookback}]))"
-            ),
-            limitations,
-            "service_request_rate",
-            prometheus_url,
+    return {
+        "service_request_rate": (
+            f'sum(rate(http_server_request_duration_seconds_count{{namespace="{escaped_ns}",service="{effective_service}"}}'
+            f"[{lookback}]))"
         ),
-        "service_error_rate": _safe_metric(
-            (
-                "sum(rate(http_server_request_duration_seconds_count"
-                f'{{namespace="{escaped_ns}",service="{effective_service}",status=~"5.."}}[{lookback}]))'
-            ),
-            limitations,
-            "service_error_rate",
-            prometheus_url,
+        "service_error_rate": (
+            "sum(rate(http_server_request_duration_seconds_count"
+            f'{{namespace="{escaped_ns}",service="{effective_service}",status=~"5.."}}[{lookback}]))'
         ),
-        "service_latency_p95_seconds": _safe_metric(
-            (
-                "histogram_quantile(0.95, "
-                "sum by (le) (rate(http_server_request_duration_seconds_bucket"
-                f'{{namespace="{escaped_ns}",service="{effective_service}"}}[{lookback}])))'
-            ),
-            limitations,
-            "service_latency_p95_seconds",
-            prometheus_url,
+        "service_latency_p95_seconds": (
+            "histogram_quantile(0.95, "
+            "sum by (le) (rate(http_server_request_duration_seconds_bucket"
+            f'{{namespace="{escaped_ns}",service="{effective_service}"}}[{lookback}])))'
         ),
     }
-    return metrics, limitations
 
 
 def collect_service_enrichment_metrics(
