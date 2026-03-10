@@ -726,6 +726,19 @@ def _step_artifact_from_submission(
     )
 
 
+def _attempt_only_workload_submission(
+    step: PlanStep,
+    submission: SubmittedStepArtifact,
+) -> bool:
+    return (
+        step.suggested_capability == "workload_evidence_plane"
+        and submission.evidence_bundle is None
+        and submission.change_candidates is None
+        and submission.actual_route.source_kind == "peer_mcp"
+        and bool(submission.actual_route.mcp_server)
+    )
+
+
 def _pending_steps_and_submissions(
     *,
     plan: InvestigationPlan,
@@ -780,9 +793,16 @@ def _execute_steps(
     plan: InvestigationPlan,
     incident: BuildInvestigationPlanRequest,
     deps: PlannerDeps,
+    attempted_peer_submissions: dict[str, SubmittedStepArtifact] | None = None,
 ) -> list[StepArtifact]:
     return [
-        _execute_step(step, plan=plan, incident=incident, deps=deps)
+        _execute_step(
+            step,
+            plan=plan,
+            incident=incident,
+            deps=deps,
+            attempted_peer_submission=(attempted_peer_submissions or {}).get(step.id),
+        )
         for step in steps
     ]
 
@@ -840,6 +860,7 @@ def advance_active_evidence_batch(
     pending_by_id = {step.id: step for step in pending_steps}
     submitted_artifacts: list[StepArtifact] = []
     submitted_step_ids: set[str] = set()
+    attempted_peer_submissions: dict[str, SubmittedStepArtifact] = {}
 
     if submitted_steps:
         _, target, _, submissions_by_step = _pending_steps_and_submissions(
@@ -848,18 +869,30 @@ def advance_active_evidence_batch(
             batch_id=batch.id,
             submitted_steps=submitted_steps,
         )
-        submitted_artifacts = _submitted_artifacts_for_batch(
-            batch=batch,
-            target=target,
-            incident=incident,
-            pending_steps=pending_by_id,
-            submissions_by_step=submissions_by_step,
-        )
-        submitted_step_ids = set(submissions_by_step.keys())
+        for step_id, submission in list(submissions_by_step.items()):
+            step = pending_by_id[step_id]
+            if _attempt_only_workload_submission(step, submission):
+                attempted_peer_submissions[step_id] = submission
+                del submissions_by_step[step_id]
+        if submissions_by_step:
+            submitted_artifacts = _submitted_artifacts_for_batch(
+                batch=batch,
+                target=target,
+                incident=incident,
+                pending_steps=pending_by_id,
+                submissions_by_step=submissions_by_step,
+            )
+            submitted_step_ids = set(submissions_by_step.keys())
 
     remaining_steps = [step for step in pending_steps if step.id not in submitted_step_ids]
     blocked_steps = [
-        step.id for step in remaining_steps if _runtime_spec(step).execution_mode != "control_plane_only"
+        step.id
+        for step in remaining_steps
+        if _runtime_spec(step).execution_mode != "control_plane_only"
+        and (
+            step.suggested_capability != "workload_evidence_plane"
+            or step.id not in attempted_peer_submissions
+        )
     ]
     if blocked_steps:
         blocked = ", ".join(blocked_steps)
@@ -870,6 +903,7 @@ def advance_active_evidence_batch(
         plan=plan,
         incident=incident,
         deps=deps,
+        attempted_peer_submissions=attempted_peer_submissions,
     )
     artifacts_by_step = {
         artifact.step_id: artifact for artifact in [*submitted_artifacts, *control_plane_artifacts]
@@ -880,6 +914,12 @@ def advance_active_evidence_batch(
         artifacts,
         note=f"advanced bounded evidence batch {batch.id}",
     )
+    if attempted_peer_submissions:
+        execution.execution_notes.extend(
+            limitation
+            for submission in attempted_peer_submissions.values()
+            for limitation in submission.limitations
+        )
     updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=plan, execution=execution))
     return SubmittedEvidenceReconciliationResult(execution=execution, updated_plan=updated_plan)
 
@@ -890,11 +930,18 @@ def _execute_step(
     plan: InvestigationPlan,
     incident: BuildInvestigationPlanRequest,
     deps: PlannerDeps,
+    attempted_peer_submission: SubmittedStepArtifact | None = None,
 ) -> StepArtifact:
     target = plan.target
     if target is None:
         raise ValueError("investigation plan did not produce a primary target")
     route_provenance = _route_provenance(step, target=target)
+    limitations: list[str] = []
+    if attempted_peer_submission is not None:
+        route_provenance = route_provenance.model_copy(
+            update={"attempted_routes": [attempted_peer_submission.actual_route]}
+        )
+        limitations.extend(attempted_peer_submission.limitations)
 
     if step.id == "collect-alert-evidence":
         if not incident.alertname:
@@ -913,13 +960,14 @@ def _execute_step(
                 lookback_minutes=target.lookback_minutes,
             )
         )
+        bundle_with_limitations = bundle.model_copy(update={"limitations": [*list(bundle.limitations), *limitations]})
         return StepArtifact(
             step_id=step.id,
             plane=step.plane,
             artifact_type="evidence_bundle",
-            summary=_summary_for_alert_bundle(incident.alertname, target.requested_target, bundle),
-            limitations=list(bundle.limitations),
-            evidence_bundle=bundle,
+            summary=_summary_for_alert_bundle(incident.alertname, target.requested_target, bundle_with_limitations),
+            limitations=list(bundle_with_limitations.limitations),
+            evidence_bundle=bundle_with_limitations,
             route_provenance=route_provenance,
         )
 
@@ -931,13 +979,14 @@ def _execute_step(
             bundle = deps.collect_service_evidence(request)
         else:
             bundle = deps.collect_workload_evidence(request)
+        bundle_with_limitations = bundle.model_copy(update={"limitations": [*list(bundle.limitations), *limitations]})
         return StepArtifact(
             step_id=step.id,
             plane=step.plane,
             artifact_type="evidence_bundle",
-            summary=_summary_for_evidence_bundle(bundle),
-            limitations=list(bundle.limitations),
-            evidence_bundle=bundle,
+            summary=_summary_for_evidence_bundle(bundle_with_limitations),
+            limitations=list(bundle_with_limitations.limitations),
+            evidence_bundle=bundle_with_limitations,
             route_provenance=route_provenance,
         )
 
@@ -953,13 +1002,14 @@ def _execute_step(
                 lookback_minutes=target.lookback_minutes,
             )
         )
+        bundle_with_limitations = bundle.model_copy(update={"limitations": [*list(bundle.limitations), *limitations]})
         return StepArtifact(
             step_id=step.id,
             plane=step.plane,
             artifact_type="evidence_bundle",
-            summary=_summary_for_evidence_bundle(bundle),
-            limitations=list(bundle.limitations),
-            evidence_bundle=bundle,
+            summary=_summary_for_evidence_bundle(bundle_with_limitations),
+            limitations=list(bundle_with_limitations.limitations),
+            evidence_bundle=bundle_with_limitations,
             route_provenance=route_provenance,
         )
 

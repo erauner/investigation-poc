@@ -1,7 +1,6 @@
 from investigation_service.models import (
     ActualRoute,
     ActiveEvidenceBatchContract,
-    CollectContextRequest,
     CollectNodeContextRequest,
     CollectServiceContextRequest,
     EvidenceBundle,
@@ -13,7 +12,7 @@ from investigation_service.submission_materialization import (
     materialize_service_submission,
     materialize_workload_submission,
 )
-from investigation_service.tools import collect_node_evidence, collect_service_evidence, collect_workload_evidence
+from investigation_service.tools import collect_node_evidence, collect_service_evidence
 from .mcp_clients import KubernetesMcpClient, PeerMcpError, PrometheusMcpClient
 
 
@@ -37,22 +36,18 @@ def _peer_route(tool_path: list[str]) -> ActualRoute:
     )
 
 
+def _planned_peer_route(step: EvidenceStepContract) -> ActualRoute:
+    server = step.preferred_mcp_server or "kubernetes-mcp-server"
+    return ActualRoute(
+        source_kind="peer_mcp",
+        mcp_server=server,
+        tool_name=None,
+        tool_path=[server],
+    )
+
+
 _kubernetes_mcp_client = KubernetesMcpClient()
 _prometheus_mcp_client = PrometheusMcpClient()
-
-
-def _workload_bundle(step: EvidenceStepContract) -> EvidenceBundle:
-    inputs = step.execution_inputs
-    return collect_workload_evidence(
-        CollectContextRequest(
-            cluster=inputs.cluster,
-            namespace=inputs.namespace,
-            target=inputs.target or "",
-            profile=inputs.profile or "workload",
-            service_name=inputs.service_name,
-            lookback_minutes=inputs.lookback_minutes or 15,
-        )
-    )
 
 
 def _service_bundle(step: EvidenceStepContract) -> EvidenceBundle:
@@ -90,16 +85,6 @@ def _workload_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSt
         actual_route=_peer_route(snapshot.tool_path),
         cluster_alias=snapshot.cluster_alias,
         extra_limitations=snapshot.limitations,
-    )
-
-
-def _workload_submission_via_internal_fallback(step: EvidenceStepContract, reason: str) -> SubmittedStepArtifact:
-    bundle = _workload_bundle(step)
-    limitations = sorted(set([*bundle.limitations, f"peer workload MCP fallback: {reason}"]))
-    return SubmittedStepArtifact(
-        step_id=step.step_id,
-        evidence_bundle=bundle.model_copy(update={"limitations": limitations}),
-        actual_route=_actual_route("collect_workload_evidence"),
     )
 
 
@@ -212,12 +197,16 @@ def _node_submission_via_internal_fallback(step: EvidenceStepContract, reason: s
     )
 
 
-def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact:
+def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact | None:
     if step.requested_capability == "workload_evidence_plane":
         try:
             return _workload_submission_via_peer_mcp(step)
         except PeerMcpError as exc:
-            return _workload_submission_via_internal_fallback(step, str(exc))
+            return SubmittedStepArtifact(
+                step_id=step.step_id,
+                actual_route=_planned_peer_route(step),
+                limitations=[f"peer workload MCP attempt failed: {exc}"],
+            )
     if step.requested_capability == "service_evidence_plane":
         try:
             return _service_submission_via_peer_mcp(step)
@@ -232,13 +221,19 @@ def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact:
 
 
 def run_required_external_steps(active_batch: ActiveEvidenceBatchContract) -> list[SubmittedStepArtifact]:
-    submissions = [
-        _submitted_artifact(step)
-        for step in active_batch.steps
-        if step.execution_mode == "external_preferred"
-    ]
-    if active_batch.steps and not submissions and any(
-        step.execution_mode == "external_preferred" for step in active_batch.steps
-    ):
+    submissions = []
+    external_steps = [step for step in active_batch.steps if step.execution_mode == "external_preferred"]
+    skipped_workload_steps = 0
+
+    for step in external_steps:
+        artifact = _submitted_artifact(step)
+        if artifact is None:
+            if step.requested_capability == "workload_evidence_plane":
+                skipped_workload_steps += 1
+                continue
+            raise ValueError(f"external step {step.step_id} did not materialize an artifact")
+        submissions.append(artifact)
+
+    if external_steps and not submissions and skipped_workload_steps != len(external_steps):
         raise ValueError("active batch requires external steps but none were materialized")
     return submissions

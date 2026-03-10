@@ -64,6 +64,8 @@ def run_external_steps_node(
         raise ValueError("active batch must be present before collecting external steps")
 
     submitted_steps = deps.run_required_external_steps(active_batch)
+    # Workload transport is the one transitional exception: a peer attempt may
+    # be recorded as metadata and planner-owned bounded fallback still executes.
     if any(step.execution_mode == "external_preferred" for step in active_batch.steps) and not submitted_steps:
         raise ValueError("required external steps were not materialized")
 
