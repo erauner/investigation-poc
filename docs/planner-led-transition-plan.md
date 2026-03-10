@@ -110,6 +110,48 @@ These have already been removed from the public FastAPI and MCP surface and shou
 - `build_root_cause_report`
 - `collect_correlated_changes`
 
+## Current Direction
+
+The current recommended direction is now:
+
+- merge the orchestration-core-first path into the current declarative runtime
+- keep `investigation_service` as the semantic/control-plane core
+- keep lower-level handoff tools available for debugging and transition
+- treat a future LangGraph rollout as an execution-shell phase, not as a semantic rewrite
+
+This means the near-term product goal is:
+
+- deterministic code-owned orchestration now
+
+not:
+
+- immediate BYO agent replacement
+- immediate LangGraph checkpointing
+- immediate persistence or resumability work
+
+The future LangGraph-specific direction is documented separately in:
+
+- `docs/adr/0003-langgraph-execution-shell.md`
+
+That future direction is:
+
+- `investigation_orchestrator` becomes the runtime layer
+- LangGraph becomes the future execution shell
+- kagent-backed checkpointing is the default first persistence path if/when resumable execution is introduced
+
+The most important follow-on after the orchestration-core-first merge is now explicit:
+
+- keep `run_orchestrated_investigation` as the preferred high-level path
+- keep `investigation_service` as the planner/reconciler
+- keep peer MCP servers and their tool catalogs
+- replace transitional internal evidence collection inside `investigation_orchestrator.evidence_runner` with orchestrator-owned peer MCP client calls
+
+That means the next transport-oriented migration is:
+
+- not removing `kubernetes-mcp-server` or `prometheus-mcp-server`
+- not asking the agent to manually choreograph those peer tools again
+- but shifting primary consumption of those peer MCP tools from prompt-driven agent behavior to orchestrator-owned code
+
 ## Completed Slices
 
 ### Slice 1: Add Explicit Planning Artifacts
@@ -429,6 +471,22 @@ Preferred direction inside the slice:
 
 - teach a higher-level batch handoff helper as the default agent-facing runtime surface
 - keep the fine-grained handoff tools available as lower-level seams for adapters, debugging, and explicit choreography
+
+Next follow-on after the orchestration-core-first merge:
+
+- keep the new high-level runtime path
+- keep the planner/reconciler semantics unchanged
+- migrate `investigation_orchestrator.evidence_runner` away from transitional internal collectors:
+  - first workload evidence
+  - then service evidence
+  - then node evidence
+- have the orchestrator satisfy external-preferred evidence by calling peer MCP tools programmatically and then materializing `SubmittedStepArtifact` in product-owned code
+
+This preserves the intended direction from ADR 0002:
+
+- peer evidence planes remain first-class
+- product reconciliation remains product-owned
+- prompt choreography is not reintroduced
 
 In this slice, target resolution should remain product-owned but should become more operationally explicit.
 

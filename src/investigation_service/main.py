@@ -40,6 +40,7 @@ from .reporting import (
     submit_evidence_step_artifacts as submit_evidence_step_artifacts_from_request,
     update_investigation_plan as update_investigation_plan_from_request,
 )
+from investigation_orchestrator.entrypoint import run_orchestrated_investigation
 from .tools import (
     find_unhealthy_pod,
     find_unhealthy_workloads,
@@ -117,6 +118,11 @@ def rank_analysis(req: InvestigationReportingRequest) -> InvestigationAnalysis:
 @app.post("/tools/render_investigation_report", response_model=InvestigationReport)
 def render_report(req: InvestigationReportingRequest) -> InvestigationReport:
     return render_investigation_report(req)
+
+
+@app.post("/tools/run_orchestrated_investigation", response_model=InvestigationReport)
+def run_orchestrated_investigation_route(req: InvestigationReportRequest) -> InvestigationReport:
+    return run_orchestrated_investigation(req)
 
 
 @app.post("/tools/collect_change_candidates", response_model=CorrelatedChangesResponse)

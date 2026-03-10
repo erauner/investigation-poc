@@ -33,29 +33,14 @@ data:
     - Prefer the canonical planner-led control-plane tools for orchestration, target resolution, plan updates, hypothesis ranking, and final rendering.
     - Default sequence for targeted or alert-driven investigations:
       1. resolve_primary_target when the target is vague, convenience-shaped, or operator-backed,
-      2. build_investigation_plan,
-      3. prefer handoff_active_evidence_batch as the default runtime-progress helper,
-      4. if handoff_active_evidence_batch returns next_action=submit_external_steps, use required_external_step_ids to select the matching steps from active_batch.steps, build non-empty submitted_steps from those step contracts, and call handoff_active_evidence_batch again with handoff_token and submitted_steps,
-      5. call handoff_active_evidence_batch at most one additional time only if it returns another active_batch that clearly warrants one bounded follow-up batch,
-      6. treat get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams for adapters, debugging, or when explicit choreography is required,
-      7. treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives rather than the preferred runtime-progress path,
-      8. render_investigation_report late for the final five-section answer.
-    - Carry forward the same incident request you used for build_investigation_plan.
-    - Call handoff_active_evidence_batch first with incident=<same build request> and no handoff_token.
-    - If handoff_active_evidence_batch returns next_action=submit_external_steps, use required_external_step_ids to select the matching steps from active_batch.steps.
-    - For each required external step, build one submitted_steps item with step_id=<the contract step id>, actual_route=<the peer MCP server/tool actually used>, and the payload field named by artifact_type from that same step contract.
-    - On the follow-up handoff call, send incident=<same build request>, handoff_token=<returned handoff_token>, and submitted_steps=<the non-empty typed artifacts built from the required external steps>.
-    - Do not call handoff_active_evidence_batch again with an empty submitted_steps list after next_action=submit_external_steps.
-    - If handoff_active_evidence_batch returns next_action=call_handoff_again, call it once more with handoff_token=<returned handoff_token>.
-    - Use get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime only when you need the fine-grained low-level choreography explicitly.
-    - Call get_active_evidence_batch with plan=<built or updated plan> and incident=<same build request> before trying to satisfy or advance an active batch when using the low-level path.
-    - For externally preferred workload evidence on the low-level path, gather the bounded peer evidence first, then call submit_evidence_step_artifacts with plan=<built or updated plan>, incident=<same build request>, and submitted_steps=<typed artifacts for the pending external steps>.
-    - Call advance_investigation_runtime with incident=<same build request>, execution_context=<the latest returned execution_context>, and batch_id only when you are explicitly advancing a known active batch on the low-level path.
-    - Do not call advance_investigation_runtime with only batch_id.
+      2. prefer run_orchestrated_investigation as the default end-to-end runtime path,
+      3. treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams for adapters, debugging, or explicit choreography,
+      4. treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives,
+      5. use render_investigation_report only as a secondary low-level render seam when explicitly debugging the staged runtime path.
+    - run_orchestrated_investigation keeps batch selection, external-step materialization, advancement, and final rendering in product code.
     - Use resolve_primary_target when the target is vague or operator-backed, and preserve Backend/<name>, Frontend/<name>, or Cluster/<name> exactly as provided.
     - If resolve_primary_target needs a concrete workload target and the user only asked for the unhealthy pod in a namespace, use Kubernetes MCP read-only inspection to identify the concrete pod first, then re-enter the planner-led control-plane path with that concrete target.
-    - Use build_investigation_plan before direct evidence collection unless the user explicitly asks for drill-down or the request is an explicit fast-path metrics investigation.
-    - Advance one active evidence batch at a time, carry forward handoff_token only across handoff calls, and use the latest returned execution_context for the final render.
+    - Use build_investigation_plan only on the low-level path or when the user explicitly asks for plan inspection; otherwise prefer run_orchestrated_investigation.
     - Do not render the final report as the first substantive step.
     - Do not loop autonomously through unbounded evidence batches.
     - Use rank_hypotheses only when the user explicitly asks for ranked causes, ambiguity review, or analytical comparison instead of a final report.

@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 .venv/
+*.egg-info/
 *.pyc
 .npm-cache/
 desktop-extension/node_modules/
