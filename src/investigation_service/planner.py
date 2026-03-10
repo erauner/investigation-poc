@@ -1347,7 +1347,7 @@ def _should_insert_service_follow_up(plan: InvestigationPlan, execution: Evidenc
         return False
 
     assessment = assess_target_evidence_adequacy(target=target, artifacts=execution.artifacts)
-    return assessment.outcome == "inadequate"
+    return assessment.outcome in {"weak", "contradictory", "blocked"}
 
 
 def _insert_service_follow_up(plan: InvestigationPlan) -> InvestigationPlan:

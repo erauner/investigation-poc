@@ -58,6 +58,7 @@ class WorkloadRuntimeSnapshot:
     log_excerpt: str
     limitations: list[str] = field(default_factory=list)
     tool_path: list[str] = field(default_factory=list)
+    runtime_pod_name: str | None = None
 
 
 @dataclass
@@ -247,7 +248,12 @@ class KubernetesMcpClient:
             raise PeerMcpError(f"{tool_name} returned MCP error")
         return _extract_content(result)
 
-    async def _collect_async(self, inputs: StepExecutionInputs) -> WorkloadRuntimeSnapshot:
+    async def _collect_async(
+        self,
+        inputs: StepExecutionInputs,
+        *,
+        excluded_pod_names: tuple[str, ...] = (),
+    ) -> WorkloadRuntimeSnapshot:
         cluster = resolve_cluster(inputs.cluster)
         local_aliases = {
             alias
@@ -308,6 +314,24 @@ class KubernetesMcpClient:
                                 {"namespace": target.namespace},
                             )
                             tool_path.append("pods_list_in_namespace")
+                            if excluded_pod_names:
+                                if isinstance(pods_raw, dict):
+                                    items = pods_raw.get("items") or []
+                                    pods_raw = {
+                                        **pods_raw,
+                                        "items": [
+                                            item
+                                            for item in items
+                                            if item.get("metadata", {}).get("name") not in excluded_pod_names
+                                        ],
+                                    }
+                                elif isinstance(pods_raw, list):
+                                    pods_raw = [
+                                        item
+                                        for item in pods_raw
+                                        if isinstance(item, dict)
+                                        and item.get("metadata", {}).get("name") not in excluded_pod_names
+                                    ]
                             pod_name = pick_runtime_pod_for_workload(raw_object_state, pods_raw)
                             if not pod_name:
                                 raise PeerMcpError(
@@ -351,9 +375,15 @@ class KubernetesMcpClient:
                         log_excerpt=log_excerpt,
                         limitations=limitations,
                         tool_path=tool_path,
+                        runtime_pod_name=pod_name,
                     )
 
-    def collect_workload_runtime(self, inputs: StepExecutionInputs) -> WorkloadRuntimeSnapshot:
+    def collect_workload_runtime(
+        self,
+        inputs: StepExecutionInputs,
+        *,
+        excluded_pod_names: tuple[str, ...] = (),
+    ) -> WorkloadRuntimeSnapshot:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -367,7 +397,9 @@ class KubernetesMcpClient:
 
             def _runner() -> None:
                 try:
-                    result["snapshot"] = anyio.run(self._collect_async, inputs)
+                    result["snapshot"] = anyio.run(
+                        lambda: self._collect_async(inputs, excluded_pod_names=excluded_pod_names)
+                    )
                 except Exception as exc:  # pragma: no cover - exercised via live MCP path
                     error["exception"] = exc
 
@@ -382,7 +414,7 @@ class KubernetesMcpClient:
             return result["snapshot"]
 
         try:
-            return anyio.run(self._collect_async, inputs)
+            return anyio.run(lambda: self._collect_async(inputs, excluded_pod_names=excluded_pod_names))
         except PeerMcpError:
             raise
         except Exception as exc:

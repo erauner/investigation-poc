@@ -11,6 +11,14 @@ class CapabilityPolicy:
     notes: str = ""
 
 
+@dataclass(frozen=True)
+class BoundedExplorationPolicy:
+    capability: str
+    enabled: bool = False
+    max_additional_pods: int = 0
+    max_additional_probe_runs: int = 0
+
+
 _POLICIES: dict[str, CapabilityPolicy] = {
     "alert_evidence_plane": CapabilityPolicy(
         capability="alert_evidence_plane",
@@ -59,6 +67,16 @@ _POLICIES: dict[str, CapabilityPolicy] = {
 }
 
 
+_BOUNDED_EXPLORATION_POLICIES: dict[str, BoundedExplorationPolicy] = {
+    "workload_evidence_plane": BoundedExplorationPolicy(
+        capability="workload_evidence_plane",
+        enabled=True,
+        max_additional_pods=1,
+        max_additional_probe_runs=1,
+    )
+}
+
+
 def policy_for_capability(capability: str | None) -> CapabilityPolicy | None:
     if capability is None:
         return None
@@ -80,3 +98,9 @@ def policy_fields(capability: str | None) -> dict[str, str | list[str] | None]:
         "fallback_mcp_server": policy.fallback_mcp_server,
         "fallback_tool_names": list(policy.fallback_tool_names),
     }
+
+
+def bounded_exploration_policy_for_capability(capability: str | None) -> BoundedExplorationPolicy | None:
+    if capability is None:
+        return None
+    return _BOUNDED_EXPLORATION_POLICIES.get(capability)
