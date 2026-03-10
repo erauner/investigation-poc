@@ -178,6 +178,35 @@ The authoritative runtime snapshot remains `ReportingExecutionContext`.
 
 Any graph-local state should be a thin wrapper around that domain snapshot, not a second semantic model.
 
+## First Implementation Slice
+
+The first implementation of this ADR is intentionally narrow:
+
+- keep `run_orchestrated_investigation(...)` as the public facade
+- compile a small in-process LangGraph graph inside `investigation_orchestrator`
+- map the current handwritten loop to explicit graph nodes over existing seams:
+  - `ensure_context`
+  - `load_active_batch`
+  - `run_external_steps`
+  - `advance_batch`
+  - `render_report`
+- keep `ReportingExecutionContext` as the only authoritative runtime snapshot inside graph state
+- keep `_maybe_attach_resolved_pod_context(...)` as post-graph compatibility behavior
+
+This first slice does not:
+
+- change the user-facing tool or route surface
+- add a public resume API
+- replace handoff tokens
+- introduce hosted LangGraph execution
+- move planner or reporting semantics out of `investigation_service`
+
+Checkpointing is introduced only as an execution-shell hook:
+
+- compile the graph with an optional checkpointer
+- pass `thread_id` and optional `checkpoint_id` through graph invoke config
+- use in-process checkpointing first for local proving and tests
+
 ## Immediate Follow-On After The Orchestration-Core-First Merge
 
 The orchestration-core-first path does not complete the evidence-plane transition by itself.
@@ -266,6 +295,7 @@ External checkpoint stores remain optional later if:
 So the rule for now is:
 
 - near-term orchestration core: no durability required
+- first LangGraph shell slice: optional in-process checkpointing hooks only
 - future checkpointed LangGraph shell: prefer kagent-backed checkpointing first
 
 ## Deployment Sequencing
@@ -277,9 +307,10 @@ The intended rollout order is:
 1. keep the current declarative agent path
 2. move orchestration into code through a high-level product-owned runtime path
 3. prove live parity on current validations
-4. add a true LangGraph shell around the orchestration layer
-5. if hosted execution, resumability, or runtime separation become active requirements, package that LangGraph runtime as a shadow BYO agent through kagent
-6. only after shadow validation, consider making the BYO LangGraph agent the preferred runtime path
+4. add a true in-process LangGraph shell around the orchestration layer with optional checkpoint hooks
+5. prove graph parity before any public resume or hosting changes
+6. if hosted execution, resumability, or runtime separation become active requirements, package that LangGraph runtime as a shadow BYO agent through kagent
+7. only after shadow validation, consider making the BYO LangGraph agent the preferred runtime path
 
 This avoids changing:
 
