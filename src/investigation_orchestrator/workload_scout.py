@@ -1,4 +1,10 @@
-from investigation_service.adequacy import EvidenceAdequacyAssessment, assess_workload_evidence_bundle
+from investigation_service.adequacy import (
+    EvidenceAdequacyAssessment,
+    assess_workload_evidence_bundle,
+    assessment_improves,
+    is_scout_candidate,
+    workload_bundle_improves,
+)
 from investigation_service.execution_policy import bounded_exploration_policy_for_capability
 from investigation_service.models import ActualRoute, EvidenceStepContract, SubmittedStepArtifact
 from investigation_service.submission_materialization import materialize_workload_submission
@@ -57,7 +63,7 @@ def maybe_run_bounded_workload_scout(
         return baseline_artifact
 
     baseline_assessment = assess_materialized_workload_submission(baseline_artifact)
-    if baseline_assessment.outcome not in {"weak", "contradictory"}:
+    if not is_scout_candidate(baseline_assessment):
         return baseline_artifact
 
     try:
@@ -92,7 +98,10 @@ def maybe_run_bounded_workload_scout(
         attempted_routes=[baseline_artifact.actual_route, *baseline_artifact.attempted_routes],
     )
     scout_assessment = assess_materialized_workload_submission(scout_artifact)
-    if scout_assessment.outcome == "adequate":
+    if assessment_improves(baseline_assessment, scout_assessment) or workload_bundle_improves(
+        baseline_artifact.evidence_bundle,
+        scout_artifact.evidence_bundle,
+    ):
         return scout_artifact
 
     if baseline_artifact.evidence_bundle is None:

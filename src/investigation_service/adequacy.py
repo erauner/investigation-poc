@@ -9,6 +9,13 @@ _SOFT_WORKLOAD_LIMITATION_PREFIXES = (
     "metric unavailable:",
     "prometheus unavailable",
 )
+_ADEQUACY_RANKS = {
+    "adequate": 4,
+    "contradictory": 3,
+    "weak": 2,
+    "blocked": 1,
+    "not_applicable": 0,
+}
 
 
 @dataclass(frozen=True)
@@ -16,6 +23,42 @@ class EvidenceAdequacyAssessment:
     outcome: Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"]
     reasons: tuple[str, ...] = ()
     evaluated_step_id: str | None = None
+
+
+def adequacy_rank(outcome: Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"]) -> int:
+    return _ADEQUACY_RANKS[outcome]
+
+
+def is_scout_candidate(assessment: EvidenceAdequacyAssessment) -> bool:
+    return adequacy_rank(assessment.outcome) < adequacy_rank("adequate")
+
+
+def assessment_improves(
+    baseline: EvidenceAdequacyAssessment,
+    candidate: EvidenceAdequacyAssessment,
+) -> bool:
+    return adequacy_rank(candidate.outcome) > adequacy_rank(baseline.outcome)
+
+
+def workload_bundle_quality_key(bundle: EvidenceBundle | None) -> tuple[int, int, int]:
+    if bundle is None:
+        return (0, 0, 0)
+    hard_limitations = tuple(
+        item
+        for item in bundle.limitations
+        if not item.startswith(_SOFT_WORKLOAD_LIMITATION_PREFIXES)
+    )
+    substantive_findings = sum(1 for finding in bundle.findings if finding.title != NO_CRITICAL_SIGNALS_TITLE)
+    has_no_critical_signals = any(finding.title == NO_CRITICAL_SIGNALS_TITLE for finding in bundle.findings)
+    return (
+        substantive_findings,
+        -len(hard_limitations),
+        0 if has_no_critical_signals else 1,
+    )
+
+
+def workload_bundle_improves(baseline: EvidenceBundle | None, candidate: EvidenceBundle | None) -> bool:
+    return workload_bundle_quality_key(candidate) > workload_bundle_quality_key(baseline)
 
 
 def assess_workload_evidence_bundle(

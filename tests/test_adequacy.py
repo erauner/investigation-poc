@@ -1,4 +1,11 @@
-from investigation_service.adequacy import assess_target_evidence_adequacy, assess_workload_evidence_bundle
+from investigation_service.adequacy import (
+    assess_target_evidence_adequacy,
+    assess_workload_evidence_bundle,
+    adequacy_rank,
+    assessment_improves,
+    is_scout_candidate,
+    workload_bundle_improves,
+)
 from investigation_service.models import Finding, InvestigationTarget, StepArtifact, StepRouteProvenance, TargetRef
 
 
@@ -153,3 +160,87 @@ def test_assess_target_evidence_adequacy_returns_not_applicable_for_irrelevant_i
             )
         ],
     ).outcome == "not_applicable"
+
+
+def test_adequacy_helpers_define_ordering_and_scout_trigger_rules() -> None:
+    blocked = assess_workload_evidence_bundle(bundle=_artifact(limitations=["logs unavailable"]).evidence_bundle)
+    weak = assess_workload_evidence_bundle(
+        bundle=_artifact(
+            findings=[
+                Finding(
+                    severity="info",
+                    source="heuristic",
+                    title="No Critical Signals Found",
+                    evidence="nothing decisive",
+                )
+            ]
+        ).evidence_bundle
+    )
+    contradictory = assess_workload_evidence_bundle(
+        bundle=_artifact(
+            findings=[
+                Finding(
+                    severity="info",
+                    source="heuristic",
+                    title="No Critical Signals Found",
+                    evidence="nothing decisive",
+                ),
+                Finding(
+                    severity="warning",
+                    source="k8s",
+                    title="CrashLoopBackOff",
+                    evidence="pod is crash looping",
+                ),
+            ]
+        ).evidence_bundle
+    )
+    adequate = assess_workload_evidence_bundle(
+        bundle=_artifact(
+            findings=[
+                Finding(
+                    severity="critical",
+                    source="k8s",
+                    title="CrashLoopBackOff",
+                    evidence="pod is crash looping",
+                )
+            ]
+        ).evidence_bundle
+    )
+
+    assert adequacy_rank(blocked.outcome) < adequacy_rank(weak.outcome) < adequacy_rank(contradictory.outcome) < adequacy_rank(adequate.outcome)
+    assert is_scout_candidate(blocked) is True
+    assert is_scout_candidate(weak) is True
+    assert is_scout_candidate(contradictory) is True
+    assert is_scout_candidate(adequate) is False
+    assert assessment_improves(blocked, weak) is True
+    assert assessment_improves(weak, adequate) is True
+    assert assessment_improves(contradictory, weak) is False
+
+
+def test_workload_bundle_improves_prefers_stronger_findings_with_same_adequacy_bucket() -> None:
+    baseline = _artifact(
+        findings=[
+            Finding(
+                severity="info",
+                source="heuristic",
+                title="No Critical Signals Found",
+                evidence="nothing decisive",
+            )
+        ],
+        limitations=["logs unavailable"],
+    ).evidence_bundle
+    candidate = _artifact(
+        findings=[
+            Finding(
+                severity="warning",
+                source="events",
+                title="Crash Loop Detected",
+                evidence="backoff seen in events",
+            )
+        ],
+        limitations=["logs unavailable"],
+    ).evidence_bundle
+
+    assert assess_workload_evidence_bundle(bundle=baseline).outcome == "weak"
+    assert assess_workload_evidence_bundle(bundle=candidate).outcome == "weak"
+    assert workload_bundle_improves(baseline, candidate) is True
