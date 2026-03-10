@@ -734,6 +734,8 @@ def _attempt_only_workload_submission(
         step.suggested_capability == "workload_evidence_plane"
         and submission.evidence_bundle is None
         and submission.change_candidates is None
+        and submission.actual_route.source_kind == "peer_mcp"
+        and bool(submission.actual_route.mcp_server)
     )
 
 

@@ -145,6 +145,8 @@ def test_workload_external_step_records_failed_peer_attempt_for_downstream_fallb
     assert artifact is not None
     assert artifact.actual_route.source_kind == "peer_mcp"
     assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
+    assert artifact.actual_route.tool_name is None
+    assert artifact.actual_route.tool_path == ["kubernetes-mcp-server"]
     assert artifact.evidence_bundle is None
     assert "peer workload MCP attempt failed: peer unavailable" in artifact.limitations
 

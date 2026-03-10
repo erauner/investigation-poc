@@ -245,6 +245,11 @@ def submit_evidence_step_artifacts(
     - submitted_steps=<typed artifacts for externally satisfiable pending steps from get_active_evidence_batch>
     - batch_id=<optional explicit batch id>
 
+    Constraints:
+    - each submitted_steps item must be fully materialized for the matching step artifact_type
+    - metadata-only workload peer-failure submissions are invalid here
+    - use advance_investigation_runtime or handoff_active_evidence_batch for workload peer-failure fallback
+
     Use this after get_active_evidence_batch and before advance_investigation_runtime when the active batch still requires external evidence submission.
     """
     return run_logged_tool(
@@ -280,6 +285,11 @@ def advance_investigation_runtime(
     - execution_context=<seeded from the built plan or carried forward from a prior advance>
     - submitted_steps=<optional typed artifacts for any externally satisfied pending steps in this batch>
     - batch_id=<optional explicit batch id>
+
+    Transition behavior:
+    - metadata-only workload submissions are accepted here when peer MCP workload collection was attempted but failed
+    - include step_id, actual_route for the attempted peer route, and limitations describing the failure
+    - omit evidence_bundle so planner-owned bounded fallback can execute for that workload step
 
     Do not call this tool with only batch_id.
     Prefer this only after external-preferred steps for the active batch have already been submitted, or when the batch is planner-owned only.
