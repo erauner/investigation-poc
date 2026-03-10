@@ -185,19 +185,12 @@ def _container_status_details(spec_containers: list[dict], status_containers: li
     return details
 
 
-def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) -> dict:
-    args = ["get", target.kind, target.name, "-o", "json"]
-    if target.namespace:
-        args = ["-n", target.namespace, *args]
-    ok, output = _call_with_optional_cluster(_run_kubectl, args, cluster=cluster)
-    if not ok:
-        return {"error": output, "namespace": target.namespace, "kind": target.kind, "name": target.name}
-
-    try:
-        parsed = json.loads(output)
-    except json.JSONDecodeError:
-        return {"error": "invalid kubectl json", "raw": output[:400]}
-
+def normalize_k8s_object_payload(
+    parsed: dict,
+    target: TargetRef,
+    *,
+    runtime_pod: dict | None = None,
+) -> dict:
     metadata = parsed.get("metadata", {})
     status = parsed.get("status", {})
     spec = parsed.get("spec", {})
@@ -224,6 +217,29 @@ def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) ->
             spec.get("initContainers", []),
             status.get("initContainerStatuses", []) or [],
         )
+    if target.kind == "deployment" and runtime_pod and not runtime_pod.get("error"):
+        response["runtimePod"] = runtime_pod
+    if target.kind == "node":
+        response["conditions"] = status.get("conditions", [])
+        response["allocatable"] = status.get("allocatable", {})
+        response["capacity"] = status.get("capacity", {})
+    return response
+
+
+def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) -> dict:
+    args = ["get", target.kind, target.name, "-o", "json"]
+    if target.namespace:
+        args = ["-n", target.namespace, *args]
+    ok, output = _call_with_optional_cluster(_run_kubectl, args, cluster=cluster)
+    if not ok:
+        return {"error": output, "namespace": target.namespace, "kind": target.kind, "name": target.name}
+
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return {"error": "invalid kubectl json", "raw": output[:400]}
+
+    response = normalize_k8s_object_payload(parsed, target)
     if target.kind == "deployment" and target.namespace:
         runtime_pod_name = _call_with_optional_cluster(
             _first_pod_for_deployment,
@@ -235,11 +251,8 @@ def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) ->
             runtime_target = TargetRef(namespace=target.namespace, kind="pod", name=runtime_pod_name)
             runtime_pod = get_k8s_object(runtime_target, cluster=cluster)
             if not runtime_pod.get("error"):
-                response["runtimePod"] = runtime_pod
+                response = normalize_k8s_object_payload(parsed, target, runtime_pod=runtime_pod)
     if target.kind == "node":
-        response["conditions"] = status.get("conditions", [])
-        response["allocatable"] = status.get("allocatable", {})
-        response["capacity"] = status.get("capacity", {})
         response["top_pods_by_memory_request"] = _top_pods_for_node(target.name, cluster=cluster)
     return response
 

@@ -10,7 +10,11 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from investigation_service.cluster_registry import resolve_cluster
-from investigation_service.k8s_adapter import resolve_runtime_target, resolve_target
+from investigation_service.k8s_adapter import (
+    normalize_k8s_object_payload,
+    resolve_runtime_target,
+    resolve_target,
+)
 from investigation_service.models import StepExecutionInputs, TargetRef
 from investigation_service.settings import (
     get_cluster_name,
@@ -157,7 +161,7 @@ class KubernetesMcpClient:
                     tool_path = ["kubernetes-mcp-server"]
                     limitations: list[str] = []
 
-                    object_state = await self._call_tool(
+                    raw_object_state = await self._call_tool(
                         session,
                         "resources_get",
                         {
@@ -168,13 +172,15 @@ class KubernetesMcpClient:
                         },
                     )
                     tool_path.append("resources_get")
-                    if not isinstance(object_state, dict):
+                    if not isinstance(raw_object_state, dict):
                         object_state = {
                             "kind": target.kind,
                             "name": target.name,
                             "namespace": target.namespace,
-                            "raw": object_state,
+                            "raw": raw_object_state,
                         }
+                    else:
+                        object_state = normalize_k8s_object_payload(raw_object_state, target)
 
                     events_raw = await self._call_tool(
                         session,
