@@ -1115,4 +1115,10 @@ def test_render_investigation_report_preserves_failed_workload_peer_attempt_in_t
     assert trace.step_id == "collect-target-evidence"
     assert trace.provenance.actual_route.tool_name == "collect_workload_evidence"
     assert trace.provenance.attempted_routes[0].mcp_server == "kubernetes-mcp-server"
+    assert trace.provenance.attempted_routes[0].tool_path == [
+        "kubernetes-mcp-server",
+        "resources_get",
+        "events_list",
+        "pods_log",
+    ]
     assert "peer workload MCP attempt failed: peer unavailable" in report.limitations

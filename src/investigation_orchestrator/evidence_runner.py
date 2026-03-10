@@ -38,13 +38,11 @@ def _peer_route(tool_path: list[str]) -> ActualRoute:
 
 def _planned_peer_route(step: EvidenceStepContract) -> ActualRoute:
     server = step.preferred_mcp_server or "kubernetes-mcp-server"
-    tool_path = [server, *step.preferred_tool_names]
-    tool_name = step.preferred_tool_names[0] if step.preferred_tool_names else None
     return ActualRoute(
         source_kind="peer_mcp",
         mcp_server=server,
-        tool_name=tool_name,
-        tool_path=tool_path,
+        tool_name=None,
+        tool_path=[server],
     )
 
 

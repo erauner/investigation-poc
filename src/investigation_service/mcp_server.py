@@ -326,6 +326,7 @@ def handoff_active_evidence_batch(
     - when next_action=submit_external_steps, build submitted_steps from the matching required_external_step_ids in active_batch.steps
     - each submitted_steps item should include step_id=<the step contract id>, actual_route=<the peer MCP route actually used or attempted>, and the payload field named by that step's artifact_type
     - for workload-only peer failure during transition, a submitted_steps item may carry only step_id, actual_route, and limitations to record the failed peer attempt before planner-owned bounded fallback runs
+    - metadata-only workload submissions are intended for handoff_active_evidence_batch and advance_investigation_runtime; submit_evidence_step_artifacts still expects fully materialized artifacts
     - do not call handoff_active_evidence_batch again with an empty submitted_steps list after next_action=submit_external_steps
     - after submitted_steps are provided, reconciles them, auto-runs only remaining same-batch planner-owned steps, and returns updated execution_context plus a refreshed handoff_token
     - if another planner-owned batch remains, returns handoff_status=ready_for_next_handoff and next_action=call_handoff_again

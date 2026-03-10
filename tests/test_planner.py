@@ -557,6 +557,23 @@ def test_advance_active_evidence_batch_rejects_missing_external_submission() -> 
         )
 
 
+def test_advance_active_evidence_batch_still_rejects_workload_batch_without_attempt_metadata() -> None:
+    deps = _deps([])
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        deps,
+    )
+
+    with pytest.raises(ValueError, match="active batch still requires external evidence submission for: collect-target-evidence"):
+        advance_active_evidence_batch(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+            submitted_steps=[],
+            batch_id=None,
+            deps=deps,
+        )
+
+
 def test_advance_active_evidence_batch_keeps_alert_evidence_planner_owned() -> None:
     calls: list[str] = []
     deps = _deps(calls)

@@ -887,7 +887,10 @@ def advance_active_evidence_batch(
         step.id
         for step in remaining_steps
         if _runtime_spec(step).execution_mode != "control_plane_only"
-        and step.suggested_capability != "workload_evidence_plane"
+        and (
+            step.suggested_capability != "workload_evidence_plane"
+            or step.id not in attempted_peer_submissions
+        )
     ]
     if blocked_steps:
         blocked = ", ".join(blocked_steps)
