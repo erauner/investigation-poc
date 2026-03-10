@@ -165,7 +165,7 @@ def test_build_investigation_plan_sets_metrics_first_policy_for_service_targets(
     assert target_step.preferred_mcp_server == "prometheus-mcp-server"
     assert target_step.preferred_tool_names == ["execute_query", "execute_range_query"]
     assert target_step.fallback_mcp_server == "kubernetes-mcp-server"
-    assert target_step.fallback_tool_names == ["resources_get", "events_list"]
+    assert target_step.fallback_tool_names == ["resources_get", "events_list", "pods_list_in_namespace"]
 
 
 def test_build_investigation_plan_keeps_alert_step_internal_only_in_public_metadata() -> None:
@@ -419,6 +419,30 @@ def test_get_active_evidence_batch_contract_exposes_execution_inputs() -> None:
     assert contract.steps[0].execution_inputs.target == "deployment/api"
     assert contract.steps[1].execution_mode == "control_plane_only"
     assert contract.steps[1].execution_inputs.request_kind == "change_candidates"
+
+
+def test_get_active_evidence_batch_contract_uses_service_context_for_service_targets() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="service/api", profile="service", service_name="api"),
+        _deps([]),
+    )
+
+    contract = get_active_evidence_batch_contract(
+        GetActiveEvidenceBatchRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(
+                namespace="default",
+                target="service/api",
+                profile="service",
+                service_name="api",
+            ),
+        )
+    )
+
+    assert contract.steps[0].step_id == "collect-target-evidence"
+    assert contract.steps[0].execution_inputs.request_kind == "service_context"
+    assert contract.steps[0].execution_inputs.target == "service/api"
+    assert contract.steps[0].execution_inputs.service_name == "api"
 
 
 def test_submit_evidence_step_artifacts_reconciles_partial_batch_without_completing_it() -> None:

@@ -646,6 +646,20 @@ def _step_execution_inputs(
             service_name=target.service_name,
             lookback_minutes=target.lookback_minutes,
         )
+    if step.id == "collect-target-evidence" and (
+        target.scope == "service"
+        or target.profile == "service"
+        or step.suggested_capability == "service_evidence_plane"
+    ):
+        return StepExecutionInputs(
+            request_kind="service_context",
+            cluster=target.cluster,
+            namespace=target.namespace,
+            target=target.target,
+            profile="service",
+            service_name=target.service_name,
+            lookback_minutes=target.lookback_minutes,
+        )
     request = _target_collect_request(target)
     return StepExecutionInputs(
         request_kind="target_context",

@@ -94,14 +94,23 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
         try:
             runtime_snapshot = _kubernetes_mcp_client.collect_service_runtime(step.execution_inputs)
         except PeerMcpError as kube_exc:
-            return materialize_attempt_only_submission(
+            return materialize_service_submission(
                 step,
+                target=metrics_snapshot.target,
+                metrics=metrics_snapshot.metrics,
+                object_state={
+                    "namespace": metrics_snapshot.target.namespace,
+                    "kind": metrics_snapshot.target.kind,
+                    "name": metrics_snapshot.target.name,
+                },
+                events=[],
                 actual_route=_peer_route(metrics_snapshot.tool_path),
                 attempted_routes=[
                     _peer_route(metrics_snapshot.tool_path),
                     _planned_fallback_peer_route(step),
                 ],
-                limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
+                cluster_alias=metrics_snapshot.cluster_alias,
+                extra_limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
             )
         limitations = [*metrics_snapshot.limitations, *runtime_snapshot.limitations]
         return materialize_service_submission(

@@ -1,3 +1,4 @@
+from investigation_service.analysis import derive_findings
 from investigation_service.models import CollectContextRequest, InvestigationReportRequest, TargetRef
 from investigation_service import planner, reporting
 from investigation_service.prom_adapter import collect_metrics_for_scope
@@ -202,3 +203,70 @@ def test_collect_context_for_workload_enriches_with_service_metrics(monkeypatch)
     titles = {item.title for item in context.findings}
     assert "Service Returning 5xx Responses" in titles
     assert "High Service Latency" in titles
+
+
+def test_collect_metrics_for_service_uses_best_available_query_family(monkeypatch) -> None:
+    def fake_query(query: str, prometheus_url: str | None = None) -> float | None:
+        if 'http_server_request_duration_seconds_count{namespace="observability",service="envoy-gateway",status=~"5.."}' in query:
+            return 0.12
+        if 'http_server_request_duration_seconds_count{namespace="observability",service="envoy-gateway"}' in query:
+            return 12.0
+        if 'http_server_request_duration_seconds_bucket{namespace="observability",service="envoy-gateway"}' in query:
+            return 1.8
+        return None
+
+    monkeypatch.setattr("investigation_service.prom_adapter.query_instant", fake_query)
+
+    metrics, limitations = collect_metrics_for_scope(
+        TargetRef(namespace="observability", kind="service", name="envoy-gateway"),
+        profile="service",
+        service_name="envoy-gateway",
+        lookback_minutes=15,
+    )
+
+    assert metrics["prometheus_available"] is True
+    assert metrics["service_metric_family"] == "http_server_service"
+    assert metrics["service_request_rate"] == 12.0
+    assert metrics["service_error_rate"] == 0.12
+    assert metrics["service_latency_p95_seconds"] == 1.8
+    assert limitations == []
+
+
+def test_collect_metrics_for_service_does_not_treat_metric_family_metadata_as_prometheus_success(monkeypatch) -> None:
+    monkeypatch.setattr("investigation_service.prom_adapter.query_instant", lambda query, prometheus_url=None: None)
+
+    metrics, limitations = collect_metrics_for_scope(
+        TargetRef(namespace="observability", kind="service", name="envoy-gateway"),
+        profile="service",
+        service_name="envoy-gateway",
+        lookback_minutes=15,
+    )
+
+    assert metrics["service_metric_family"] == "http_server_service"
+    assert metrics["prometheus_available"] is False
+    assert "prometheus unavailable or returned no usable results" in limitations
+
+
+def test_service_findings_use_backend_topology_when_metrics_are_weak() -> None:
+    findings = derive_findings(
+        "service",
+        {
+            "kind": "service",
+            "name": "envoy-gateway",
+            "selector": {"app": "envoy-gateway"},
+            "matchedPodCount": 2,
+            "readyPodCount": 0,
+            "matchedPods": [
+                {"name": "envoy-a", "ready": False, "restartCount": 3},
+                {"name": "envoy-b", "ready": False, "restartCount": 1},
+            ],
+            "matchedWorkloads": [{"kind": "deployment", "name": "envoy-gateway"}],
+        },
+        ["Warning Unhealthy service/envoy-gateway"],
+        "",
+        {"profile": "service", "prometheus_available": False},
+    )
+
+    titles = {item.title for item in findings}
+    assert "Service Has No Ready Backends" in titles
+    assert "Service Backends Restarting" in titles

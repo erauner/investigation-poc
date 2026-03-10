@@ -7,7 +7,18 @@ from .cluster_registry import ResolvedCluster
 from .models import TargetRef
 from .settings import get_prometheus_url
 
-_METRIC_METADATA_KEYS = {"profile", "prometheus_url", "lookback_minutes", "prometheus_available"}
+_METRIC_METADATA_KEYS = {
+    "profile",
+    "prometheus_url",
+    "lookback_minutes",
+    "prometheus_available",
+    "service_metric_family",
+}
+_SERVICE_METRIC_KEYS = (
+    "service_request_rate",
+    "service_error_rate",
+    "service_latency_p95_seconds",
+)
 
 
 def _effective_prometheus_url(cluster: ResolvedCluster | None) -> str:
@@ -130,34 +141,93 @@ def collect_service_metrics(
     *,
     prometheus_url: str,
 ) -> tuple[dict, list[str]]:
-    queries = service_metric_queries(namespace, service_name, lookback_minutes)
-    limitations: list[str] = []
-    metrics = {
-        label: _safe_metric(query, limitations, label, prometheus_url)
-        for label, query in queries.items()
-    }
-    return metrics, limitations
+    family_results: list[tuple[str, dict[str, float | None]]] = []
+    for family_id, queries in service_metric_query_families(namespace, service_name, lookback_minutes):
+        family_metrics = {
+            label: _safe_metric(query, [], label, prometheus_url)
+            for label, query in queries.items()
+        }
+        family_results.append((family_id, family_metrics))
+    return select_best_service_metric_family(family_results)
 
 
 def service_metric_queries(namespace: str, service_name: str, lookback_minutes: int) -> dict[str, str]:
+    return service_metric_query_families(namespace, service_name, lookback_minutes)[0][1]
+
+
+def service_metric_query_families(
+    namespace: str,
+    service_name: str,
+    lookback_minutes: int,
+) -> list[tuple[str, dict[str, str]]]:
     lookback = f"{max(lookback_minutes, 1)}m"
     escaped_ns = namespace.replace('"', '\\"')
     effective_service = service_name.replace('"', '\\"')
-    return {
-        "service_request_rate": (
-            f'sum(rate(http_server_request_duration_seconds_count{{namespace="{escaped_ns}",service="{effective_service}"}}'
-            f"[{lookback}]))"
+    return [
+        (
+            "http_server_service",
+            {
+                "service_request_rate": (
+                    f'sum(rate(http_server_request_duration_seconds_count{{namespace="{escaped_ns}",service="{effective_service}"}}'
+                    f"[{lookback}]))"
+                ),
+                "service_error_rate": (
+                    "sum(rate(http_server_request_duration_seconds_count"
+                    f'{{namespace="{escaped_ns}",service="{effective_service}",status=~"5.."}}[{lookback}]))'
+                ),
+                "service_latency_p95_seconds": (
+                    "histogram_quantile(0.95, "
+                    "sum by (le) (rate(http_server_request_duration_seconds_bucket"
+                    f'{{namespace="{escaped_ns}",service="{effective_service}"}}[{lookback}])))'
+                ),
+            },
         ),
-        "service_error_rate": (
-            "sum(rate(http_server_request_duration_seconds_count"
-            f'{{namespace="{escaped_ns}",service="{effective_service}",status=~"5.."}}[{lookback}]))'
+        (
+            "http_server_kubernetes_name",
+            {
+                "service_request_rate": (
+                    f'sum(rate(http_server_request_duration_seconds_count{{kubernetes_namespace="{escaped_ns}",kubernetes_name="{effective_service}"}}'
+                    f"[{lookback}]))"
+                ),
+                "service_error_rate": (
+                    "sum(rate(http_server_request_duration_seconds_count"
+                    f'{{kubernetes_namespace="{escaped_ns}",kubernetes_name="{effective_service}",status=~"5.."}}[{lookback}]))'
+                ),
+                "service_latency_p95_seconds": (
+                    "histogram_quantile(0.95, "
+                    "sum by (le) (rate(http_server_request_duration_seconds_bucket"
+                    f'{{kubernetes_namespace="{escaped_ns}",kubernetes_name="{effective_service}"}}[{lookback}])))'
+                ),
+            },
         ),
-        "service_latency_p95_seconds": (
-            "histogram_quantile(0.95, "
-            "sum by (le) (rate(http_server_request_duration_seconds_bucket"
-            f'{{namespace="{escaped_ns}",service="{effective_service}"}}[{lookback}])))'
+    ]
+
+
+def select_best_service_metric_family(
+    family_results: list[tuple[str, dict[str, float | None]]],
+) -> tuple[dict[str, float | None | str | bool], list[str]]:
+    if not family_results:
+        metrics = {key: None for key in _SERVICE_METRIC_KEYS}
+        metrics["prometheus_available"] = False
+        return metrics, [
+            *(f"metric unavailable: {key}" for key in _SERVICE_METRIC_KEYS),
+            "prometheus unavailable or returned no usable results",
+        ]
+
+    best_family_id, best_metrics = max(
+        family_results,
+        key=lambda item: (
+            sum(value is not None for value in item[1].values()),
+            item[0] == "http_server_service",
         ),
-    }
+    )
+    metrics: dict[str, float | None | str | bool] = {key: best_metrics.get(key) for key in _SERVICE_METRIC_KEYS}
+    metrics["service_metric_family"] = best_family_id
+    metrics["prometheus_available"] = any(metrics[key] is not None for key in _SERVICE_METRIC_KEYS)
+    limitations = [f"metric unavailable: {key}" for key in _SERVICE_METRIC_KEYS if metrics[key] is None]
+    if not metrics["prometheus_available"]:
+        limitations.append("prometheus unavailable or returned no usable results")
+    return metrics, limitations
 
 
 def collect_service_enrichment_metrics(
@@ -243,10 +313,13 @@ def collect_metrics_for_scope(
 
     metrics.update(scoped_metrics)
     limitations.extend(scoped_limitations)
-    metrics["prometheus_available"] = any(
-        value is not None for key, value in metrics.items() if key not in _METRIC_METADATA_KEYS
-    )
-    if not metrics["prometheus_available"]:
+    if target.kind == "service" or profile == "service":
+        metrics["prometheus_available"] = bool(scoped_metrics.get("prometheus_available"))
+    else:
+        metrics["prometheus_available"] = any(
+            value is not None for key, value in metrics.items() if key not in _METRIC_METADATA_KEYS
+        )
+    if not metrics["prometheus_available"] and "prometheus unavailable or returned no usable results" not in limitations:
         limitations.append("prometheus unavailable or returned no usable results")
     return metrics, limitations
 

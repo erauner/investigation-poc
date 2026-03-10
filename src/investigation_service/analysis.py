@@ -33,6 +33,9 @@ _SCOPE_TITLE_PRIORITY = {
         "No Critical Signals Found": 0,
     },
     "service": {
+        "Service Has No Matching Backends": 80,
+        "Service Has No Ready Backends": 75,
+        "Service Backends Restarting": 65,
         "Service Returning 5xx Responses": 70,
         "High Service Latency": 60,
         "Target Not Found": 55,
@@ -113,8 +116,51 @@ def _derive_node_findings(object_state: dict, metrics: dict) -> list[Finding]:
     return findings
 
 
-def _derive_service_findings(metrics: dict) -> list[Finding]:
+def _derive_service_findings(object_state: dict, metrics: dict) -> list[Finding]:
     findings: list[Finding] = []
+
+    matched_pod_count = object_state.get("matchedPodCount")
+    ready_pod_count = object_state.get("readyPodCount")
+    matched_pods = object_state.get("matchedPods") or []
+    matched_workloads = object_state.get("matchedWorkloads") or []
+    selector = object_state.get("selector") or {}
+    if selector and matched_pod_count == 0:
+        findings.append(
+            Finding(
+                severity="critical",
+                source="k8s",
+                title="Service Has No Matching Backends",
+                evidence=f"Selector {selector} did not match any live pods",
+            )
+        )
+    elif matched_pod_count and ready_pod_count == 0:
+        workload_note = ""
+        if matched_workloads:
+            workload_names = ", ".join(f"{item.get('kind')}/{item.get('name')}" for item in matched_workloads)
+            workload_note = f" for workloads {workload_names}"
+        findings.append(
+            Finding(
+                severity="critical",
+                source="k8s",
+                title="Service Has No Ready Backends",
+                evidence=f"Matched {matched_pod_count} backend pods but 0 are ready{workload_note}",
+            )
+        )
+    restarting_pods = [pod for pod in matched_pods if (pod.get("restartCount") or 0) > 0]
+    if restarting_pods:
+        summaries = ", ".join(
+            f"{pod.get('name')} restarts={pod.get('restartCount')}"
+            for pod in restarting_pods[:3]
+            if pod.get("name")
+        )
+        findings.append(
+            Finding(
+                severity="warning",
+                source="k8s",
+                title="Service Backends Restarting",
+                evidence=summaries or "One or more service backend pods are restarting",
+            )
+        )
 
     error_rate = metrics.get("service_error_rate")
     if error_rate is not None and error_rate > 0:
@@ -279,7 +325,7 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
             )
         )
 
-    findings.extend(_derive_service_findings(metrics))
+    findings.extend(_derive_service_findings(object_state, metrics))
 
     return findings
 
@@ -305,7 +351,7 @@ def derive_findings(profile: str, object_state: dict, events: list[str], logs: s
     if object_state.get("kind") == "node":
         findings.extend(_derive_node_findings(object_state, metrics))
     elif profile == "service":
-        findings.extend(_derive_service_findings(metrics))
+        findings.extend(_derive_service_findings(object_state, metrics))
     elif profile == "otel-pipeline":
         findings.extend(_derive_pipeline_findings(metrics))
     else:

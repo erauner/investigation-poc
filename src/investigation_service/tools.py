@@ -189,9 +189,11 @@ def _materialize_evidence_bundle(
             cluster=cluster,
         )
         for key, value in service_metrics.items():
+            if key == "prometheus_available":
+                continue
             if value is not None:
                 metrics[key] = value
-        if any(value is not None for value in service_metrics.values()):
+        if service_metrics.get("prometheus_available"):
             metrics["prometheus_available"] = True
     findings = derive_findings(effective_profile, object_state, events, logs, metrics)
     limitations = [*metric_limitations, *(extra_limitations or [])]
@@ -258,7 +260,8 @@ def materialize_service_evidence(
         service_name=req.service_name,
         lookback_minutes=req.lookback_minutes,
     )
-    findings = derive_findings("service", object_state or {}, events or ["no related events"], "", metrics)
+    effective_events = list(events or [])
+    findings = derive_findings("service", object_state or {}, effective_events, "", metrics)
     limitations = [*(extra_limitations or [])]
     if (object_state or {}).get("error"):
         limitations.append("kubernetes object query failed")
@@ -269,7 +272,7 @@ def materialize_service_evidence(
         cluster=cluster_alias or cluster.alias,
         target=target,
         object_state=object_state or {},
-        events=events or ["no related events"],
+        events=effective_events,
         log_excerpt="",
         metrics={**metrics, "profile": "service", "lookback_minutes": context_req.lookback_minutes},
         findings=findings,

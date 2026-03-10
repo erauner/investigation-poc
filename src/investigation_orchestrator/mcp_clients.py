@@ -16,9 +16,14 @@ from investigation_service.k8s_adapter import (
     pick_runtime_pod_for_workload,
     resolve_runtime_target,
     resolve_target,
+    summarize_service_topology,
 )
 from investigation_service.models import StepExecutionInputs, TargetRef
-from investigation_service.prom_adapter import node_metric_queries, service_metric_queries
+from investigation_service.prom_adapter import (
+    node_metric_queries,
+    select_best_service_metric_family,
+    service_metric_query_families,
+)
 from investigation_service.settings import (
     get_cluster_name,
     get_default_cluster_alias,
@@ -418,10 +423,30 @@ class KubernetesMcpClient:
                     )
                     tool_path.append("resources_get")
                     object_state = _normalize_object_state(raw_object_state, target)
+                    limitations: list[str] = []
+                    try:
+                        pods_raw = await self._call_tool(
+                            session,
+                            "pods_list_in_namespace",
+                            {"namespace": namespace},
+                        )
+                        tool_path.append("pods_list_in_namespace")
+                        pods = []
+                        if isinstance(pods_raw, dict):
+                            pods = pods_raw.get("items") or pods_raw.get("pods") or []
+                        elif isinstance(pods_raw, list):
+                            pods = pods_raw
+                        object_state.update(
+                            summarize_service_topology(
+                                raw_object_state if isinstance(raw_object_state, dict) else {},
+                                [pod for pod in pods if isinstance(pod, dict)],
+                            )
+                        )
+                    except PeerMcpError:
+                        limitations.append("peer service Kubernetes fallback could not infer backend topology")
                     events_raw = await self._call_tool(session, "events_list", {"namespace": namespace})
                     tool_path.append("events_list")
                     events = _normalize_events(target, events_raw)
-                    limitations: list[str] = []
                     if events == ["no related events"]:
                         limitations.append("peer service Kubernetes fallback returned no related events")
                     return ServiceRuntimeSnapshot(
@@ -580,7 +605,7 @@ class PrometheusMcpClient:
             raise PeerMcpError("service peer transport requires namespace and service_name")
 
         target = TargetRef(namespace=namespace, kind="service", name=service_name)
-        queries = service_metric_queries(namespace, service_name, inputs.lookback_minutes or 15)
+        query_families = service_metric_query_families(namespace, service_name, inputs.lookback_minutes or 15)
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout_seconds)) as http_client:
             async with streamable_http_client(self.url, http_client=http_client) as (
@@ -591,20 +616,15 @@ class PrometheusMcpClient:
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
                     tool_path = ["prometheus-mcp-server"]
-                    limitations: list[str] = []
-                    metrics: dict[str, Any] = {}
-                    for label, query in queries.items():
-                        raw = await self._call_tool(session, "execute_query", {"query": query})
-                        tool_path.append("execute_query")
-                        value = _normalize_metric_value(raw)
-                        metrics[label] = value
-                        if value is None:
-                            limitations.append(f"metric unavailable: {label}")
-                    metrics["prometheus_available"] = any(
-                        value is not None for key, value in metrics.items() if key != "prometheus_available"
-                    )
-                    if not metrics["prometheus_available"]:
-                        limitations.append("prometheus unavailable or returned no usable results")
+                    family_results: list[tuple[str, dict[str, float | None]]] = []
+                    for family_id, queries in query_families:
+                        family_metrics: dict[str, float | None] = {}
+                        for label, query in queries.items():
+                            raw = await self._call_tool(session, "execute_query", {"query": query})
+                            tool_path.append("execute_query")
+                            family_metrics[label] = _normalize_metric_value(raw)
+                        family_results.append((family_id, family_metrics))
+                    metrics, limitations = select_best_service_metric_family(family_results)
                     return ServiceMetricsSnapshot(
                         cluster_alias=cluster.alias,
                         target=target,

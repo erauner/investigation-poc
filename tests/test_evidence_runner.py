@@ -47,7 +47,7 @@ def _service_step() -> EvidenceStepContract:
         preferred_mcp_server="prometheus-mcp-server",
         preferred_tool_names=["execute_query", "execute_range_query"],
         fallback_mcp_server="kubernetes-mcp-server",
-        fallback_tool_names=["resources_get", "events_list"],
+        fallback_tool_names=["resources_get", "events_list", "pods_list_in_namespace"],
         execution_mode="external_preferred",
         execution_inputs=StepExecutionInputs(
             request_kind="service_context",
@@ -390,13 +390,16 @@ def test_service_external_step_records_dual_peer_attempts_when_kubernetes_enrich
 
     artifact = evidence_runner._submitted_artifact(step)
 
-    assert artifact.evidence_bundle is None
+    assert artifact.evidence_bundle is not None
+    assert artifact.evidence_bundle.metrics["service_error_rate"] == 0.5
+    assert artifact.evidence_bundle.object_state["kind"] == "service"
+    assert artifact.evidence_bundle.events == []
     assert artifact.actual_route.tool_path == ["prometheus-mcp-server", "execute_query", "execute_range_query"]
     assert [route.mcp_server for route in artifact.attempted_routes] == [
         "prometheus-mcp-server",
         "kubernetes-mcp-server",
     ]
-    assert "kubernetes peer fallback failed: kube down" in artifact.limitations
+    assert "kubernetes peer fallback failed: kube down" in artifact.evidence_bundle.limitations
 
 
 def test_node_external_step_prefers_prometheus_with_kubernetes_enrichment(monkeypatch) -> None:
