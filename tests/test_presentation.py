@@ -99,6 +99,8 @@ def test_debug_trace_includes_trace_notes_and_guidelines_without_changing_headli
     rendered = render_presentation_markdown(_report(), profile="debug_trace")
 
     assert "CrashLoopBackOff" in rendered
+    assert "k8s: Crash Loop Detected - container=app, waiting reason=CrashLoopBackOff, restarts=5" in rendered
+    assert "recent events: Back-off restarting failed container crashy in pod crashy-abc123" in rendered
     assert "Planner path used: True" in rendered
     assert "Executed steps: collect-target-evidence" in rendered
     assert "target derived from alert text" in rendered
@@ -113,3 +115,42 @@ def test_explain_more_surfaces_follow_ups_and_related_data_note() -> None:
     assert "Inspect the failing container command." in rendered
     assert "Compare the current image tag to the previous successful revision." in rendered
     assert "No additional changes found." in rendered
+
+
+def test_operator_summary_preserves_legacy_report_evidence_fallback() -> None:
+    report = _report().model_copy(
+        update={
+            "evidence_items": [],
+            "evidence": [
+                "events: Crash Loop Detected - Events indicate BackOff/CrashLoopBackOff behavior",
+                "logs: application exits with status 1",
+            ],
+        }
+    )
+
+    rendered = render_presentation_markdown(report, profile="operator_summary")
+
+    assert "Events indicate BackOff/CrashLoopBackOff behavior" in rendered
+    assert "logs: application exits with status 1" in rendered
+
+
+def test_event_fallback_uses_parse_compact_event_text_when_regex_shortcuts_do_not_match() -> None:
+    report = _report().model_copy(
+        update={
+            "evidence": [],
+            "evidence_items": [
+                EvidenceItem(
+                    fingerprint="event|fallback",
+                    source="events",
+                    kind="event",
+                    severity="warning",
+                    summary="recent events",
+                    detail="Warning Failed Scheduling default-scheduler 0/3 nodes are available: 3 Insufficient cpu.",
+                )
+            ],
+        }
+    )
+
+    rendered = render_presentation_markdown(report, profile="operator_summary")
+
+    assert "recent events: Failed - Scheduling default-scheduler 0/3 nodes are available: 3 Insufficient cpu." in rendered

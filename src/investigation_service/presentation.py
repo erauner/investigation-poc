@@ -45,7 +45,7 @@ def render_presentation_markdown(
 def _render_operator_summary(report: InvestigationReport) -> list[PresentationSection]:
     return [
         PresentationSection("diagnosis", "Diagnosis", [report.diagnosis]),
-        PresentationSection("evidence", "Evidence", _bullet_lines(_evidence_lines(report), fallback="None.")),
+        PresentationSection("evidence", "Evidence", _bullet_lines(_summary_evidence_lines(report), fallback="None.")),
         PresentationSection("related_data", "Related Data", _related_data_lines(report)),
         PresentationSection("limitations", "Limitations", _bullet_lines(report.limitations, fallback="None reported.")),
         PresentationSection("next_step", "Recommended next step", [report.recommended_next_step]),
@@ -63,7 +63,7 @@ def _render_incident_report(report: InvestigationReport) -> list[PresentationSec
     next_actions = [report.recommended_next_step, *_bullet_lines(report.suggested_follow_ups, fallback="").copy()]
     return [
         PresentationSection("summary", "Incident Summary", summary),
-        PresentationSection("evidence", "Supporting Evidence", _bullet_lines(_evidence_lines(report), fallback="None.")),
+        PresentationSection("evidence", "Supporting Evidence", _bullet_lines(_verbose_evidence_lines(report), fallback="None.")),
         PresentationSection("related_context", "Related Context", _related_data_lines(report)),
         PresentationSection("limitations", "Limitations", _bullet_lines(report.limitations, fallback="None reported.")),
         PresentationSection("next_actions", "Next Actions", [line for line in next_actions if line]),
@@ -97,7 +97,7 @@ def _render_debug_trace(report: InvestigationReport) -> list[PresentationSection
 
     return [
         PresentationSection("diagnosis", "Diagnosis", [report.diagnosis]),
-        PresentationSection("evidence", "Evidence", _bullet_lines(_evidence_lines(report), fallback="None.")),
+        PresentationSection("evidence", "Evidence", _bullet_lines(_verbose_evidence_lines(report), fallback="None.")),
         PresentationSection("related_data", "Related Data", _related_data_lines(report)),
         PresentationSection("limitations", "Limitations", _bullet_lines(report.limitations, fallback="None reported.")),
         PresentationSection("next_step", "Recommended next step", [report.recommended_next_step]),
@@ -123,14 +123,14 @@ def _render_explain_more(report: InvestigationReport) -> list[PresentationSectio
     follow_up_lines.extend(_guideline_lines(report.guidelines))
     return [
         PresentationSection("diagnosis", "Diagnosis", diagnosis_lines),
-        PresentationSection("why", "Why This Conclusion", _bullet_lines(_evidence_lines(report), fallback="None.")),
+        PresentationSection("why", "Why This Conclusion", _bullet_lines(_verbose_evidence_lines(report), fallback="None.")),
         PresentationSection("related_data", "Related Data", _related_data_lines(report)),
         PresentationSection("limitations", "Limitations", _bullet_lines(report.limitations, fallback="None reported.")),
         PresentationSection("follow_ups", "Follow-ups And Guidance", follow_up_lines or ["- None."]),
     ]
 
 
-def _evidence_lines(report: InvestigationReport) -> list[str]:
+def _summary_evidence_lines(report: InvestigationReport) -> list[str]:
     if report.evidence_items:
         rendered: list[str] = []
         seen: set[str] = set()
@@ -144,6 +144,27 @@ def _evidence_lines(report: InvestigationReport) -> list[str]:
         if rendered:
             return _collapse_overlapping_evidence(rendered)
 
+    return _collapse_overlapping_evidence(_legacy_evidence_lines(report))
+
+
+def _verbose_evidence_lines(report: InvestigationReport) -> list[str]:
+    if report.evidence_items:
+        rendered: list[str] = []
+        seen: set[str] = set()
+        for item in report.evidence_items:
+            line = _format_evidence_item(item)
+            normalized = line.strip().lower()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            rendered.append(line)
+        if rendered:
+            return rendered
+
+    return _legacy_evidence_lines(report)
+
+
+def _legacy_evidence_lines(report: InvestigationReport) -> list[str]:
     rendered = []
     seen: set[str] = set()
     for item in report.evidence:
@@ -153,7 +174,7 @@ def _evidence_lines(report: InvestigationReport) -> list[str]:
             continue
         seen.add(normalized)
         rendered.append(line)
-    return _collapse_overlapping_evidence(rendered)
+    return rendered
 
 
 def _format_evidence_item(item: EvidenceItem) -> str:
