@@ -67,6 +67,22 @@ The runtime should now be thought of as:
   - unbounded loops
   - moving semantic ownership into prompt logic or the host wrapper
 
+Presentation profiles are a separate downstream concern.
+
+Profiles such as:
+
+- `operator_summary`
+- `incident_report`
+- `debug_trace`
+- `explain_more`
+
+may change how investigation results are rendered, but they must not change:
+
+- evidence adequacy
+- batch progression
+- reconciliation
+- canonical investigation semantics
+
 ## What "Bounded Exploratory Evidence" Means
 
 Bounded exploratory evidence is allowed only when all of the following remain true:
@@ -81,8 +97,35 @@ Bounded exploratory evidence is allowed only when all of the following remain tr
   - `EvidenceBundle`
 - provenance remains inspectable
 - the outer orchestration spine still decides stop/continue behavior deterministically
+- the server/tool allowlist does not expand dynamically at runtime
 
 So the flexibility lives inside a bounded box, not across the whole workflow.
+
+Exploratory behavior may change how evidence is gathered, but not how evidence is represented.
+
+The downstream planner and reconciliation seams must still consume the same typed contracts:
+
+- `SubmittedStepArtifact`
+- `EvidenceBundle`
+- `StepArtifact`
+
+This ADR does not require that bounded exploration be implemented by an LLM-driven scout immediately.
+
+Bounded exploratory evidence may later be implemented by:
+
+- policy-guided branching
+- deterministic probe selection
+- structured tool-planning logic
+- or a constrained tool-using agent
+
+The architectural requirement is:
+
+- boundedness
+- allowlisting
+- typed outputs
+- provenance
+
+not any one specific mechanism.
 
 ## Preferred Pattern
 
@@ -95,6 +138,26 @@ The preferred near-term pattern is:
 5. deterministic batch progression and rendering
 
 This is intentionally narrower than making the whole investigation graph agentic.
+
+## Adequacy Outcome Taxonomy
+
+The adequacy gate is the first extension seam for bounded exploration.
+
+The long-term adequacy contract should distinguish at least these outcomes:
+
+- `adequate`
+- `weak`
+- `contradictory`
+- `blocked`
+
+Not every slice needs all four outcomes immediately, but this is the intended conceptual taxonomy.
+
+Why this matters:
+
+- `adequate` means baseline evidence is strong enough to materialize and continue
+- `weak` means the evidence is thin and bounded exploration may help
+- `contradictory` means the evidence conflicts and bounded follow-up may be needed
+- `blocked` means collection limitations dominate and the system should degrade honestly rather than pretending evidence is complete
 
 ## Initial Scope
 
@@ -142,6 +205,13 @@ Representative examples of desired future behavior:
 3. if evidence is still insufficient, return a partial but honest artifact
 4. if service or node follow-up is needed, route only through pre-approved graph branches
 
+Promotion to a preferred BYO/default hosted runtime is orthogonal to this ADR.
+
+Bounded exploratory evidence can be introduced regardless of whether the preferred hosted runtime:
+
+- remains declarative for a period
+- or later shifts to BYO LangGraph hosting
+
 ## Implementation Direction
 
 The next implementation slices should follow this order:
@@ -151,6 +221,19 @@ The next implementation slices should follow this order:
 3. add a bounded workload evidence-scout subgraph
 4. route the main orchestrator to use that subgraph only when adequacy fails
 5. add presentation profiles as a separate downstream concern
+
+## Observability And Provenance Expectations
+
+As exploratory behavior grows, observability must grow with it.
+
+The system should preserve enough traceability to explain:
+
+- why exploration was entered
+- which bounded probe path actually ran
+- what budget was consumed
+- what final route or routes satisfied the step
+
+The current `actual_route` seam remains important, but exploratory behavior may require richer provenance and runtime trace detail later.
 
 ## Consequences
 

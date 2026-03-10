@@ -208,55 +208,27 @@ Checkpointing is introduced only as an execution-shell hook:
 - pass `thread_id` and optional `checkpoint_id` through graph invoke config
 - use in-process checkpointing first for local proving and tests
 
-## Current Status After The First Shell And Peer-Transport Slices
+## Operational Rollout Note
 
-The repo has now completed the intended first shell slice and the peer evidence-plane transport migration that was meant to follow it.
+This ADR is intentionally about durable architecture, not rollout status.
 
-What is now true:
+Time-sensitive program state should live in:
 
-- `run_orchestrated_investigation(...)` is the stable public facade and uses the in-process LangGraph shell internally
-- graph state remains a thin wrapper around `ReportingExecutionContext`
-- checkpoint configuration is behind an orchestrator-side seam and is exercised in tests with in-memory checkpointing
-- the orchestrator now has an explicit internal thread identity seam for checkpointed graph execution
-- checkpoint-resume behavior is exercised in tests from real graph-node boundaries rather than only through terminal state inspection
-- minimal redacted runtime observability exists around graph run start/finish, node transitions, and checkpoint interruption/resume boundaries
-- workload, service, and node external-preferred evidence steps now use orchestrator-owned peer MCP transport first
-- bounded internal fallback remains planner-owned inside product code rather than living in the orchestrator happy path
+- `docs/planner-led-transition-plan.md`
 
-What is still intentionally deferred:
+That includes:
 
-- public resume APIs
-- durable checkpoint storage by default
-- caller-facing thread identity
-- a hosted BYO LangGraph runtime
+- what is complete today
+- what is only locally proven
+- what is hosted but not yet promotion-ready
+- the current slice order and validation gates
 
-So the architecture is now at the point where a future BYO LangGraph move should be treated as a hosting/runtime packaging step, not as a semantic rewrite.
+The durable point that matters here is narrower:
 
-## Current Status After The Local Shadow BYO Slice
-
-The repo has now completed the first additive local shadow-hosting slice for the BYO direction.
-
-What is now true:
-
-- a separate `investigation_shadow_runtime` package exists as an outer host layer
-- that host calls the orchestrator library directly rather than routing back through `investigation_service.mcp_server`
-- a small stable host-facing orchestrator API now exists so the host does not depend on private `_run_*` helpers or exception-only interruption detection
-- local kind packaging now supports a separate shadow BYO agent beside the current declarative `incident-triage` path
-- local shadow validation is now repeatable on a warm kind cluster and includes output-quality assertions rather than only health checks
-- deterministic host-side formatting is now applied from `InvestigationReport` so the shadow lane can be compared side by side with the declarative lane
-
-What is intentionally true only for local validation right now:
-
-- the local shadow lane uses `SHADOW_CHECKPOINT_MODE=memory`
-- local kind validation proves the hosted packaging boundary and direct-orchestrator call path
-- local kind validation does not yet prove the real kagent-backed checkpoint path
-
-What remains to close before treating the BYO path as more than a local shadow proof:
-
-- validate the shadow lane in homelab/GitOps as a separate hosted runtime
-- choose and document the hosted thread identity boundary explicitly
-- exercise real kagent-backed checkpoint storage in the outer host layer
-- strengthen side-by-side hosted observability so invoke/resume behavior is inspectable without guesswork
+- the in-process shell, peer-transport migration, and shadow BYO work all reinforce the same architectural boundary
+- LangGraph remains the execution shell
+- `investigation_service` remains the semantic owner
+- any future BYO move remains a hosting/runtime packaging step, not a semantic rewrite
 
 ## Current Status After Initial Homelab Shadow Validation
 
@@ -558,35 +530,25 @@ The narrower decision here is:
 
 > The future LangGraph path should be execution-shell-first, not semantic-owner-first.
 
-## Follow-On Direction After Initial Shadow Validation
+## Follow-On Direction
 
-The shadow-hosting proof and recent real-cluster validation changed the next architectural question again.
-
-The main remaining product-quality gap is no longer "should the system use a hosted LangGraph lane at all?" The gap is:
-
-- how to restore useful evidence-discovery flexibility
-- without reopening the whole runtime to prompt-owned raw tool choreography
-
-The intended follow-on direction is now defined in:
+The next refinement of this ADR is defined in:
 
 - `docs/adr/0004-bounded-exploratory-evidence.md`
 
-That follow-on should be read as the next refinement of this ADR, not a replacement for it.
-
-The combined position is now:
+ADR 0003 and ADR 0004 should be read together:
 
 - ADR 0003:
   - LangGraph is the execution shell
   - semantic ownership stays in `investigation_service`
   - the outer runtime spine stays deterministic and checkpointable
 - ADR 0004:
-  - selective evidence-plane nodes may become bounded-exploratory
+  - selective evidence-plane seams may become bounded-exploratory
   - exploratory behavior must stay inside approved, budgeted, typed seams
 
 So the next place to add flexibility is:
 
-- workload evidence gathering first
-- later service and node evidence if the bounded pattern proves worthwhile
+- selected evidence-gathering seams inside the deterministic runtime
 
 The next place to add flexibility is not:
 

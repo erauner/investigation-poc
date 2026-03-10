@@ -837,7 +837,7 @@ When the target model is in place, e2e coverage should include:
 - replacing structured semantics with raw-tool improvisation
 - splitting MCP services before semantic boundaries are stable
 
-## Next Directive After Hosted Shadow Proof
+## Next Directive After Initial Shadow Validation
 
 Recent homelab validation now makes the next implementation directive clearer.
 
@@ -877,7 +877,7 @@ Goal:
 Delivered in this slice should be:
 
 - a product-owned adequacy evaluator for evidence bundles
-- explicit pass/fail outcomes that can drive routing
+- explicit adequacy outcomes that can later drive routing
 - tests proving strong workload evidence short-circuits without extra exploration
 
 This slice should remain:
@@ -933,6 +933,17 @@ Delivered in this slice should be:
 Validation gate:
 
 - the same canonical investigation result can be rendered in multiple profiles without changing findings or route provenance
+
+## Current Rollout Framing
+
+This transition plan, not the ADRs, should carry the time-sensitive rollout framing.
+
+The current intended distinction is:
+
+- local proof complete
+- initial shadow validation in real environments in progress
+- hosted checkpoint/resume semantics still separate from this flexibility work
+- promotion beyond shadow still explicitly deferred
 
 ## Updated Priority Order
 
