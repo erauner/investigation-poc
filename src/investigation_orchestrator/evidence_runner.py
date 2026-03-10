@@ -158,6 +158,56 @@ def _service_submission_via_internal_fallback(step: EvidenceStepContract, reason
     )
 
 
+def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepArtifact:
+    try:
+        metrics_snapshot = _prometheus_mcp_client.collect_node_metrics(step.execution_inputs)
+    except PeerMcpError as prom_exc:
+        try:
+            runtime_snapshot = _kubernetes_mcp_client.collect_node_runtime(step.execution_inputs)
+        except PeerMcpError as kube_exc:
+            raise PeerMcpError(
+                f"prometheus peer failed: {prom_exc}; kubernetes peer fallback failed: {kube_exc}"
+            ) from kube_exc
+        return runtime_api.materialize_node_submission(
+            step,
+            target=runtime_snapshot.target,
+            metrics={"prometheus_available": False},
+            object_state=runtime_snapshot.object_state,
+            events=runtime_snapshot.events,
+            actual_route=_peer_route(runtime_snapshot.tool_path),
+            cluster_alias=runtime_snapshot.cluster_alias,
+            extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
+        )
+
+    runtime_snapshot = _kubernetes_mcp_client.collect_node_runtime(step.execution_inputs)
+    limitations = [*metrics_snapshot.limitations, *runtime_snapshot.limitations]
+    actual_route = (
+        _peer_route(runtime_snapshot.tool_path)
+        if not metrics_snapshot.metrics.get("prometheus_available")
+        else _peer_route([*metrics_snapshot.tool_path, *runtime_snapshot.tool_path])
+    )
+    return runtime_api.materialize_node_submission(
+        step,
+        target=runtime_snapshot.target,
+        metrics=metrics_snapshot.metrics,
+        object_state=runtime_snapshot.object_state,
+        events=runtime_snapshot.events,
+        actual_route=actual_route,
+        cluster_alias=runtime_snapshot.cluster_alias,
+        extra_limitations=limitations,
+    )
+
+
+def _node_submission_via_internal_fallback(step: EvidenceStepContract, reason: str) -> SubmittedStepArtifact:
+    bundle = _node_bundle(step)
+    limitations = sorted(set([*bundle.limitations, f"peer node MCP fallback: {reason}"]))
+    return SubmittedStepArtifact(
+        step_id=step.step_id,
+        evidence_bundle=bundle.model_copy(update={"limitations": limitations}),
+        actual_route=_actual_route("collect_node_evidence"),
+    )
+
+
 def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact:
     if step.requested_capability == "workload_evidence_plane":
         try:
@@ -170,11 +220,10 @@ def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact:
         except PeerMcpError as exc:
             return _service_submission_via_internal_fallback(step, str(exc))
     if step.requested_capability == "node_evidence_plane":
-        return SubmittedStepArtifact(
-            step_id=step.step_id,
-            evidence_bundle=_node_bundle(step),
-            actual_route=_actual_route("collect_node_evidence"),
-        )
+        try:
+            return _node_submission_via_peer_mcp(step)
+        except PeerMcpError as exc:
+            return _node_submission_via_internal_fallback(step, str(exc))
     raise ValueError(f"unsupported external step capability: {step.requested_capability}")
 
 

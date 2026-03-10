@@ -176,29 +176,28 @@ def collect_service_enrichment_metrics(
 
 
 def collect_node_metrics(node_name: str, *, prometheus_url: str) -> tuple[dict, list[str]]:
-    escaped_name = node_name.replace('"', '\\"')
+    queries = node_metric_queries(node_name)
     limitations: list[str] = []
     metrics = {
-        "node_memory_allocatable_bytes": _safe_metric(
-            f'kube_node_status_allocatable{{node="{escaped_name}",resource="memory",unit="byte"}}',
-            limitations,
-            "node_memory_allocatable_bytes",
-            prometheus_url,
-        ),
-        "node_memory_working_set_bytes": _safe_metric(
-            f'sum(container_memory_working_set_bytes{{node="{escaped_name}",container!="",pod!=""}})',
-            limitations,
-            "node_memory_working_set_bytes",
-            prometheus_url,
-        ),
-        "node_memory_request_bytes": _safe_metric(
-            f'sum(kube_pod_container_resource_requests{{node="{escaped_name}",resource="memory",unit="byte"}})',
-            limitations,
-            "node_memory_request_bytes",
-            prometheus_url,
-        ),
+        label: _safe_metric(query, limitations, label, prometheus_url)
+        for label, query in queries.items()
     }
     return metrics, limitations
+
+
+def node_metric_queries(node_name: str) -> dict[str, str]:
+    escaped_name = node_name.replace('"', '\\"')
+    return {
+        "node_memory_allocatable_bytes": (
+            f'kube_node_status_allocatable{{node="{escaped_name}",resource="memory",unit="byte"}}'
+        ),
+        "node_memory_working_set_bytes": (
+            f'sum(container_memory_working_set_bytes{{node="{escaped_name}",container!="",pod!=""}})'
+        ),
+        "node_memory_request_bytes": (
+            f'sum(kube_pod_container_resource_requests{{node="{escaped_name}",resource="memory",unit="byte"}})'
+        ),
+    }
 
 
 def collect_metrics_for_scope(

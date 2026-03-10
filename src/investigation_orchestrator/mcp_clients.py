@@ -17,7 +17,7 @@ from investigation_service.k8s_adapter import (
     resolve_target,
 )
 from investigation_service.models import StepExecutionInputs, TargetRef
-from investigation_service.prom_adapter import service_metric_queries
+from investigation_service.prom_adapter import node_metric_queries, service_metric_queries
 from investigation_service.settings import (
     get_cluster_name,
     get_default_cluster_alias,
@@ -64,6 +64,25 @@ class ServiceMetricsSnapshot:
 
 @dataclass
 class ServiceRuntimeSnapshot:
+    cluster_alias: str
+    target: TargetRef
+    object_state: dict[str, Any]
+    events: list[str]
+    limitations: list[str] = field(default_factory=list)
+    tool_path: list[str] = field(default_factory=list)
+
+
+@dataclass
+class NodeMetricsSnapshot:
+    cluster_alias: str
+    target: TargetRef
+    metrics: dict[str, Any]
+    limitations: list[str] = field(default_factory=list)
+    tool_path: list[str] = field(default_factory=list)
+
+
+@dataclass
+class NodeRuntimeSnapshot:
     cluster_alias: str
     target: TargetRef
     object_state: dict[str, Any]
@@ -392,6 +411,58 @@ class KubernetesMcpClient:
                         tool_path=tool_path,
                     )
 
+    async def _collect_node_async(self, inputs: StepExecutionInputs) -> NodeRuntimeSnapshot:
+        cluster = resolve_cluster(inputs.cluster)
+        local_aliases = {
+            alias for alias in (get_default_cluster_alias(), get_cluster_name(), "local-kind") if alias
+        }
+        if (cluster.kube_context or cluster.kubeconfig_path) and cluster.alias not in local_aliases:
+            raise PeerMcpError("peer node Kubernetes fallback does not yet support multicluster kubeconfig routing")
+        if not inputs.node_name:
+            raise PeerMcpError("node peer transport requires node_name")
+
+        target = TargetRef(namespace=None, kind="node", name=inputs.node_name)
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout_seconds)) as http_client:
+            async with streamable_http_client(self.url, http_client=http_client) as (
+                read_stream,
+                write_stream,
+                _get_session_id,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tool_path = ["kubernetes-mcp-server"]
+                    limitations: list[str] = []
+
+                    raw_object_state = await self._call_tool(
+                        session,
+                        "resources_get",
+                        {
+                            "apiVersion": "v1",
+                            "kind": "Node",
+                            "name": target.name,
+                        },
+                    )
+                    tool_path.append("resources_get")
+                    object_state = _normalize_object_state(raw_object_state, target)
+
+                    try:
+                        events_raw = await self._call_tool(session, "events_list", {})
+                        tool_path.append("events_list")
+                        events = _normalize_events(target, events_raw)
+                    except PeerMcpError:
+                        events = ["no related events"]
+                        limitations.append("peer node Kubernetes fallback could not read cluster events")
+
+                    return NodeRuntimeSnapshot(
+                        cluster_alias=cluster.alias,
+                        target=target,
+                        object_state=object_state,
+                        events=events,
+                        limitations=limitations,
+                        tool_path=tool_path,
+                    )
+
     def collect_service_runtime(self, inputs: StepExecutionInputs) -> ServiceRuntimeSnapshot:
         try:
             asyncio.get_running_loop()
@@ -422,6 +493,41 @@ class KubernetesMcpClient:
 
         try:
             return anyio.run(self._collect_service_async, inputs)
+        except PeerMcpError:
+            raise
+        except Exception as exc:
+            raise PeerMcpError(_peer_error_message(exc)) from exc
+
+    def collect_node_runtime(self, inputs: StepExecutionInputs) -> NodeRuntimeSnapshot:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = False
+        else:
+            running_loop = True
+
+        if running_loop:
+            result: dict[str, NodeRuntimeSnapshot] = {}
+            error: dict[str, Exception] = {}
+
+            def _runner() -> None:
+                try:
+                    result["snapshot"] = anyio.run(self._collect_node_async, inputs)
+                except Exception as exc:  # pragma: no cover
+                    error["exception"] = exc
+
+            thread = threading.Thread(target=_runner, daemon=True)
+            thread.start()
+            thread.join()
+            if "exception" in error:
+                exc = error["exception"]
+                if isinstance(exc, PeerMcpError):
+                    raise exc
+                raise PeerMcpError(_peer_error_message(exc)) from exc
+            return result["snapshot"]
+
+        try:
+            return anyio.run(self._collect_node_async, inputs)
         except PeerMcpError:
             raise
         except Exception as exc:
@@ -485,6 +591,50 @@ class PrometheusMcpClient:
                         tool_path=tool_path,
                     )
 
+    async def _collect_node_async(self, inputs: StepExecutionInputs) -> NodeMetricsSnapshot:
+        cluster = resolve_cluster(inputs.cluster)
+        local_aliases = {
+            alias for alias in (get_default_cluster_alias(), get_cluster_name(), "local-kind") if alias
+        }
+        if cluster.prometheus_url and cluster.alias not in local_aliases:
+            raise PeerMcpError("peer node Prometheus transport does not yet support multicluster prometheus routing")
+        if not inputs.node_name:
+            raise PeerMcpError("node peer transport requires node_name")
+
+        target = TargetRef(namespace=None, kind="node", name=inputs.node_name)
+        queries = node_metric_queries(inputs.node_name)
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout_seconds)) as http_client:
+            async with streamable_http_client(self.url, http_client=http_client) as (
+                read_stream,
+                write_stream,
+                _get_session_id,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tool_path = ["prometheus-mcp-server"]
+                    limitations: list[str] = []
+                    metrics: dict[str, Any] = {}
+                    for label, query in queries.items():
+                        raw = await self._call_tool(session, "execute_query", {"query": query})
+                        tool_path.append("execute_query")
+                        value = _normalize_metric_value(raw)
+                        metrics[label] = value
+                        if value is None:
+                            limitations.append(f"metric unavailable: {label}")
+                    metrics["prometheus_available"] = any(
+                        value is not None for key, value in metrics.items() if key != "prometheus_available"
+                    )
+                    if not metrics["prometheus_available"]:
+                        limitations.append("prometheus unavailable or returned no usable results")
+                    return NodeMetricsSnapshot(
+                        cluster_alias=cluster.alias,
+                        target=target,
+                        metrics=metrics,
+                        limitations=limitations,
+                        tool_path=tool_path,
+                    )
+
     def collect_service_metrics(self, inputs: StepExecutionInputs) -> ServiceMetricsSnapshot:
         try:
             asyncio.get_running_loop()
@@ -515,6 +665,41 @@ class PrometheusMcpClient:
 
         try:
             return anyio.run(self._collect_service_async, inputs)
+        except PeerMcpError:
+            raise
+        except Exception as exc:
+            raise PeerMcpError(_peer_error_message(exc)) from exc
+
+    def collect_node_metrics(self, inputs: StepExecutionInputs) -> NodeMetricsSnapshot:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = False
+        else:
+            running_loop = True
+
+        if running_loop:
+            result: dict[str, NodeMetricsSnapshot] = {}
+            error: dict[str, Exception] = {}
+
+            def _runner() -> None:
+                try:
+                    result["snapshot"] = anyio.run(self._collect_node_async, inputs)
+                except Exception as exc:  # pragma: no cover
+                    error["exception"] = exc
+
+            thread = threading.Thread(target=_runner, daemon=True)
+            thread.start()
+            thread.join()
+            if "exception" in error:
+                exc = error["exception"]
+                if isinstance(exc, PeerMcpError):
+                    raise exc
+                raise PeerMcpError(_peer_error_message(exc)) from exc
+            return result["snapshot"]
+
+        try:
+            return anyio.run(self._collect_node_async, inputs)
         except PeerMcpError:
             raise
         except Exception as exc:
