@@ -24,6 +24,7 @@ from investigation_service.settings import (
     get_default_cluster_alias,
     get_kubernetes_mcp_url,
     get_peer_mcp_timeout_seconds,
+    get_prometheus_url,
     get_prometheus_mcp_url,
 )
 
@@ -174,6 +175,20 @@ def _normalize_metric_value(raw: Any) -> float | None:
         if "text" in raw:
             return _normalize_metric_value(raw["text"])
     return None
+
+
+def _peer_prometheus_routing_unsupported(cluster, requested_cluster: str | None) -> bool:
+    requested_alias = (requested_cluster or "").strip().lower() or None
+    local_aliases = {
+        alias for alias in (get_default_cluster_alias(), get_cluster_name(), "local-kind", "current-context") if alias
+    }
+    if requested_alias is None:
+        return False
+    if cluster.alias in local_aliases or requested_alias in local_aliases:
+        return False
+    if not cluster.prometheus_url or cluster.prometheus_url == get_prometheus_url():
+        return False
+    return True
 
 
 def _pick_runtime_pod(prefix: str, raw: Any) -> str | None:
@@ -600,10 +615,7 @@ class PrometheusMcpClient:
 
     async def _collect_node_async(self, inputs: StepExecutionInputs) -> NodeMetricsSnapshot:
         cluster = resolve_cluster(inputs.cluster)
-        local_aliases = {
-            alias for alias in (get_default_cluster_alias(), get_cluster_name(), "local-kind") if alias
-        }
-        if cluster.prometheus_url and cluster.alias not in local_aliases:
+        if _peer_prometheus_routing_unsupported(cluster, inputs.cluster):
             raise PeerMcpError("peer node Prometheus transport does not yet support multicluster prometheus routing")
         if not inputs.node_name:
             raise PeerMcpError("node peer transport requires node_name")

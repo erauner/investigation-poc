@@ -6,8 +6,10 @@ from investigation_orchestrator.mcp_clients import (
     ServiceMetricsSnapshot,
     ServiceRuntimeSnapshot,
     WorkloadRuntimeSnapshot,
+    _peer_prometheus_routing_unsupported,
     _normalize_object_state,
 )
+from investigation_service.cluster_registry import ResolvedCluster
 from investigation_service.k8s_adapter import pick_runtime_pod_for_workload
 from investigation_service.models import EvidenceStepContract, StepExecutionInputs, TargetRef
 
@@ -435,6 +437,20 @@ def test_node_external_step_falls_back_internally_after_peer_failures(monkeypatc
         "peer node MCP fallback: prometheus peer failed: prom down; kubernetes peer fallback failed: kube down"
         in artifact.evidence_bundle.limitations
     )
+
+
+def test_node_peer_prometheus_routing_allows_default_cluster_with_prometheus_url() -> None:
+    cluster = ResolvedCluster(
+        alias="local-kind",
+        kube_context="kind-investigation",
+        kubeconfig_path="/tmp/config",
+        use_in_cluster=False,
+        prometheus_url="http://prometheus.kagent.svc.cluster.local:9090",
+        source="default",
+        allowed_namespaces=None,
+    )
+
+    assert _peer_prometheus_routing_unsupported(cluster, None) is False
 
 
 def test_pick_runtime_pod_for_workload_uses_selector_not_prefix() -> None:
