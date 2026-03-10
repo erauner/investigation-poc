@@ -10,6 +10,7 @@ from investigation_service.submission_materialization import (
     materialize_service_submission,
 )
 from .mcp_clients import KubernetesMcpClient, PeerMcpError, PrometheusMcpClient
+from .service_scout import maybe_run_bounded_service_follow_up_scout
 from .workload_scout import materialize_workload_snapshot, maybe_run_bounded_workload_scout
 
 
@@ -78,7 +79,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
                     f"kubernetes peer fallback failed: {kube_exc}",
                 ],
             )
-        return materialize_service_submission(
+        baseline_artifact = materialize_service_submission(
             step,
             target=runtime_snapshot.target,
             metrics={"prometheus_available": False},
@@ -89,12 +90,17 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
         )
+        return maybe_run_bounded_service_follow_up_scout(
+            step,
+            baseline_artifact=baseline_artifact,
+            prometheus_mcp_client=_prometheus_mcp_client,
+        )
 
     if metrics_snapshot.metrics.get("prometheus_available"):
         try:
             runtime_snapshot = _kubernetes_mcp_client.collect_service_runtime(step.execution_inputs)
         except PeerMcpError as kube_exc:
-            return materialize_service_submission(
+            baseline_artifact = materialize_service_submission(
                 step,
                 target=metrics_snapshot.target,
                 metrics=metrics_snapshot.metrics,
@@ -112,8 +118,13 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
                 cluster_alias=metrics_snapshot.cluster_alias,
                 extra_limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
             )
+            return maybe_run_bounded_service_follow_up_scout(
+                step,
+                baseline_artifact=baseline_artifact,
+                prometheus_mcp_client=_prometheus_mcp_client,
+            )
         limitations = [*metrics_snapshot.limitations, *runtime_snapshot.limitations]
-        return materialize_service_submission(
+        baseline_artifact = materialize_service_submission(
             step,
             target=runtime_snapshot.target,
             metrics=metrics_snapshot.metrics,
@@ -122,6 +133,11 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             actual_route=_peer_route([*metrics_snapshot.tool_path, *runtime_snapshot.tool_path]),
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=limitations,
+        )
+        return maybe_run_bounded_service_follow_up_scout(
+            step,
+            baseline_artifact=baseline_artifact,
+            prometheus_mcp_client=_prometheus_mcp_client,
         )
 
     try:
@@ -137,7 +153,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
         )
     limitations = [*metrics_snapshot.limitations, *runtime_snapshot.limitations]
-    return materialize_service_submission(
+    baseline_artifact = materialize_service_submission(
         step,
         target=runtime_snapshot.target,
         metrics=metrics_snapshot.metrics,
@@ -147,6 +163,11 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
         attempted_routes=[_peer_route(metrics_snapshot.tool_path)],
         cluster_alias=runtime_snapshot.cluster_alias,
         extra_limitations=limitations,
+    )
+    return maybe_run_bounded_service_follow_up_scout(
+        step,
+        baseline_artifact=baseline_artifact,
+        prometheus_mcp_client=_prometheus_mcp_client,
     )
 
 

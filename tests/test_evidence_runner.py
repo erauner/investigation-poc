@@ -61,6 +61,15 @@ def _service_step() -> EvidenceStepContract:
     )
 
 
+def _service_follow_up_step() -> EvidenceStepContract:
+    return _service_step().model_copy(
+        update={
+            "step_id": "collect-service-follow-up-evidence",
+            "title": "Collect service follow-up evidence",
+        }
+    )
+
+
 def _node_step() -> EvidenceStepContract:
     return EvidenceStepContract(
         step_id="collect-target-evidence",
@@ -678,6 +687,306 @@ def test_service_external_step_records_dual_peer_attempts_when_kubernetes_enrich
         "kubernetes-mcp-server",
     ]
     assert "kubernetes peer fallback failed: kube down" in artifact.evidence_bundle.limitations
+
+
+def test_service_follow_up_step_runs_bounded_range_scout_when_baseline_is_weak(monkeypatch) -> None:
+    step = _service_follow_up_step()
+    range_calls: list[int] = []
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": None,
+                        "service_error_rate": None,
+                        "service_latency_p95_seconds": None,
+                        "prometheus_available": False,
+                    },
+                    limitations=["prometheus unavailable or returned no usable results"],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                ),
+                "collect_service_range_metrics": lambda _self, _inputs, max_metric_families=0: (
+                    range_calls.append(max_metric_families)
+                    or ServiceMetricsSnapshot(
+                        cluster_alias="erauner-home",
+                        target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                        metrics={
+                            "service_request_rate": 12.5,
+                            "service_error_rate": 0.5,
+                            "service_latency_p95_seconds": 1.2,
+                            "prometheus_available": True,
+                        },
+                        limitations=[],
+                        tool_path=["prometheus-mcp-server", "execute_range_query", "execute_range_query"],
+                    )
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert range_calls == [2]
+    assert artifact.actual_route.tool_path == ["prometheus-mcp-server", "execute_range_query", "execute_range_query"]
+    assert artifact.evidence_bundle is not None
+    assert artifact.evidence_bundle.metrics["service_error_rate"] == 0.5
+    assert "prometheus unavailable or returned no usable results" not in artifact.evidence_bundle.limitations
+    assert artifact.attempted_routes[0].mcp_server == "kubernetes-mcp-server"
+
+
+def test_service_follow_up_step_clears_stale_prometheus_failure_limitations_after_range_recovery(monkeypatch) -> None:
+    step = _service_follow_up_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: (_ for _ in ()).throw(PeerMcpError("prom down")),
+                "collect_service_range_metrics": lambda _self, _inputs, max_metric_families=0: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": 12.5,
+                        "service_error_rate": 0.5,
+                        "service_latency_p95_seconds": 1.2,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_range_query", "execute_range_query"],
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=["runtime data limited to namespace scope"],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route.tool_path == ["prometheus-mcp-server", "execute_range_query", "execute_range_query"]
+    assert artifact.evidence_bundle is not None
+    assert "prometheus peer failed: prom down" not in artifact.evidence_bundle.limitations
+    assert "prometheus unavailable or returned no usable results" not in artifact.evidence_bundle.limitations
+    assert "runtime data limited to namespace scope" in artifact.evidence_bundle.limitations
+    assert [route.tool_path for route in artifact.attempted_routes] == [
+        ["kubernetes-mcp-server", "resources_get", "events_list"],
+        ["prometheus-mcp-server"],
+    ]
+
+
+def test_service_follow_up_step_keeps_baseline_when_range_scout_does_not_improve(monkeypatch) -> None:
+    step = _service_follow_up_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": None,
+                        "service_error_rate": None,
+                        "service_latency_p95_seconds": None,
+                        "prometheus_available": False,
+                    },
+                    limitations=["prometheus unavailable or returned no usable results"],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                ),
+                "collect_service_range_metrics": lambda _self, _inputs, max_metric_families=0: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": None,
+                        "service_error_rate": None,
+                        "service_latency_p95_seconds": None,
+                        "prometheus_available": False,
+                    },
+                    limitations=["prometheus unavailable or returned no usable results"],
+                    tool_path=["prometheus-mcp-server", "execute_range_query"],
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
+    assert artifact.attempted_routes[-1].mcp_server == "prometheus-mcp-server"
+
+
+def test_service_follow_up_step_records_failed_range_scout_without_changing_shape(monkeypatch) -> None:
+    step = _service_follow_up_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": None,
+                        "service_error_rate": None,
+                        "service_latency_p95_seconds": None,
+                        "prometheus_available": False,
+                    },
+                    limitations=["prometheus unavailable or returned no usable results"],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                ),
+                "collect_service_range_metrics": lambda _self, _inputs, max_metric_families=0: (_ for _ in ()).throw(
+                    PeerMcpError("range scout failed")
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.evidence_bundle is not None
+    assert "bounded service scout failed: range scout failed" in artifact.evidence_bundle.limitations
+    assert artifact.attempted_routes[-1].tool_path == ["prometheus-mcp-server"]
+
+
+def test_primary_service_step_never_invokes_bounded_range_scout(monkeypatch) -> None:
+    step = _service_step()
+    range_calls: list[int] = []
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": 12.5,
+                        "service_error_rate": 0.5,
+                        "service_latency_p95_seconds": 1.2,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                ),
+                "collect_service_range_metrics": lambda _self, _inputs, max_metric_families=0: (
+                    range_calls.append(max_metric_families)
+                    or ServiceMetricsSnapshot(
+                        cluster_alias="erauner-home",
+                        target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                        metrics={},
+                        limitations=[],
+                        tool_path=["prometheus-mcp-server", "execute_range_query"],
+                    )
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert range_calls == []
+    assert artifact.actual_route.tool_path == ["prometheus-mcp-server", "execute_query", "execute_query", "execute_query", "kubernetes-mcp-server", "resources_get", "events_list"]
 
 
 def test_node_external_step_prefers_prometheus_with_kubernetes_enrichment(monkeypatch) -> None:

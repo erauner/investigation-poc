@@ -17,6 +17,7 @@ class BoundedExplorationPolicy:
     enabled: bool = False
     max_additional_pods: int = 0
     max_additional_probe_runs: int = 0
+    max_metric_families: int = 0
 
 
 _POLICIES: dict[str, CapabilityPolicy] = {
@@ -73,7 +74,13 @@ _BOUNDED_EXPLORATION_POLICIES: dict[str, BoundedExplorationPolicy] = {
         enabled=True,
         max_additional_pods=1,
         max_additional_probe_runs=1,
-    )
+    ),
+    "service_evidence_plane": BoundedExplorationPolicy(
+        capability="service_evidence_plane",
+        enabled=True,
+        max_additional_probe_runs=1,
+        max_metric_families=2,
+    ),
 }
 
 

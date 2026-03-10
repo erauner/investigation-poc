@@ -155,6 +155,14 @@ def service_metric_queries(namespace: str, service_name: str, lookback_minutes: 
     return service_metric_query_families(namespace, service_name, lookback_minutes)[0][1]
 
 
+def service_metric_range_query_families(
+    namespace: str,
+    service_name: str,
+    lookback_minutes: int,
+) -> list[tuple[str, dict[str, str]]]:
+    return service_metric_query_families(namespace, service_name, lookback_minutes)
+
+
 def service_metric_query_families(
     namespace: str,
     service_name: str,

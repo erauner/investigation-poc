@@ -23,6 +23,7 @@ from investigation_service.prom_adapter import (
     node_metric_queries,
     select_best_service_metric_family,
     service_metric_query_families,
+    service_metric_range_query_families,
 )
 from investigation_service.settings import (
     get_cluster_name,
@@ -181,6 +182,39 @@ def _normalize_metric_value(raw: Any) -> float | None:
         if "text" in raw:
             return _normalize_metric_value(raw["text"])
     return None
+
+
+def _latest_non_null_metric_value(raw: Any) -> float | None:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        if "values" in raw and isinstance(raw["values"], list):
+            return _latest_non_null_metric_value(raw["values"])
+        if "result" in raw and isinstance(raw["result"], list):
+            return _latest_non_null_metric_value(raw["result"])
+        if "data" in raw:
+            return _latest_non_null_metric_value(raw["data"])
+        if "text" in raw and isinstance(raw["text"], str):
+            matches = re.findall(r"=>\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*@\[", raw["text"])
+            if matches:
+                try:
+                    return float(matches[-1])
+                except ValueError:
+                    return None
+        return _normalize_metric_value(raw)
+    if isinstance(raw, list):
+        if raw and all(isinstance(item, (list, tuple)) and len(item) >= 2 for item in raw):
+            for item in reversed(raw):
+                value = _normalize_metric_value(item[1])
+                if value is not None:
+                    return value
+            return None
+        for item in reversed(raw):
+            value = _latest_non_null_metric_value(item)
+            if value is not None:
+                return value
+        return None
+    return _normalize_metric_value(raw)
 
 
 def _peer_prometheus_routing_unsupported(cluster, requested_cluster: str | None) -> bool:
@@ -665,6 +699,60 @@ class PrometheusMcpClient:
                         tool_path=tool_path,
                     )
 
+    async def _collect_service_range_async(
+        self,
+        inputs: StepExecutionInputs,
+        *,
+        max_metric_families: int = 1,
+    ) -> ServiceMetricsSnapshot:
+        cluster = resolve_cluster(inputs.cluster)
+        local_aliases = {
+            alias for alias in (get_default_cluster_alias(), get_cluster_name(), "local-kind") if alias
+        }
+        if cluster.prometheus_url and cluster.alias not in local_aliases:
+            raise PeerMcpError("peer service Prometheus transport does not yet support multicluster prometheus routing")
+        namespace = inputs.namespace
+        service_name = inputs.service_name
+        if not namespace or not service_name:
+            raise PeerMcpError("service peer transport requires namespace and service_name")
+
+        target = TargetRef(namespace=namespace, kind="service", name=service_name)
+        query_families = service_metric_range_query_families(namespace, service_name, inputs.lookback_minutes or 15)[:max_metric_families]
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout_seconds)) as http_client:
+            async with streamable_http_client(self.url, http_client=http_client) as (
+                read_stream,
+                write_stream,
+                _get_session_id,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tool_path = ["prometheus-mcp-server"]
+                    family_results: list[tuple[str, dict[str, float | None]]] = []
+                    for family_id, queries in query_families:
+                        family_metrics: dict[str, float | None] = {}
+                        for label, query in queries.items():
+                            raw = await self._call_tool(
+                                session,
+                                "execute_range_query",
+                                {
+                                    "query": query,
+                                    "window": f"{max(inputs.lookback_minutes or 15, 1)}m",
+                                    "step": "60s",
+                                },
+                            )
+                            tool_path.append("execute_range_query")
+                            family_metrics[label] = _latest_non_null_metric_value(raw)
+                        family_results.append((family_id, family_metrics))
+                    metrics, limitations = select_best_service_metric_family(family_results)
+                    return ServiceMetricsSnapshot(
+                        cluster_alias=cluster.alias,
+                        target=target,
+                        metrics=metrics,
+                        limitations=limitations,
+                        tool_path=tool_path,
+                    )
+
     async def _collect_node_async(self, inputs: StepExecutionInputs) -> NodeMetricsSnapshot:
         cluster = resolve_cluster(inputs.cluster)
         if _peer_prometheus_routing_unsupported(cluster, inputs.cluster):
@@ -736,6 +824,56 @@ class PrometheusMcpClient:
 
         try:
             return anyio.run(self._collect_service_async, inputs)
+        except PeerMcpError:
+            raise
+        except Exception as exc:
+            raise PeerMcpError(_peer_error_message(exc)) from exc
+
+    def collect_service_range_metrics(
+        self,
+        inputs: StepExecutionInputs,
+        *,
+        max_metric_families: int = 1,
+    ) -> ServiceMetricsSnapshot:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = False
+        else:
+            running_loop = True
+
+        if running_loop:
+            result: dict[str, ServiceMetricsSnapshot] = {}
+            error: dict[str, Exception] = {}
+
+            def _runner() -> None:
+                try:
+                    result["snapshot"] = anyio.run(
+                        lambda: self._collect_service_range_async(
+                            inputs,
+                            max_metric_families=max_metric_families,
+                        )
+                    )
+                except Exception as exc:  # pragma: no cover
+                    error["exception"] = exc
+
+            thread = threading.Thread(target=_runner, daemon=True)
+            thread.start()
+            thread.join()
+            if "exception" in error:
+                exc = error["exception"]
+                if isinstance(exc, PeerMcpError):
+                    raise exc
+                raise PeerMcpError(_peer_error_message(exc)) from exc
+            return result["snapshot"]
+
+        try:
+            return anyio.run(
+                lambda: self._collect_service_range_async(
+                    inputs,
+                    max_metric_families=max_metric_families,
+                )
+            )
         except PeerMcpError:
             raise
         except Exception as exc:
