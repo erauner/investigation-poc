@@ -438,7 +438,13 @@ def summarize_top_pods_for_node(pod_items: list[dict], limit: int = 5) -> list[d
             }
         )
 
-    pods.sort(key=lambda item: item["memory_request_bytes"], reverse=True)
+    pods.sort(
+        key=lambda item: (
+            -item["memory_request_bytes"],
+            item.get("namespace") or "",
+            item.get("name") or "",
+        )
+    )
     return pods[:limit]
 
 

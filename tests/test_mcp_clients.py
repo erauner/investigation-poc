@@ -161,7 +161,17 @@ def test_collect_node_top_pods_parses_resources_list_payload(monkeypatch) -> Non
         limit=1,
     )
 
-    assert calls == [("resources_list", {"apiVersion": "v1", "kind": "Pod", "fieldSelector": "spec.nodeName=worker3"})]
+    assert calls == [
+        (
+            "resources_list",
+            {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "fieldSelector": "spec.nodeName=worker3",
+                "limit": 1,
+            },
+        )
+    ]
     assert snapshot.top_pods_by_memory_request == [
         {"namespace": "operator-smoke", "name": "api-0", "memory_request_bytes": 536870912}
     ]
