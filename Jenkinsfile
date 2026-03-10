@@ -107,8 +107,7 @@ spec:
                                 --context=dir://. \
                                 --destination=${SHADOW_IMAGE_NAME}:${shortCommit} \
                                 --destination=${SHADOW_IMAGE_NAME}:latest \
-                                --cache=true \
-                                --cache-repo=${SHADOW_IMAGE_NAME}-cache \
+                                --cache=false \
                                 --skip-tls-verify-registry=docker.nexus.erauner.dev \
                                 --custom-platform=linux/amd64
                         """
