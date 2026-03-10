@@ -65,6 +65,7 @@ BANNED_PROMPT_PHRASES = (
     "build_alert_investigation_report",
     "find_unhealthy_pod",
     "find_unhealthy_workloads",
+    "collect_alert_evidence",
     "collect_workload_context",
     "collect_service_context",
     "collect_node_context",
@@ -142,6 +143,7 @@ def test_agent_manifest_tool_catalog_is_subset_of_exported_mcp_tools() -> None:
     exported_tools = set(mcp_server.mcp._tool_manager._tools.keys())
 
     assert set(investigation_tools) <= exported_tools
+    assert "normalize_alert_input" not in exported_tools
 
 
 def test_execution_policy_preferred_tool_names_are_backed_by_manifest_catalogs() -> None:
@@ -165,10 +167,16 @@ def test_execution_policy_preferred_tool_names_are_backed_by_manifest_catalogs()
     workload_policy = policy_for_capability("workload_evidence_plane")
     service_policy = policy_for_capability("service_evidence_plane")
     node_policy = policy_for_capability("node_evidence_plane")
+    alert_policy = policy_for_capability("alert_evidence_plane")
 
     assert set(workload_policy.preferred_tool_names) <= kubernetes_tools
     assert set(service_policy.preferred_tool_names) <= prometheus_tools
     assert set(node_policy.preferred_tool_names) <= prometheus_tools
+    assert alert_policy is not None
+    assert alert_policy.preferred_mcp_server is None
+    assert alert_policy.preferred_tool_names == ()
+    assert alert_policy.fallback_mcp_server is None
+    assert alert_policy.fallback_tool_names == ()
 
 
 def test_skill_configmap_stops_teaching_report_first_or_hidden_tools() -> None:

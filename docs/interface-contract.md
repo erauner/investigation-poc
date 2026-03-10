@@ -78,9 +78,12 @@ The current capability-to-tool policy is:
   - use tools such as `execute_query`, `execute_range_query`
   - fall back to `kubernetes-mcp-server` for runtime inspection
 - `alert_evidence_plane`
-  - stays product-owned for alert extraction and alert-shaped context
+  - stays internal and product-owned for alert extraction and alert-shaped context
 - `collect_change_candidates`, `rank_hypotheses`, and `render_investigation_report`
   - stay product-owned on `investigation-mcp-server`
+
+Alert normalization and alert evidence collection are internal product seams.
+They should be reached through `resolve_primary_target`, `build_investigation_plan`, or `run_orchestrated_investigation`, not through separate public normalization tools.
 
 ## Client-side routing
 

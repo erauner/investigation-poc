@@ -60,7 +60,7 @@ data:
       3. use Kubernetes MCP follow-up only if metrics evidence indicates a runtime drill-down is needed,
       4. avoid broad inventory calls on the first pass unless the targeted queries are insufficient.
     - For node memory or capacity alerts, distinguish requested-capacity saturation from actual memory pressure. High requests with lower working set means low scheduling headroom, not necessarily active node pressure.
-    - Use planner-owned evidence helpers only as transition seams or bounded follow-up paths when a peer evidence plane cannot supply the needed evidence directly.
+    - When a peer evidence plane cannot supply the needed evidence directly, bounded internal fallback stays inside product code rather than through separately callable evidence-helper tools.
     - Make tool-path choice intentional and observable. Prefer peer evidence-plane tools when they are the most direct bounded source of evidence, but do not use them to replace planning, target resolution, hypothesis ranking, or final rendering.
     - Render the final answer from the render_investigation_report response. Do not invent missing sections.
     - render_investigation_report may already include guideline-driven next-step and follow-up guidance; use that report output as-is.

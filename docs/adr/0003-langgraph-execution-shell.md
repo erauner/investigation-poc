@@ -207,6 +207,49 @@ Checkpointing is introduced only as an execution-shell hook:
 - pass `thread_id` and optional `checkpoint_id` through graph invoke config
 - use in-process checkpointing first for local proving and tests
 
+## Current Status After The First Shell And Peer-Transport Slices
+
+The repo has now completed the intended first shell slice and the peer evidence-plane transport migration that was meant to follow it.
+
+What is now true:
+
+- `run_orchestrated_investigation(...)` is the stable public facade and uses the in-process LangGraph shell internally
+- graph state remains a thin wrapper around `ReportingExecutionContext`
+- checkpoint configuration is behind an orchestrator-side seam and is exercised in tests with in-memory checkpointing
+- workload, service, and node external-preferred evidence steps now use orchestrator-owned peer MCP transport first
+- bounded internal fallback remains planner-owned inside product code rather than living in the orchestrator happy path
+
+What is still intentionally deferred:
+
+- public resume APIs
+- durable checkpoint storage by default
+- caller-facing thread identity
+- a hosted BYO LangGraph runtime
+
+So the architecture is now at the point where a future BYO LangGraph move should be treated as a hosting/runtime packaging step, not as a semantic rewrite.
+
+## Readiness Gates Before Any BYO Shadow Agent
+
+Before introducing a shadow BYO LangGraph agent through kagent, the following should be true:
+
+1. the LangGraph shell is already the only real runtime behind `run_orchestrated_investigation(...)`
+2. `ReportingExecutionContext` remains the only authoritative domain snapshot in graph state
+3. peer evidence transport runs through orchestrator-owned MCP clients rather than declarative tool injection
+4. checkpointing remains abstracted behind a repo seam rather than being wired directly into product semantics
+5. deterministic report formatting is available directly from `InvestigationReport`
+
+The remaining practical gates before a BYO shadow-hosting slice are:
+
+- add a small runtime seam for explicit thread identity resolution
+- add checkpoint-resume tests at graph-node boundaries, not only checkpoint state inspection
+- add minimal runtime observability around thread ID, node transition, and checkpoint boundary
+- package the BYO runtime as a separate outer hosting layer rather than folding kagent-specific code into `investigation_orchestrator`
+
+Until those gates are closed, the repo should be treated as:
+
+- architecturally ready for BYO preparation
+- not yet fully ready for a production-worthy BYO shadow rollout
+
 ## Immediate Follow-On After The Orchestration-Core-First Merge
 
 The orchestration-core-first path does not complete the evidence-plane transition by itself.

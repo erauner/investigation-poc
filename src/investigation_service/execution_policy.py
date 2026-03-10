@@ -14,9 +14,7 @@ class CapabilityPolicy:
 _POLICIES: dict[str, CapabilityPolicy] = {
     "alert_evidence_plane": CapabilityPolicy(
         capability="alert_evidence_plane",
-        preferred_mcp_server="investigation-mcp-server",
-        preferred_tool_names=("normalize_alert_input",),
-        notes="Alert extraction and alert-shaped context remain product-owned before peer evidence-plane drill-down.",
+        notes="Alert extraction and alert-shaped context remain internal product-owned control-plane behavior before peer evidence-plane drill-down.",
     ),
     "workload_evidence_plane": CapabilityPolicy(
         capability="workload_evidence_plane",
