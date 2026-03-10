@@ -2,6 +2,7 @@ from investigation_orchestrator import evidence_runner
 from investigation_orchestrator.mcp_clients import (
     PeerMcpError,
     WorkloadRuntimeSnapshot,
+    _normalize_object_state,
     _pick_runtime_pod_for_deployment,
 )
 from investigation_service.models import EvidenceStepContract, StepExecutionInputs, TargetRef
@@ -135,3 +136,117 @@ def test_pick_runtime_pod_for_deployment_uses_selector_not_prefix() -> None:
     }
 
     assert _pick_runtime_pod_for_deployment(deployment, pods) == "crashy-58b5897796-lckp9"
+
+
+def test_normalize_object_state_for_deployment_attaches_runtime_pod() -> None:
+    deployment = {
+        "metadata": {
+            "name": "crashy",
+            "namespace": "operator-smoke",
+            "creationTimestamp": "2026-03-09T12:00:00Z",
+        },
+        "spec": {
+            "selector": {
+                "matchLabels": {
+                    "app.kubernetes.io/name": "crashy",
+                }
+            }
+        },
+        "status": {
+            "readyReplicas": 0,
+            "replicas": 1,
+            "observedGeneration": 3,
+        },
+    }
+    runtime_pod = {
+        "metadata": {
+            "name": "crashy-58b5897796-lckp9",
+            "namespace": "operator-smoke",
+            "creationTimestamp": "2026-03-09T12:01:00Z",
+            "labels": {"app.kubernetes.io/name": "crashy"},
+            "ownerReferences": [{"kind": "ReplicaSet", "name": "crashy-58b5897796"}],
+        },
+        "spec": {
+            "containers": [{"name": "app", "image": "busybox:1.36"}],
+        },
+        "status": {
+            "phase": "Running",
+            "containerStatuses": [
+                {
+                    "name": "app",
+                    "ready": False,
+                    "restartCount": 5,
+                    "state": {"waiting": {"reason": "CrashLoopBackOff"}},
+                    "lastState": {"terminated": {"reason": "Error", "exitCode": 1}},
+                }
+            ],
+        },
+    }
+
+    normalized = _normalize_object_state(
+        deployment,
+        TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+        runtime_pod_raw=runtime_pod,
+    )
+
+    assert normalized["kind"] == "deployment"
+    assert normalized["runtimePod"]["kind"] == "pod"
+    assert normalized["runtimePod"]["name"] == "crashy-58b5897796-lckp9"
+    assert normalized["runtimePod"]["containers"][0]["restartCount"] == 5
+
+
+def test_normalize_object_state_for_statefulset_attaches_runtime_pod() -> None:
+    statefulset = {
+        "metadata": {
+            "name": "postgres",
+            "namespace": "operator-smoke",
+            "creationTimestamp": "2026-03-09T12:00:00Z",
+        },
+        "spec": {
+            "selector": {
+                "matchLabels": {
+                    "app.kubernetes.io/name": "postgres",
+                }
+            }
+        },
+        "status": {
+            "readyReplicas": 0,
+            "replicas": 1,
+            "observedGeneration": 2,
+        },
+    }
+    runtime_pod = {
+        "metadata": {
+            "name": "postgres-0",
+            "namespace": "operator-smoke",
+            "creationTimestamp": "2026-03-09T12:01:00Z",
+            "labels": {"app.kubernetes.io/name": "postgres"},
+            "ownerReferences": [{"kind": "StatefulSet", "name": "postgres"}],
+        },
+        "spec": {
+            "containers": [{"name": "db", "image": "postgres:16"}],
+        },
+        "status": {
+            "phase": "Running",
+            "containerStatuses": [
+                {
+                    "name": "db",
+                    "ready": False,
+                    "restartCount": 2,
+                    "state": {"waiting": {"reason": "CrashLoopBackOff"}},
+                    "lastState": {"terminated": {"reason": "Error", "exitCode": 1}},
+                }
+            ],
+        },
+    }
+
+    normalized = _normalize_object_state(
+        statefulset,
+        TargetRef(namespace="operator-smoke", kind="statefulset", name="postgres"),
+        runtime_pod_raw=runtime_pod,
+    )
+
+    assert normalized["kind"] == "statefulset"
+    assert normalized["runtimePod"]["kind"] == "pod"
+    assert normalized["runtimePod"]["name"] == "postgres-0"
+    assert normalized["runtimePod"]["containers"][0]["restartCount"] == 2

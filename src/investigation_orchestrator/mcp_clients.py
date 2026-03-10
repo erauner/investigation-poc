@@ -155,9 +155,29 @@ def _pick_runtime_pod_for_deployment(deployment_raw: Any, pods_raw: Any) -> str 
 
 
 def _api_version_for_target(target: TargetRef) -> str:
-    if target.kind == "deployment":
+    if target.kind in {"deployment", "statefulset"}:
         return "apps/v1"
     return "v1"
+
+
+def _normalize_object_state(
+    raw_object_state: Any,
+    target: TargetRef,
+    *,
+    runtime_pod_raw: Any | None = None,
+) -> dict[str, Any]:
+    if not isinstance(raw_object_state, dict):
+        return {
+            "kind": target.kind,
+            "name": target.name,
+            "namespace": target.namespace,
+            "raw": raw_object_state,
+        }
+    runtime_pod = None
+    if runtime_pod_raw is not None:
+        runtime_target = TargetRef(namespace=target.namespace, kind="pod", name=runtime_pod_raw.get("metadata", {}).get("name", ""))
+        runtime_pod = normalize_k8s_object_payload(runtime_pod_raw, runtime_target)
+    return normalize_k8s_object_payload(raw_object_state, target, runtime_pod=runtime_pod)
 
 
 class KubernetesMcpClient:
@@ -212,15 +232,7 @@ class KubernetesMcpClient:
                         },
                     )
                     tool_path.append("resources_get")
-                    if not isinstance(raw_object_state, dict):
-                        object_state = {
-                            "kind": target.kind,
-                            "name": target.name,
-                            "namespace": target.namespace,
-                            "raw": raw_object_state,
-                        }
-                    else:
-                        object_state = normalize_k8s_object_payload(raw_object_state, target)
+                    object_state = _normalize_object_state(raw_object_state, target)
 
                     events_raw = await self._call_tool(
                         session,
@@ -231,9 +243,9 @@ class KubernetesMcpClient:
                     events = _normalize_events(target, events_raw)
 
                     log_excerpt = ""
-                    if target.kind in {"pod", "deployment"}:
+                    if target.kind in {"pod", "deployment", "statefulset"}:
                         pod_name = target.name
-                        if target.kind == "deployment":
+                        if target.kind in {"deployment", "statefulset"}:
                             pods_raw = await self._call_tool(
                                 session,
                                 "pods_list_in_namespace",
@@ -243,6 +255,22 @@ class KubernetesMcpClient:
                             pod_name = _pick_runtime_pod_for_deployment(raw_object_state, pods_raw)
                             if not pod_name:
                                 raise PeerMcpError("could not resolve runtime pod for deployment target")
+                            runtime_pod_raw = await self._call_tool(
+                                session,
+                                "resources_get",
+                                {
+                                    "apiVersion": "v1",
+                                    "kind": "Pod",
+                                    "name": pod_name,
+                                    "namespace": target.namespace,
+                                },
+                            )
+                            tool_path.append("resources_get")
+                            object_state = _normalize_object_state(
+                                raw_object_state,
+                                target,
+                                runtime_pod_raw=runtime_pod_raw if isinstance(runtime_pod_raw, dict) else None,
+                            )
                         logs_raw = await self._call_tool(
                             session,
                             "pods_log",

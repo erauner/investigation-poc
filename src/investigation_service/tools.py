@@ -96,7 +96,7 @@ def _build_enrichment_hints(
 
 
 def _build_operator_ownership_hints(target_kind: str, object_state: dict) -> list[str]:
-    if target_kind not in {"pod", "deployment"} or object_state.get("error"):
+    if target_kind not in {"pod", "deployment", "statefulset"} or object_state.get("error"):
         return []
 
     labels = object_state.get("labels") or {}
@@ -179,7 +179,7 @@ def _materialize_evidence_bundle(
         lookback_minutes=lookback_minutes,
         cluster=cluster,
     )
-    if effective_profile == "workload" and effective_service_name and target.kind in {"pod", "deployment"}:
+    if effective_profile == "workload" and effective_service_name and target.kind in {"pod", "deployment", "statefulset"}:
         service_metrics, _ = _call_with_optional_cluster(
             collect_service_enrichment_metrics,
             namespace=target.namespace or req.namespace or "",
@@ -198,7 +198,7 @@ def _materialize_evidence_bundle(
         limitations.append("kubernetes object query failed")
     if events == ["no related events"]:
         limitations.append("no related Kubernetes events found")
-    if target.kind in {"pod", "deployment"} and (logs.startswith("log query failed:") or logs.startswith("no pod found")):
+    if target.kind in {"pod", "deployment", "statefulset"} and (logs.startswith("log query failed:") or logs.startswith("no pod found")):
         limitations.append("pod logs unavailable for target")
     enrichment_hints = _build_enrichment_hints(target.kind, effective_profile, metrics, limitations, findings)
     enrichment_hints.extend(_build_operator_ownership_hints(target.kind, object_state))
@@ -245,7 +245,7 @@ def collect_evidence_bundle(req: CollectContextRequest) -> EvidenceBundle:
     object_state = _call_with_optional_cluster(get_k8s_object, target, cluster=cluster)
     events = _call_with_optional_cluster(get_related_events, target, cluster=cluster)
     logs = ""
-    if target.kind in {"pod", "deployment"}:
+    if target.kind in {"pod", "deployment", "statefulset"}:
         logs = _call_with_optional_cluster(get_pod_logs, target, tail=get_log_tail_lines(), cluster=cluster)
     return _materialize_evidence_bundle(
         req,
