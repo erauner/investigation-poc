@@ -130,12 +130,16 @@ def test_collect_node_top_pods_parses_resources_list_payload(monkeypatch) -> Non
         return {
             "items": [
                 {
+                    "metadata": {"namespace": "operator-smoke", "name": "worker-helper"},
+                    "spec": {"containers": [{"resources": {"requests": {"memory": "128Mi"}}}]},
+                },
+                {
                     "metadata": {"namespace": "operator-smoke", "name": "api-0"},
                     "spec": {"containers": [{"resources": {"requests": {"memory": "512Mi"}}}]},
                 },
                 {
-                    "metadata": {"namespace": "operator-smoke", "name": "worker-helper"},
-                    "spec": {"containers": [{"resources": {"requests": {"memory": "128Mi"}}}]},
+                    "metadata": {"namespace": "operator-smoke", "name": "api-1"},
+                    "spec": {"containers": [{"resources": {"requests": {"memory": "256Mi"}}}]},
                 },
             ]
         }
@@ -158,7 +162,7 @@ def test_collect_node_top_pods_parses_resources_list_payload(monkeypatch) -> Non
             node_name="worker3",
             lookback_minutes=15,
         ),
-        limit=1,
+        limit=2,
     )
 
     assert calls == [
@@ -168,11 +172,11 @@ def test_collect_node_top_pods_parses_resources_list_payload(monkeypatch) -> Non
                 "apiVersion": "v1",
                 "kind": "Pod",
                 "fieldSelector": "spec.nodeName=worker3",
-                "limit": 1,
             },
         )
     ]
     assert snapshot.top_pods_by_memory_request == [
-        {"namespace": "operator-smoke", "name": "api-0", "memory_request_bytes": 536870912}
+        {"namespace": "operator-smoke", "name": "api-0", "memory_request_bytes": 536870912},
+        {"namespace": "operator-smoke", "name": "api-1", "memory_request_bytes": 268435456},
     ]
     assert snapshot.limitations == []

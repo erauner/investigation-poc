@@ -619,7 +619,6 @@ class KubernetesMcpClient:
                             "apiVersion": "v1",
                             "kind": "Pod",
                             "fieldSelector": f"spec.nodeName={target.name}",
-                            "limit": max(limit, 1),
                         },
                     )
                     tool_path.append("resources_list")
