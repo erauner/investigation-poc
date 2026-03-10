@@ -520,6 +520,22 @@ def _evidence_items_for_hypothesis(bundle: EvidenceBundle, scope: str, findings:
         )
         if event_item.fingerprint not in {item.fingerprint for item in evidence_items}:
             evidence_items.append(event_item)
+    if scope == "node" and bundle.object_state.get("top_pods_by_memory_request"):
+        top_pods = bundle.object_state["top_pods_by_memory_request"][:3]
+        pod_details = ", ".join(
+            f"{item.get('namespace')}/{item.get('name')} ({int(item.get('memory_request_bytes', 0))}B req)"
+            for item in top_pods
+        )
+        top_pods_item = EvidenceItem(
+            fingerprint=f"object_state|node|top_pods|{pod_details}",
+            source="k8s",
+            kind="object_state",
+            severity="info",
+            summary="k8s: Top Node Memory Request Consumers",
+            detail=pod_details,
+        )
+        if top_pods_item.fingerprint not in {item.fingerprint for item in evidence_items}:
+            evidence_items.append(top_pods_item)
     return evidence_items
 
 

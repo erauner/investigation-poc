@@ -1,5 +1,6 @@
 from investigation_orchestrator import evidence_runner
 from investigation_orchestrator.mcp_clients import (
+    NodePodSummarySnapshot,
     NodeMetricsSnapshot,
     NodeRuntimeSnapshot,
     PeerMcpError,
@@ -1085,7 +1086,14 @@ def test_node_external_step_uses_kubernetes_peer_when_prometheus_is_empty(monkey
                     events=["Warning DiskPressure node/worker3"],
                     limitations=[],
                     tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
-                )
+                ),
+                "collect_node_top_pods": lambda _self, _inputs, limit=0: NodePodSummarySnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace=None, kind="node", name="worker3"),
+                    top_pods_by_memory_request=[],
+                    limitations=["node workload summary unavailable"],
+                    tool_path=["kubernetes-mcp-server", "resources_list"],
+                ),
             },
         )(),
     )
@@ -1127,7 +1135,14 @@ def test_node_external_step_uses_kubernetes_peer_when_prometheus_hard_fails(monk
                     events=["Warning DiskPressure node/worker3"],
                     limitations=["runtime data limited to node scope"],
                     tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
-                )
+                ),
+                "collect_node_top_pods": lambda _self, _inputs, limit=0: NodePodSummarySnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace=None, kind="node", name="worker3"),
+                    top_pods_by_memory_request=[],
+                    limitations=["node workload summary unavailable"],
+                    tool_path=["kubernetes-mcp-server", "resources_list"],
+                ),
             },
         )(),
     )
@@ -1136,11 +1151,194 @@ def test_node_external_step_uses_kubernetes_peer_when_prometheus_hard_fails(monk
 
     assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
     assert artifact.actual_route.tool_path == ["kubernetes-mcp-server", "resources_get", "events_list"]
-    assert [route.mcp_server for route in artifact.attempted_routes] == ["prometheus-mcp-server"]
-    assert artifact.attempted_routes[0].tool_path == ["prometheus-mcp-server"]
+    assert [route.tool_path for route in artifact.attempted_routes] == [
+        ["prometheus-mcp-server"],
+        ["kubernetes-mcp-server", "resources_list"],
+    ]
     assert artifact.evidence_bundle is not None
     assert "prometheus peer failed: prom down" in artifact.evidence_bundle.limitations
     assert "runtime data limited to node scope" in artifact.evidence_bundle.limitations
+
+
+def test_node_external_step_runs_bounded_node_scout_for_weak_saturation_signal(monkeypatch) -> None:
+    step = _node_step()
+    scout_calls: list[int] = []
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_node_metrics": lambda _self, _inputs: NodeMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace=None, kind="node", name="worker3"),
+                    metrics={
+                        "node_memory_allocatable_bytes": 100.0,
+                        "node_memory_working_set_bytes": 40.0,
+                        "node_memory_request_bytes": 90.0,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_node_runtime": lambda _self, _inputs: NodeRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace=None, kind="node", name="worker3"),
+                    object_state={"kind": "node", "name": "worker3", "conditions": []},
+                    events=["Warning DiskPressure node/worker3"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                ),
+                "collect_node_top_pods": lambda _self, _inputs, limit=0: (
+                    scout_calls.append(limit)
+                    or NodePodSummarySnapshot(
+                        cluster_alias="erauner-home",
+                        target=TargetRef(namespace=None, kind="node", name="worker3"),
+                        top_pods_by_memory_request=[
+                            {"namespace": "operator-smoke", "name": "api-0", "memory_request_bytes": 536870912}
+                        ],
+                        limitations=[],
+                        tool_path=["kubernetes-mcp-server", "resources_list"],
+                    )
+                ),
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert scout_calls == [5]
+    assert artifact.actual_route.tool_path == ["kubernetes-mcp-server", "resources_list"]
+    assert artifact.evidence_bundle is not None
+    assert artifact.evidence_bundle.object_state["top_pods_by_memory_request"][0]["name"] == "api-0"
+    assert artifact.attempted_routes[0].mcp_server == "prometheus-mcp-server"
+
+
+def test_node_external_step_skips_bounded_node_scout_for_adequate_baseline(monkeypatch) -> None:
+    step = _node_step()
+    scout_calls: list[int] = []
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_node_metrics": lambda _self, _inputs: NodeMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace=None, kind="node", name="worker3"),
+                    metrics={
+                        "node_memory_allocatable_bytes": 100.0,
+                        "node_memory_working_set_bytes": 92.0,
+                        "node_memory_request_bytes": 90.0,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_node_runtime": lambda _self, _inputs: NodeRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace=None, kind="node", name="worker3"),
+                    object_state={
+                        "kind": "node",
+                        "name": "worker3",
+                        "conditions": [{"type": "Ready", "status": "False"}],
+                    },
+                    events=["Warning NodeNotReady node/worker3"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                ),
+                "collect_node_top_pods": lambda _self, _inputs, limit=0: scout_calls.append(limit),
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert scout_calls == []
+    assert artifact.actual_route.tool_path == [
+        "prometheus-mcp-server",
+        "execute_query",
+        "execute_query",
+        "execute_query",
+        "kubernetes-mcp-server",
+        "resources_get",
+        "events_list",
+    ]
+
+
+def test_node_external_step_records_failed_bounded_node_scout_without_changing_shape(monkeypatch) -> None:
+    step = _node_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_node_metrics": lambda _self, _inputs: NodeMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace=None, kind="node", name="worker3"),
+                    metrics={
+                        "node_memory_allocatable_bytes": 100.0,
+                        "node_memory_working_set_bytes": 40.0,
+                        "node_memory_request_bytes": 90.0,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_node_runtime": lambda _self, _inputs: NodeRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace=None, kind="node", name="worker3"),
+                    object_state={"kind": "node", "name": "worker3", "conditions": []},
+                    events=["Warning DiskPressure node/worker3"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                ),
+                "collect_node_top_pods": lambda _self, _inputs, limit=0: (_ for _ in ()).throw(
+                    PeerMcpError("node scout failed")
+                ),
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.evidence_bundle is not None
+    assert "bounded node scout failed: node scout failed" in artifact.evidence_bundle.limitations
+    assert artifact.attempted_routes[-1].tool_path == ["kubernetes-mcp-server"]
 
 
 def test_node_external_step_records_failed_peer_attempts_for_downstream_fallback(monkeypatch) -> None:

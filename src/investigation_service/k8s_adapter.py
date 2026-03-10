@@ -411,8 +411,16 @@ def _top_pods_for_node(node_name: str, limit: int = 5, cluster: ResolvedCluster 
     except json.JSONDecodeError:
         return []
 
+    return summarize_top_pods_for_node(items, limit=limit)
+
+
+def get_top_pods_for_node(node_name: str, limit: int = 5, cluster: ResolvedCluster | None = None) -> list[dict]:
+    return _top_pods_for_node(node_name=node_name, limit=limit, cluster=cluster)
+
+
+def summarize_top_pods_for_node(pod_items: list[dict], limit: int = 5) -> list[dict]:
     pods: list[dict] = []
-    for item in items:
+    for item in pod_items:
         metadata = item.get("metadata", {})
         spec = item.get("spec", {})
         total_bytes = 0
@@ -432,10 +440,6 @@ def _top_pods_for_node(node_name: str, limit: int = 5, cluster: ResolvedCluster 
 
     pods.sort(key=lambda item: item["memory_request_bytes"], reverse=True)
     return pods[:limit]
-
-
-def get_top_pods_for_node(node_name: str, limit: int = 5, cluster: ResolvedCluster | None = None) -> list[dict]:
-    return _top_pods_for_node(node_name=node_name, limit=limit, cluster=cluster)
 
 
 def get_pods_for_node(node_name: str, limit: int = 10, cluster: ResolvedCluster | None = None) -> list[dict]:

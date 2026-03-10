@@ -1,10 +1,12 @@
 from investigation_service.adequacy import (
+    assess_node_evidence_bundle,
     assess_service_evidence_bundle,
     assess_target_evidence_adequacy,
     assess_workload_evidence_bundle,
     adequacy_rank,
     assessment_improves,
     is_scout_candidate,
+    node_bundle_improves,
     service_bundle_improves,
     workload_bundle_improves,
 )
@@ -307,3 +309,94 @@ def test_service_bundle_improves_prefers_recovered_prometheus_signals() -> None:
     )
 
     assert service_bundle_improves(baseline, candidate) is True
+
+
+def test_assess_node_evidence_bundle_returns_adequate_for_not_ready_signal() -> None:
+    bundle = _artifact(
+        findings=[
+            Finding(
+                severity="critical",
+                source="k8s",
+                title="Node Not Ready",
+                evidence="Node condition Ready=False",
+            )
+        ]
+    ).evidence_bundle
+
+    assessment = assess_node_evidence_bundle(bundle=bundle)
+
+    assert assessment.outcome == "adequate"
+
+
+def test_assess_node_evidence_bundle_returns_weak_for_request_saturation_only() -> None:
+    bundle = _artifact(
+        findings=[
+            Finding(
+                severity="warning",
+                source="prometheus",
+                title="High Node Memory Request Saturation",
+                evidence="Memory requests are at 90.0% of allocatable capacity",
+            )
+        ]
+    ).evidence_bundle
+
+    assessment = assess_node_evidence_bundle(bundle=bundle)
+
+    assert assessment.outcome == "weak"
+    assert assessment.reasons == ("request_saturation_only",)
+
+
+def test_assess_node_evidence_bundle_returns_blocked_for_missing_metrics_and_limitations() -> None:
+    bundle = _artifact(limitations=["prometheus unavailable or returned no usable results"]).evidence_bundle.model_copy(
+        update={
+            "metrics": {
+                "node_memory_allocatable_bytes": None,
+                "node_memory_working_set_bytes": None,
+                "node_memory_request_bytes": None,
+                "prometheus_available": False,
+            }
+        }
+    )
+
+    assessment = assess_node_evidence_bundle(bundle=bundle)
+
+    assert assessment.outcome == "blocked"
+
+
+def test_node_bundle_improves_prefers_added_top_pod_summary() -> None:
+    baseline = _artifact(
+        findings=[
+            Finding(
+                severity="warning",
+                source="prometheus",
+                title="High Node Memory Request Saturation",
+                evidence="Memory requests are at 90.0% of allocatable capacity",
+            )
+        ],
+        limitations=[],
+    ).evidence_bundle.model_copy(
+        update={
+            "target": TargetRef(namespace=None, kind="node", name="worker3"),
+            "object_state": {"kind": "node", "name": "worker3", "conditions": []},
+            "metrics": {
+                "node_memory_allocatable_bytes": 100.0,
+                "node_memory_working_set_bytes": 40.0,
+                "node_memory_request_bytes": 90.0,
+                "prometheus_available": True,
+            },
+        }
+    )
+    candidate = baseline.model_copy(
+        update={
+            "object_state": {
+                "kind": "node",
+                "name": "worker3",
+                "conditions": [],
+                "top_pods_by_memory_request": [
+                    {"namespace": "operator-smoke", "name": "api-0", "memory_request_bytes": 536870912}
+                ],
+            }
+        }
+    )
+
+    assert node_bundle_improves(baseline, candidate) is True

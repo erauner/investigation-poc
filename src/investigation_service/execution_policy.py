@@ -18,6 +18,7 @@ class BoundedExplorationPolicy:
     max_additional_pods: int = 0
     max_additional_probe_runs: int = 0
     max_metric_families: int = 0
+    max_related_pods: int = 0
 
 
 _POLICIES: dict[str, CapabilityPolicy] = {
@@ -44,7 +45,7 @@ _POLICIES: dict[str, CapabilityPolicy] = {
         preferred_mcp_server="prometheus-mcp-server",
         preferred_tool_names=("execute_query", "execute_range_query"),
         fallback_mcp_server="kubernetes-mcp-server",
-        fallback_tool_names=("resources_get", "events_list"),
+        fallback_tool_names=("resources_get", "events_list", "resources_list"),
         notes="Use metrics-first evidence for node capacity and pressure, then fall back to Kubernetes inspection if needed.",
     ),
     "collect_change_candidates": CapabilityPolicy(
@@ -80,6 +81,12 @@ _BOUNDED_EXPLORATION_POLICIES: dict[str, BoundedExplorationPolicy] = {
         enabled=True,
         max_additional_probe_runs=1,
         max_metric_families=2,
+    ),
+    "node_evidence_plane": BoundedExplorationPolicy(
+        capability="node_evidence_plane",
+        enabled=True,
+        max_additional_probe_runs=1,
+        max_related_pods=5,
     ),
 }
 

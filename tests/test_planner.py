@@ -1121,6 +1121,47 @@ def test_update_investigation_plan_does_not_insert_service_follow_up_for_adequat
     assert next(batch for batch in updated.evidence_batches if batch.id == "batch-2").status == "pending"
 
 
+def test_update_investigation_plan_does_not_insert_service_follow_up_for_node_evidence() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(target="node/worker3", node_name="worker3"),
+        _deps([]),
+    )
+
+    updated = update_investigation_plan(
+        UpdateInvestigationPlanRequest(
+            plan=plan,
+            execution=EvidenceBatchExecution(
+                batch_id="batch-1",
+                executed_step_ids=["collect-target-evidence", "collect-change-candidates"],
+                artifacts=[
+                    {
+                        "step_id": "collect-target-evidence",
+                        "plane": "node",
+                        "artifact_type": "evidence_bundle",
+                        "evidence_bundle": _bundle(
+                            kind="node",
+                            name="worker3",
+                            findings=[
+                                Finding(
+                                    severity="warning",
+                                    source="prometheus",
+                                    title="High Node Memory Request Saturation",
+                                    evidence="Memory requests are at 90.0% of allocatable capacity",
+                                )
+                            ],
+                        ),
+                        "summary": ["High Node Memory Request Saturation"],
+                        "limitations": [],
+                    }
+                ],
+            ),
+        )
+    )
+
+    assert updated.active_batch_id is None
+    assert all(step.id != "collect-service-follow-up-evidence" for step in updated.steps)
+
+
 def test_execute_investigation_step_rejects_factual_mode_for_slice_two() -> None:
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(objective="factual", question="What uses the most CPU?"),
