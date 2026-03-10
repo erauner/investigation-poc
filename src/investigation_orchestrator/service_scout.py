@@ -57,6 +57,8 @@ def _retained_service_limitations(
     for limitation in baseline_limitations:
         if limitation == "prometheus unavailable or returned no usable results" and prometheus_available:
             continue
+        if limitation.startswith("prometheus peer failed:") and prometheus_available:
+            continue
         if limitation.startswith("metric unavailable: "):
             metric_key = limitation.removeprefix("metric unavailable: ").strip()
             if recovered_metrics.get(metric_key) is not None:
