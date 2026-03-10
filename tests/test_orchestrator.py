@@ -1536,3 +1536,56 @@ def test_internal_graph_resume_applies_pod_compatibility_when_request_is_provide
     )
 
     assert any("Resolved concrete crash-looping pod: pod/crashy-abc123" in item for item in report.evidence)
+
+
+def test_runtime_api_returns_completed_result(monkeypatch) -> None:
+    incident = _incident()
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+    monkeypatch.setattr(entrypoint, "render_report", lambda *_args, **_kwargs: _report())
+
+    result = entrypoint.run_orchestrated_investigation_runtime(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+        ),
+    )
+
+    assert result.status == "completed"
+    assert result.final_report is not None
+    assert result.final_report.target == "deployment/crashy"
+    assert result.next_nodes == ()
+
+
+def test_runtime_api_returns_interrupted_result(monkeypatch) -> None:
+    incident = _incident()
+    checkpointer = create_in_memory_checkpointer()
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context())
+    monkeypatch.setattr(entrypoint, "render_report", lambda *_args, **_kwargs: _report())
+
+    result = entrypoint.run_orchestrated_investigation_runtime(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+        ),
+        runtime=entrypoint.OrchestratorRuntimeConfig(
+            checkpointer=checkpointer,
+            thread_id="runtime-api-interrupted",
+            interrupt_after=["ensure_context"],
+        ),
+    )
+
+    assert result.status == "interrupted"
+    assert result.final_report is None
+    assert result.next_nodes == ("load_active_batch",)

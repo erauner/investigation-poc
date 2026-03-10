@@ -1,0 +1,26 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: incident-triage-shadow
+  namespace: kagent
+spec:
+  description: Shadow BYO Kubernetes investigation runtime backed directly by the orchestrator library.
+  type: BYO
+  byo:
+    deployment:
+      image: ghcr.io/erauner/investigation-shadow-runtime:latest
+      env:
+        - name: SHADOW_AGENT_NAME
+          value: incident-triage-shadow
+        - name: CLUSTER_NAME
+          value: current-context
+        - name: KUBERNETES_MCP_URL
+          value: http://kubernetes-mcp-server.kagent:8080/mcp
+        - name: PROMETHEUS_MCP_URL
+          value: http://prometheus-mcp-server.kagent:8080/mcp
+        - name: PROMETHEUS_URL
+          value: http://prometheus.kagent.svc.cluster.local:9090
+        - name: GUIDELINES_ENABLED
+          value: "false"
+        - name: SHADOW_CHECKPOINT_MODE
+          value: memory
