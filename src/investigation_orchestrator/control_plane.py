@@ -1,13 +1,16 @@
 from investigation_service.models import (
     ActiveEvidenceBatchContract,
+    AdvanceInvestigationRuntimeRequest,
     AdvanceInvestigationRuntimeResponse,
     BuildInvestigationPlanRequest,
+    GetActiveEvidenceBatchRequest,
     InvestigationReport,
+    InvestigationReportingRequest,
     InvestigationReportRequest,
     ReportingExecutionContext,
     SubmittedStepArtifact,
 )
-from investigation_service import runtime_api
+from investigation_service import reporting
 
 
 def seed_context(
@@ -15,8 +18,11 @@ def seed_context(
     *,
     allow_bounded_fallback_execution: bool = False,
 ) -> ReportingExecutionContext:
-    return runtime_api.seed_execution_context(
-        incident,
+    plan = reporting.build_investigation_plan(incident)
+    return ReportingExecutionContext(
+        initial_plan=plan,
+        updated_plan=plan,
+        executions=[],
         allow_bounded_fallback_execution=allow_bounded_fallback_execution,
     )
 
@@ -27,7 +33,16 @@ def get_active_batch(
     *,
     batch_id: str | None = None,
 ) -> ActiveEvidenceBatchContract | None:
-    return runtime_api.get_active_batch(incident, execution_context, batch_id=batch_id)
+    plan = execution_context.updated_plan
+    if plan.active_batch_id is None:
+        return None
+    return reporting.get_active_evidence_batch(
+        GetActiveEvidenceBatchRequest(
+            plan=plan,
+            incident=incident,
+            batch_id=batch_id or plan.active_batch_id,
+        )
+    )
 
 
 def advance_batch(
@@ -37,11 +52,13 @@ def advance_batch(
     submitted_steps: list[SubmittedStepArtifact],
     batch_id: str | None = None,
 ) -> AdvanceInvestigationRuntimeResponse:
-    return runtime_api.advance_batch(
-        incident,
-        execution_context,
-        submitted_steps=submitted_steps,
-        batch_id=batch_id,
+    return reporting.advance_investigation_runtime(
+        AdvanceInvestigationRuntimeRequest(
+            incident=incident,
+            execution_context=execution_context,
+            submitted_steps=submitted_steps,
+            batch_id=batch_id,
+        )
     )
 
 
@@ -49,4 +66,9 @@ def render_report(
     req: InvestigationReportRequest,
     execution_context: ReportingExecutionContext,
 ) -> InvestigationReport:
-    return runtime_api.render_report(req, execution_context)
+    return reporting.render_investigation_report(
+        InvestigationReportingRequest(
+            **req.model_dump(mode="python"),
+            execution_context=execution_context,
+        )
+    )

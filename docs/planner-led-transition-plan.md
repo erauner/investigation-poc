@@ -201,7 +201,7 @@ The intended sequence after the orchestration-core-first merge is:
    - keep planner/reconciler semantics unchanged
 
 4. runtime seam cleanup
-   - tighten `runtime_api.py`
+   - keep `investigation_orchestrator.control_plane` as the orchestrator-side runtime adapter
    - refine the product-owned submission/materialization seam
    - reduce dependence on transitional helper coupling
 
