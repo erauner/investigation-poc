@@ -790,6 +790,9 @@ The next implementation move should be:
 
 ### Continue Slice 8, Then Finish Slice 9 Adoption
 
+This remains the next quality, cleanup, and runtime-adoption continuation path for the pre-exploration transition work.
+It does not replace the bounded-exploration slices as the primary next architecture direction, which is defined later in this document.
+
 Why:
 
 - the deletion pass is complete, so the remaining risk is behavior quality rather than surface sprawl
@@ -881,6 +884,9 @@ That directive is now captured in:
 
 - `docs/adr/0004-bounded-exploratory-evidence.md`
 
+The bounded-exploration slices are the next architecture slices.
+Remaining Slice 8 and Slice 9 items continue in parallel where they are quality, cleanup, or runtime-adoption work, but they no longer define the primary architectural direction.
+
 ## Recommended Next Slices
 
 ### Slice 11: Evidence Adequacy Contract
@@ -898,6 +904,7 @@ Delivered in this slice should be:
 
 - a product-owned adequacy evaluator that is shared coherently across workload, service, and node scout paths
 - explicit adequacy outcomes that drive bounded routing decisions and honest degradation
+- define the exploratory node input contract and bounded probe/result seam before expanding scout behavior broadly across evidence planes
 - tests proving strong baseline evidence short-circuits without extra exploration
 
 This slice should remain:
@@ -922,6 +929,7 @@ Delivered in this slice should be:
 - node scout work finishes against the same bounded policy model
 - approved review/interrupt seams stay runtime-local and do not alter `ReportingExecutionContext`
 - deterministic materialization still returns `SubmittedStepArtifact`
+- earlier bounded service follow-up behavior is treated as a precursor pattern that should converge under the same bounded-exploration policy model
 
 Validation gate:
 
@@ -980,6 +988,8 @@ Validation gate:
 
 - the same canonical investigation result can be rendered in multiple profiles without changing findings or route provenance
 
+Presentation profile work may proceed in parallel, but it must remain strictly downstream of canonical evidence adequacy, exploratory routing, and deterministic artifact materialization.
+
 ## Current Rollout Framing
 
 This transition plan, not the ADRs, should carry the time-sensitive rollout framing.
@@ -993,6 +1003,9 @@ The current intended distinction is:
 - service scout landing earlier than originally sequenced changed rollout order, not architecture
 
 ## Updated Priority Order
+
+Slice numbering remains historical.
+Current implementation priorities may overlap when bounded-exploration work does not conflict with remaining real-cluster correctness or hosted-runtime validation work.
 
 The next implementation order should now be:
 

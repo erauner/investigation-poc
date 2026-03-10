@@ -59,8 +59,7 @@ The runtime should now be thought of as:
   - final report semantics
 - bounded-flexible evidence layer
   - selective evidence discovery inside a step
-  - bounded follow-up routing when evidence is weak or contradictory
-  - presentation depth and rendering profile selection
+  - bounded graph follow-up routing when evidence is weak or contradictory
 - explicitly non-flexible areas
   - arbitrary raw tool choreography across the whole investigation
   - write actions
@@ -160,12 +159,12 @@ The downstream contracts still remain:
 
 This ADR does not require that bounded exploration be implemented by an LLM-driven scout immediately.
 
-Bounded exploratory evidence may later be implemented by:
+Bounded exploratory evidence should prefer simpler mechanisms first, and may later be implemented by:
 
-- policy-guided branching
+- deterministic policy-guided branching
 - deterministic probe selection
 - structured tool-planning logic
-- or a constrained tool-using agent
+- a constrained tool-using agent only if simpler bounded mechanisms are insufficient
 
 The architectural requirement is:
 
@@ -175,6 +174,9 @@ The architectural requirement is:
 - provenance
 
 not any one specific mechanism.
+
+Exploration policy, adequacy thresholds, and allowlists are product-owned policy inputs.
+Exploratory runtime nodes consume them; they do not define them.
 
 ## Scout Policy And Leading Context
 
@@ -220,6 +222,32 @@ It is not:
 The baseline summary is intentionally separate from the full evidence artifact.
 Exploratory nodes should receive a compact view of what is already known and what is still missing rather than depending on arbitrary prompt reconstruction from raw runtime state.
 
+## Exploratory Node Input And Output Seams
+
+Bounded exploratory nodes should consume a small typed runtime input contract rather than the full investigation state.
+
+That runtime input should be derived from:
+
+- the active step's execution-facing inputs
+- product-owned exploration policy
+- adequacy-derived hints
+- optionally a compact baseline evidence summary
+
+This seam is a transient runtime input contract, not a second semantic model beside `ReportingExecutionContext`.
+
+Exploratory execution may also produce a bounded intermediate probe/result record before deterministic materialization into canonical typed artifacts.
+
+That intermediate seam may capture things such as:
+
+- probes attempted
+- which probes were useful, empty, contradictory, or failed
+- additional evidence recovered
+- additional limitations discovered
+- budget consumed and stop reason
+
+The important invariant is that exploratory nodes do not directly redefine planner or report semantics.
+They still terminate in the same deterministic materialization path into canonical typed step artifacts.
+
 ## Preferred Pattern
 
 The preferred near-term pattern is:
@@ -232,7 +260,7 @@ The preferred near-term pattern is:
 
 This is intentionally narrower than making the whole investigation graph agentic.
 
-The flexibility lives only in:
+The flexibility lives only in exploratory probe selection:
 
 - which approved probe to try next
 - the order of those approved probes
@@ -244,6 +272,10 @@ The flexibility does not extend to:
 - inventing new tool families or MCP servers
 - changing artifact or reconciliation contracts
 - continuing beyond bounded budgets
+
+This is distinct from bounded graph follow-up routing.
+Exploratory probe selection is step-local behavior inside an approved scout seam.
+Bounded graph follow-up routing is main-graph branching only across pre-approved steps or batches.
 
 ## Adequacy Outcome Taxonomy
 
@@ -286,6 +318,10 @@ Why workload was the first intended proving case:
   - `events_list`
   - `pods_log`
   - `pods_list_in_namespace`
+
+Workload is the first canonical proving model for bounded exploratory evidence.
+Service-specific bounded follow-up may still land earlier in isolated cases where product-quality gaps justify it.
+That changes rollout order, not architectural scope.
 
 The following should remain deterministic for now:
 

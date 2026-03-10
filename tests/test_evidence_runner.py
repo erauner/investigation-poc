@@ -12,7 +12,14 @@ from investigation_orchestrator.mcp_clients import (
 )
 from investigation_service.cluster_registry import ResolvedCluster
 from investigation_service.k8s_adapter import pick_runtime_pod_for_workload
-from investigation_service.models import EvidenceStepContract, StepExecutionInputs, TargetRef
+from investigation_service.models import (
+    ActiveEvidenceBatchContract,
+    EvidenceStepContract,
+    InvestigationSubject,
+    InvestigationTarget,
+    StepExecutionInputs,
+    TargetRef,
+)
 
 
 def _workload_step() -> EvidenceStepContract:
@@ -439,6 +446,231 @@ def test_workload_external_step_replaces_with_improved_non_adequate_scout(monkey
     assert "logs unavailable" in artifact.evidence_bundle.limitations
 
 
+def test_collect_external_steps_returns_pending_workload_review_when_enabled(monkeypatch) -> None:
+    step = _workload_step().model_copy(
+        update={
+            "execution_inputs": _workload_step().execution_inputs.model_copy(
+                update={"target": "deployment/crashy"}
+            )
+        }
+    )
+
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "ClientStub",
+            (),
+            {
+                "collect_workload_runtime": lambda _self, _inputs: WorkloadRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+                    object_state={
+                        "kind": "deployment",
+                        "name": "crashy",
+                        "namespace": "operator-smoke",
+                        "runtimePod": {"name": "crashy-a"},
+                    },
+                    events=[],
+                    log_excerpt="",
+                    limitations=["logs unavailable"],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "pods_log"],
+                    runtime_pod_name="crashy-a",
+                )
+            },
+        )(),
+    )
+
+    result = evidence_runner.collect_external_steps(
+        ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect workload evidence",
+            subject=InvestigationSubject(
+                source="alert",
+                kind="alert",
+                summary="Investigate PodCrashLooping",
+                requested_target="pod/crashy",
+                alertname="PodCrashLooping",
+            ),
+            canonical_target=InvestigationTarget(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="pod/crashy",
+                target="deployment/crashy",
+                service_name=None,
+                node_name=None,
+                profile="workload",
+                lookback_minutes=15,
+                normalization_notes=[],
+            ),
+            steps=[step],
+        ),
+        allow_exploration_review=True,
+    )
+
+    assert result.submitted_steps == []
+    assert result.pending_exploration_review is not None
+    assert result.pending_exploration_review.batch_id == "batch-1"
+    assert result.pending_exploration_review.step.step_id == "collect-target-evidence"
+    assert result.pending_exploration_review.adequacy_outcome == "weak"
+    assert result.pending_exploration_review.baseline_runtime_pod_name == "crashy-a"
+
+
+def test_apply_pending_exploration_review_skip_keeps_baseline_with_review_note(monkeypatch) -> None:
+    step = _workload_step().model_copy(
+        update={
+            "execution_inputs": _workload_step().execution_inputs.model_copy(
+                update={"target": "deployment/crashy"}
+            )
+        }
+    )
+
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "ClientStub",
+            (),
+            {
+                "collect_workload_runtime": lambda _self, _inputs: WorkloadRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+                    object_state={
+                        "kind": "deployment",
+                        "name": "crashy",
+                        "namespace": "operator-smoke",
+                        "runtimePod": {"name": "crashy-a"},
+                    },
+                    events=[],
+                    log_excerpt="",
+                    limitations=["logs unavailable"],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "pods_log"],
+                    runtime_pod_name="crashy-a",
+                )
+            },
+        )(),
+    )
+
+    result = evidence_runner.collect_external_steps(
+        ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect workload evidence",
+            subject=InvestigationSubject(
+                source="alert",
+                kind="alert",
+                summary="Investigate PodCrashLooping",
+                requested_target="pod/crashy",
+                alertname="PodCrashLooping",
+            ),
+            canonical_target=InvestigationTarget(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="pod/crashy",
+                target="deployment/crashy",
+                service_name=None,
+                node_name=None,
+                profile="workload",
+                lookback_minutes=15,
+                normalization_notes=[],
+            ),
+            steps=[step],
+        ),
+        allow_exploration_review=True,
+    )
+
+    artifact = evidence_runner.apply_pending_exploration_review(
+        result.pending_exploration_review.model_copy(update={"decision": "skip"})
+    )
+
+    assert artifact.evidence_bundle is not None
+    assert "bounded workload scout skipped by review decision" in artifact.evidence_bundle.limitations
+
+
+def test_collect_external_steps_stops_after_first_pending_review(monkeypatch) -> None:
+    step_one = _workload_step().model_copy(
+        update={
+            "execution_inputs": _workload_step().execution_inputs.model_copy(
+                update={"target": "deployment/crashy-a"}
+            )
+        }
+    )
+    step_two = _workload_step().model_copy(
+        update={
+            "step_id": "collect-target-evidence-2",
+            "execution_inputs": _workload_step().execution_inputs.model_copy(
+                update={"target": "deployment/crashy-b"}
+            ),
+        }
+    )
+    calls: list[str] = []
+
+    def _collect(_self, inputs):
+        calls.append(inputs.target or "")
+        return WorkloadRuntimeSnapshot(
+            cluster_alias="erauner-home",
+            target=TargetRef(namespace="operator-smoke", kind="deployment", name="crashy"),
+            object_state={
+                "kind": "deployment",
+                "name": "crashy",
+                "namespace": "operator-smoke",
+                "runtimePod": {"name": "crashy-a"},
+            },
+            events=[],
+            log_excerpt="",
+            limitations=["logs unavailable"],
+            tool_path=["kubernetes-mcp-server", "resources_get", "pods_log"],
+            runtime_pod_name="crashy-a",
+        )
+
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type("ClientStub", (), {"collect_workload_runtime": _collect})(),
+    )
+
+    result = evidence_runner.collect_external_steps(
+        ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect workload evidence",
+            subject=InvestigationSubject(
+                source="alert",
+                kind="alert",
+                summary="Investigate PodCrashLooping",
+                requested_target="pod/crashy",
+                alertname="PodCrashLooping",
+            ),
+            canonical_target=InvestigationTarget(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="pod/crashy",
+                target="deployment/crashy",
+                service_name=None,
+                node_name=None,
+                profile="workload",
+                lookback_minutes=15,
+                normalization_notes=[],
+            ),
+            steps=[step_one, step_two],
+        ),
+        allow_exploration_review=True,
+    )
+
+    assert calls == ["deployment/crashy-a"]
+    assert result.submitted_steps == []
+    assert result.pending_exploration_review is not None
+    assert result.pending_exploration_review.step.step_id == "collect-target-evidence"
+    assert [step.step_id for step in result.deferred_external_steps] == ["collect-target-evidence-2"]
+
+
 def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:
     step = _service_step()
     monkeypatch.setattr(
@@ -493,6 +725,86 @@ def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:
     assert artifact.evidence_bundle.object_state["kind"] == "service"
     assert artifact.evidence_bundle.events == ["Warning Unhealthy service/api"]
     assert any(item.title == "High Service Latency" for item in artifact.evidence_bundle.findings)
+
+
+def test_collect_external_steps_replays_only_deferred_external_steps(monkeypatch) -> None:
+    workload_step = _workload_step()
+    step = _service_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_workload_runtime": lambda _self, _inputs: pytest.fail("original batch workload step should not run during deferred replay"),
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": 12.5,
+                        "service_error_rate": 0.5,
+                        "service_latency_p95_seconds": 1.2,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_query"],
+                )
+            },
+        )(),
+    )
+
+    result = evidence_runner.collect_external_steps(
+        ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect workload evidence",
+            subject=InvestigationSubject(
+                source="alert",
+                kind="alert",
+                summary="Investigate PodCrashLooping",
+                requested_target="pod/crashy",
+                alertname="PodCrashLooping",
+            ),
+            canonical_target=InvestigationTarget(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="pod/crashy",
+                target="deployment/crashy",
+                service_name="api",
+                node_name=None,
+                profile="workload",
+                lookback_minutes=15,
+                normalization_notes=[],
+            ),
+            steps=[workload_step],
+        ),
+        steps=[step],
+    )
+
+    assert result.pending_exploration_review is None
+    assert result.deferred_external_steps == ()
+    assert [artifact.step_id for artifact in result.submitted_steps] == [step.step_id]
 
 
 def test_service_external_step_uses_kubernetes_peer_fallback_when_prometheus_is_empty(monkeypatch) -> None:

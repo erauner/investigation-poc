@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,8 @@ class BoundedExplorationPolicy:
     max_additional_probe_runs: int = 0
     max_metric_families: int = 0
     max_related_pods: int = 0
+    human_review_enabled: bool = False
+    human_review_outcomes: tuple[Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"], ...] = ()
 
 
 _POLICIES: dict[str, CapabilityPolicy] = {
@@ -75,6 +78,8 @@ _BOUNDED_EXPLORATION_POLICIES: dict[str, BoundedExplorationPolicy] = {
         enabled=True,
         max_additional_pods=1,
         max_additional_probe_runs=1,
+        human_review_enabled=True,
+        human_review_outcomes=("weak", "contradictory", "blocked"),
     ),
     "service_evidence_plane": BoundedExplorationPolicy(
         capability="service_evidence_plane",
