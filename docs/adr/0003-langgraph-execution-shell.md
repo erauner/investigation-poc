@@ -216,6 +216,9 @@ What is now true:
 - `run_orchestrated_investigation(...)` is the stable public facade and uses the in-process LangGraph shell internally
 - graph state remains a thin wrapper around `ReportingExecutionContext`
 - checkpoint configuration is behind an orchestrator-side seam and is exercised in tests with in-memory checkpointing
+- the orchestrator now has an explicit internal thread identity seam for checkpointed graph execution
+- checkpoint-resume behavior is exercised in tests from real graph-node boundaries rather than only through terminal state inspection
+- minimal redacted runtime observability exists around graph run start/finish, node transitions, and checkpoint interruption/resume boundaries
 - workload, service, and node external-preferred evidence steps now use orchestrator-owned peer MCP transport first
 - bounded internal fallback remains planner-owned inside product code rather than living in the orchestrator happy path
 
@@ -240,15 +243,14 @@ Before introducing a shadow BYO LangGraph agent through kagent, the following sh
 
 The remaining practical gates before a BYO shadow-hosting slice are:
 
-- add a small runtime seam for explicit thread identity resolution
-- add checkpoint-resume tests at graph-node boundaries, not only checkpoint state inspection
-- add minimal runtime observability around thread ID, node transition, and checkpoint boundary
+- choose the caller-facing thread identity strategy at the hosted runtime boundary
+- keep public resume APIs deferred until that hosting boundary exists
 - package the BYO runtime as a separate outer hosting layer rather than folding kagent-specific code into `investigation_orchestrator`
 
 Until those gates are closed, the repo should be treated as:
 
-- architecturally ready for BYO preparation
-- not yet fully ready for a production-worthy BYO shadow rollout
+- architecturally ready for BYO shadow-hosting preparation
+- not yet fully ready for a production-worthy BYO shadow rollout until the hosted thread identity boundary is explicit
 
 ## Immediate Follow-On After The Orchestration-Core-First Merge
 

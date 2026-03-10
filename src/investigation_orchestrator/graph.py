@@ -11,6 +11,7 @@ from .graph_nodes import (
     render_report_node,
     run_external_steps_node,
 )
+from .runtime_logging import log_graph_node, log_graph_run
 from .state import OrchestrationState
 
 
@@ -36,17 +37,66 @@ def _route_after_load_active_batch(state: OrchestrationState) -> str:
     return "run_external_steps"
 
 
+def _logged_node(node_name: str, node_fn, *, checkpoint_config: GraphCheckpointConfig | None):
+    def _runner(state: OrchestrationState) -> dict:
+        log_graph_node(
+            event="enter",
+            node=node_name,
+            checkpoint_config=checkpoint_config,
+            state=state,
+        )
+        try:
+            result = node_fn(state)
+        except Exception as exc:
+            log_graph_node(
+                event="failure",
+                node=node_name,
+                checkpoint_config=checkpoint_config,
+                state=state,
+                error_type=type(exc).__name__,
+            )
+            raise
+        merged_state = {**state, **result}
+        log_graph_node(
+            event="exit",
+            node=node_name,
+            checkpoint_config=checkpoint_config,
+            state=merged_state,
+        )
+        return result
+
+    return _runner
+
+
 def build_investigation_graph(
     *,
     deps: OrchestratorRuntimeDeps,
     checkpointer: BaseCheckpointSaver | None = None,
+    checkpoint_config: GraphCheckpointConfig | None = None,
+    interrupt_before: tuple[str, ...] | list[str] = (),
+    interrupt_after: tuple[str, ...] | list[str] = (),
 ):
     graph = StateGraph(OrchestrationState)
-    graph.add_node("ensure_context", lambda state: ensure_context_node(state, deps))
-    graph.add_node("load_active_batch", lambda state: load_active_batch_node(state, deps))
-    graph.add_node("run_external_steps", lambda state: run_external_steps_node(state, deps))
-    graph.add_node("advance_batch", lambda state: advance_batch_node(state, deps))
-    graph.add_node("render_report", lambda state: render_report_node(state, deps))
+    graph.add_node(
+        "ensure_context",
+        _logged_node("ensure_context", lambda state: ensure_context_node(state, deps), checkpoint_config=checkpoint_config),
+    )
+    graph.add_node(
+        "load_active_batch",
+        _logged_node("load_active_batch", lambda state: load_active_batch_node(state, deps), checkpoint_config=checkpoint_config),
+    )
+    graph.add_node(
+        "run_external_steps",
+        _logged_node("run_external_steps", lambda state: run_external_steps_node(state, deps), checkpoint_config=checkpoint_config),
+    )
+    graph.add_node(
+        "advance_batch",
+        _logged_node("advance_batch", lambda state: advance_batch_node(state, deps), checkpoint_config=checkpoint_config),
+    )
+    graph.add_node(
+        "render_report",
+        _logged_node("render_report", lambda state: render_report_node(state, deps), checkpoint_config=checkpoint_config),
+    )
 
     graph.add_edge(START, "ensure_context")
     graph.add_conditional_edges(
@@ -69,7 +119,11 @@ def build_investigation_graph(
     graph.add_edge("advance_batch", "ensure_context")
     graph.add_edge("render_report", END)
 
-    return graph.compile(checkpointer=checkpointer)
+    return graph.compile(
+        checkpointer=checkpointer,
+        interrupt_before=list(interrupt_before),
+        interrupt_after=list(interrupt_after),
+    )
 
 
 def invoke_investigation_graph(
@@ -78,15 +132,116 @@ def invoke_investigation_graph(
     deps: OrchestratorRuntimeDeps,
     checkpointer: BaseCheckpointSaver | None = None,
     checkpoint_config: GraphCheckpointConfig | None = None,
+    interrupt_before: tuple[str, ...] | list[str] = (),
+    interrupt_after: tuple[str, ...] | list[str] = (),
 ) -> OrchestrationState:
     if checkpoint_config is not None and checkpointer is None:
         raise ValueError("checkpoint_config requires a checkpointer")
     if checkpointer is not None and checkpoint_config is None:
         raise ValueError("checkpoint_config with an explicit thread_id is required when checkpointing is enabled")
 
-    graph = build_investigation_graph(deps=deps, checkpointer=checkpointer)
+    graph = build_investigation_graph(
+        deps=deps,
+        checkpointer=checkpointer,
+        checkpoint_config=checkpoint_config,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+    )
     config = build_graph_config(checkpoint_config) if checkpointer else None
-    return graph.invoke(initial_state, config=config)
+    log_graph_run(
+        mode="invoke",
+        status="start",
+        checkpoint_config=checkpoint_config,
+        state=initial_state,
+    )
+    try:
+        result = graph.invoke(initial_state, config=config)
+    except Exception as exc:
+        log_graph_run(
+            mode="invoke",
+            status="failure",
+            checkpoint_config=checkpoint_config,
+            state=initial_state,
+            error_type=type(exc).__name__,
+        )
+        raise
+    if checkpointer is not None:
+        snapshot = graph.get_state(config)
+        if snapshot.next:
+            log_graph_run(
+                mode="invoke",
+                status="interrupted",
+                checkpoint_config=checkpoint_config,
+                state=snapshot.values,
+                next_nodes=snapshot.next,
+            )
+            return snapshot.values
+    log_graph_run(
+        mode="invoke",
+        status="success",
+        checkpoint_config=checkpoint_config,
+        state=result,
+    )
+    return result
+
+
+def resume_investigation_graph(
+    *,
+    deps: OrchestratorRuntimeDeps,
+    checkpointer: BaseCheckpointSaver,
+    checkpoint_config: GraphCheckpointConfig,
+    interrupt_before: tuple[str, ...] | list[str] = (),
+    interrupt_after: tuple[str, ...] | list[str] = (),
+) -> OrchestrationState:
+    graph = build_investigation_graph(
+        deps=deps,
+        checkpointer=checkpointer,
+        checkpoint_config=checkpoint_config,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+    )
+    config = build_graph_config(checkpoint_config)
+    snapshot = graph.get_state(config)
+    if not snapshot.values:
+        raise ValueError("no resumable graph state exists for the requested thread_id")
+    if not snapshot.next:
+        raise ValueError("graph has no resumable next node for the requested thread_id")
+    log_graph_run(
+        mode="resume",
+        status="start",
+        checkpoint_config=checkpoint_config,
+        state=snapshot.values,
+        next_nodes=snapshot.next,
+    )
+    try:
+        result = graph.invoke(None, config=config)
+    except Exception as exc:
+        log_graph_run(
+            mode="resume",
+            status="failure",
+            checkpoint_config=checkpoint_config,
+            state=snapshot.values,
+            next_nodes=snapshot.next,
+            error_type=type(exc).__name__,
+        )
+        raise
+    resumed_snapshot = graph.get_state(config)
+    if resumed_snapshot.next:
+        log_graph_run(
+            mode="resume",
+            status="interrupted",
+            checkpoint_config=checkpoint_config,
+            state=resumed_snapshot.values,
+            next_nodes=resumed_snapshot.next,
+        )
+        return resumed_snapshot.values
+    log_graph_run(
+        mode="resume",
+        status="success",
+        checkpoint_config=checkpoint_config,
+        state=result,
+    )
+    return result
 
 
 def get_investigation_graph_state(
@@ -94,6 +249,14 @@ def get_investigation_graph_state(
     deps: OrchestratorRuntimeDeps,
     checkpointer: BaseCheckpointSaver,
     checkpoint_config: GraphCheckpointConfig,
+    interrupt_before: tuple[str, ...] | list[str] = (),
+    interrupt_after: tuple[str, ...] | list[str] = (),
 ) -> StateSnapshot:
-    graph = build_investigation_graph(deps=deps, checkpointer=checkpointer)
+    graph = build_investigation_graph(
+        deps=deps,
+        checkpointer=checkpointer,
+        checkpoint_config=checkpoint_config,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+    )
     return graph.get_state(build_graph_config(checkpoint_config))
