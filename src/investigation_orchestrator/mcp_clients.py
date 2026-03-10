@@ -215,7 +215,9 @@ class KubernetesMcpClient:
                             tool_path.append("pods_list_in_namespace")
                             pod_name = pick_runtime_pod_for_workload(raw_object_state, pods_raw)
                             if not pod_name:
-                                raise PeerMcpError("could not resolve runtime pod for deployment target")
+                                raise PeerMcpError(
+                                    f"could not resolve runtime pod for {target.kind} target"
+                                )
                             runtime_pod_raw = await self._call_tool(
                                 session,
                                 "resources_get",

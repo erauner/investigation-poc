@@ -173,6 +173,16 @@ One important planning note:
 
 So we should not measure the current deterministic orchestration layer against “can the model improvise more tool paths again?” The intended later flexibility comes from the execution shell, not from reopening raw prompt choreography.
 
+Concretely, the later flexibility we are working toward is:
+
+- branch to a service-evidence follow-up when workload evidence is inconclusive
+- retry or degrade gracefully on bounded peer-evidence failures
+- resume a partially completed investigation from checkpointed graph state
+- continue a follow-up investigation from prior reconciled execution context
+
+That is the form of flexibility the later LangGraph shell should add.
+It is not a plan to reintroduce free-form prompt-owned raw MCP choreography into the main happy path.
+
 ### Ordered Follow-On After The Orchestration-Core-First Merge
 
 The intended sequence after the orchestration-core-first merge is:
