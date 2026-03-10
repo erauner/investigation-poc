@@ -263,6 +263,116 @@ def test_run_orchestrated_investigation_advances_and_renders(monkeypatch) -> Non
     assert report.diagnosis == "Crash Loop Detected"
 
 
+def test_run_orchestrated_investigation_allows_empty_workload_submissions_for_downstream_fallback(monkeypatch) -> None:
+    incident = _incident()
+    captured = {"submitted": None}
+
+    monkeypatch.setattr(
+        entrypoint,
+        "find_unhealthy_pod",
+        lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})(),
+    )
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context())
+    monkeypatch.setattr(
+        entrypoint,
+        "get_active_batch",
+        lambda *_args, **_kwargs: ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect workload evidence",
+            subject=InvestigationSubject(
+                source="alert",
+                kind="alert",
+                summary="Investigate PodCrashLooping",
+                requested_target="pod/crashy",
+                alertname="PodCrashLooping",
+            ),
+            canonical_target=InvestigationTarget(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="pod/crashy",
+                target="pod/crashy-abc123",
+                service_name=None,
+                node_name=None,
+                profile="workload",
+                lookback_minutes=15,
+                normalization_notes=["alertname=PodCrashLooping"],
+            ),
+            steps=[
+                EvidenceStepContract(
+                    step_id="collect-target-evidence",
+                    title="Collect workload evidence",
+                    plane="workload",
+                    artifact_type="evidence_bundle",
+                    requested_capability="workload_evidence_plane",
+                    preferred_mcp_server="kubernetes-mcp-server",
+                    preferred_tool_names=["pods_log", "resources_get"],
+                    fallback_mcp_server=None,
+                    fallback_tool_names=[],
+                    execution_mode="external_preferred",
+                    execution_inputs=StepExecutionInputs(
+                        request_kind="target_context",
+                        cluster="erauner-home",
+                        namespace="operator-smoke",
+                        target="pod/crashy-abc123",
+                        profile="workload",
+                        lookback_minutes=15,
+                    ),
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(entrypoint, "run_required_external_steps", lambda _batch: [])
+
+    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+        captured["submitted"] = submitted_steps
+        return AdvanceInvestigationRuntimeResponse(
+            execution_context=_context(active_batch_id=None),
+            next_active_batch=None,
+        )
+
+    monkeypatch.setattr(entrypoint, "advance_batch", fake_advance)
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="pod/crashy-abc123",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=["panic: startup failed"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="Inspect logs and recent deployment changes before taking write actions.",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=["alertname=PodCrashLooping"],
+            tool_path_trace=None,
+        ),
+    )
+
+    report = run_orchestrated_investigation(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+        )
+    )
+
+    assert captured["submitted"] == []
+    assert report.target == "pod/crashy-abc123"
+
+
 def test_run_orchestrated_investigation_bypasses_terminal_render_batch(monkeypatch) -> None:
     incident = _incident()
     monkeypatch.setattr(

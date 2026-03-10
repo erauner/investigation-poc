@@ -199,6 +199,7 @@ The intended sequence after the orchestration-core-first merge is:
    - replace transitional internal workload evidence collection in `investigation_orchestrator.evidence_runner`
    - keep `run_orchestrated_investigation` unchanged as the preferred high-level path
    - prove that workload evidence is gathered through orchestrator-owned Kubernetes MCP calls rather than prompt choreography or internal helper transport
+   - keep bounded internal fallback product-owned in planner/control-plane execution rather than recreating workload helper transport inside the orchestrator
 
 2. service peer-MCP transport
    - move service evidence acquisition to orchestrator-owned Prometheus MCP calls first

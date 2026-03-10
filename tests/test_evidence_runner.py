@@ -123,8 +123,15 @@ def test_workload_external_step_prefers_peer_mcp(monkeypatch) -> None:
     assert "peer partial: events only from namespace scope" in artifact.evidence_bundle.limitations
 
 
-def test_workload_external_step_falls_back_explicitly(monkeypatch) -> None:
+def test_workload_external_step_defers_to_downstream_fallback_when_peer_fails(monkeypatch) -> None:
     step = _workload_step()
+    active_batch = type(
+        "ActiveBatchStub",
+        (),
+        {
+            "steps": [step],
+        },
+    )()
 
     monkeypatch.setattr(
         evidence_runner,
@@ -136,17 +143,13 @@ def test_workload_external_step_falls_back_explicitly(monkeypatch) -> None:
                 "collect_workload_runtime": lambda _self, _inputs: (_ for _ in ()).throw(
                     PeerMcpError("peer unavailable")
                 )
-            },
+            },  
         )(),
     )
 
-    artifact = evidence_runner._submitted_artifact(step)
+    submissions = evidence_runner.run_required_external_steps(active_batch)
 
-    assert artifact.actual_route is not None
-    assert artifact.actual_route.source_kind == "investigation_internal"
-    assert artifact.actual_route.tool_name == "collect_workload_evidence"
-    assert artifact.evidence_bundle is not None
-    assert "peer workload MCP fallback: peer unavailable" in artifact.evidence_bundle.limitations
+    assert submissions == []
 
 
 def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:
@@ -437,6 +440,30 @@ def test_node_external_step_falls_back_internally_after_peer_failures(monkeypatc
         "peer node MCP fallback: prometheus peer failed: prom down; kubernetes peer fallback failed: kube down"
         in artifact.evidence_bundle.limitations
     )
+
+
+def test_external_steps_still_require_non_workload_submission(monkeypatch) -> None:
+    step = _service_step()
+    active_batch = type(
+        "ActiveBatchStub",
+        (),
+        {
+            "steps": [step],
+        },
+    )()
+
+    monkeypatch.setattr(
+        evidence_runner,
+        "_submitted_artifact",
+        lambda _step: None,
+    )
+
+    try:
+        evidence_runner.run_required_external_steps(active_batch)
+    except ValueError as exc:
+        assert "did not materialize an artifact" in str(exc)
+    else:
+        raise AssertionError("expected non-workload external steps to still require a submission")
 
 
 def test_node_peer_prometheus_routing_allows_default_cluster_with_prometheus_url() -> None:
