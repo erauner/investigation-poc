@@ -1,5 +1,9 @@
 from investigation_orchestrator import evidence_runner
-from investigation_orchestrator.mcp_clients import PeerMcpError, WorkloadRuntimeSnapshot
+from investigation_orchestrator.mcp_clients import (
+    PeerMcpError,
+    WorkloadRuntimeSnapshot,
+    _pick_runtime_pod_for_deployment,
+)
 from investigation_service.models import EvidenceStepContract, StepExecutionInputs, TargetRef
 
 
@@ -89,3 +93,45 @@ def test_workload_external_step_falls_back_explicitly(monkeypatch) -> None:
     assert artifact.actual_route.tool_name == "collect_workload_evidence"
     assert artifact.evidence_bundle is not None
     assert "peer workload MCP fallback: peer unavailable" in artifact.evidence_bundle.limitations
+
+
+def test_pick_runtime_pod_for_deployment_uses_selector_not_prefix() -> None:
+    deployment = {
+        "metadata": {"name": "crashy"},
+        "spec": {
+            "selector": {
+                "matchLabels": {
+                    "app.kubernetes.io/name": "crashy",
+                    "app.kubernetes.io/instance": "crashy",
+                }
+            }
+        },
+    }
+    pods = {
+        "items": [
+            {
+                "metadata": {
+                    "name": "crashy-extra-aaa",
+                    "creationTimestamp": "2026-03-09T12:02:00Z",
+                    "labels": {
+                        "app.kubernetes.io/name": "crashy-extra",
+                        "app.kubernetes.io/instance": "crashy-extra",
+                    },
+                    "ownerReferences": [{"kind": "ReplicaSet", "name": "crashy-extra-7b6d9f"}],
+                }
+            },
+            {
+                "metadata": {
+                    "name": "crashy-58b5897796-lckp9",
+                    "creationTimestamp": "2026-03-09T12:01:00Z",
+                    "labels": {
+                        "app.kubernetes.io/name": "crashy",
+                        "app.kubernetes.io/instance": "crashy",
+                    },
+                    "ownerReferences": [{"kind": "ReplicaSet", "name": "crashy-58b5897796"}],
+                }
+            },
+        ]
+    }
+
+    assert _pick_runtime_pod_for_deployment(deployment, pods) == "crashy-58b5897796-lckp9"
