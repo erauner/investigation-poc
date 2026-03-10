@@ -66,7 +66,8 @@ This means:
 - `investigation_service` remains the authoritative semantic/control-plane library
 - `investigation_orchestrator` becomes the deterministic runtime layer
 - LangGraph is the future execution framework for that orchestrator
-- BYO LangGraph hosting through kagent is a later deployment step, not the first architectural step
+- BYO LangGraph hosting through kagent is the preferred future deployment direction if hosted resumable execution proves worth the added operational complexity
+- that BYO move is a later deployment step, not the first architectural step
 
 LangGraph is not intended to become:
 
@@ -218,7 +219,8 @@ The intended rollout order is:
 2. move orchestration into code through a high-level product-owned runtime path
 3. prove live parity on current validations
 4. add a true LangGraph shell around the orchestration layer
-5. only then consider a shadow or replacement BYO LangGraph agent through kagent
+5. if hosted execution, resumability, or runtime separation become active requirements, package that LangGraph runtime as a shadow BYO agent through kagent
+6. only after shadow validation, consider making the BYO LangGraph agent the preferred runtime path
 
 This avoids changing:
 
@@ -228,6 +230,34 @@ This avoids changing:
 - orchestration logic
 
 all at once.
+
+## Future Deployment Direction
+
+The architectural decision in this ADR is about the execution shell, not immediate hosting.
+
+However, the expected later operational landing zone is:
+
+- keep the same semantic/control-plane ownership in `investigation_service`
+- keep peer MCP servers as first-class evidence planes
+- host the LangGraph-backed orchestration runtime as a BYO kagent agent if and when:
+  - resumable execution is required
+  - hosted runtime separation is worth the operational cost
+  - shadow/canary comparison against the declarative agent is complete
+
+This means a future BYO LangGraph agent would most likely:
+
+- reuse the same orchestration core
+- continue talking to the same MCP servers
+- reduce the need for a large declarative investigation tool surface
+- change the outer hosting/runtime model more than the underlying server topology
+
+So the intended long-term direction is:
+
+- orchestration core first
+- transport migration next
+- BYO LangGraph hosting later if it proves beneficial
+
+This ADR does not require that deployment move now, but it does treat it as the preferred future option if the operational trade-off is justified.
 
 ## Consequences
 

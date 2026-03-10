@@ -138,6 +138,7 @@ That future direction is:
 - `investigation_orchestrator` becomes the runtime layer
 - LangGraph becomes the future execution shell
 - kagent-backed checkpointing is the default first persistence path if/when resumable execution is introduced
+- a future BYO LangGraph agent is the preferred later deployment direction if hosted execution/resume value justifies the added operational complexity
 
 The most important follow-on after the orchestration-core-first merge is now explicit:
 
@@ -151,6 +152,49 @@ That means the next transport-oriented migration is:
 - not removing `kubernetes-mcp-server` or `prometheus-mcp-server`
 - not asking the agent to manually choreograph those peer tools again
 - but shifting primary consumption of those peer MCP tools from prompt-driven agent behavior to orchestrator-owned code
+
+The future BYO question is intentionally sequenced after those steps:
+
+- first fix orchestration in the current declarative path
+- then move evidence transport toward orchestrator-owned peer MCP execution
+- then decide whether the hosted runtime should stay declarative-plus-MCP or move to a shadow BYO LangGraph agent
+
+So the current plan does not require an immediate BYO move, but it does keep that as the preferred later deployment direction once the orchestration core and transport split are stable.
+
+### Ordered Follow-On After The Orchestration-Core-First Merge
+
+The intended sequence after the orchestration-core-first merge is:
+
+1. workload peer-MCP transport
+   - replace transitional internal workload evidence collection in `investigation_orchestrator.evidence_runner`
+   - keep `run_orchestrated_investigation` unchanged as the preferred high-level path
+   - prove that workload evidence is gathered through orchestrator-owned Kubernetes MCP calls rather than prompt choreography or internal helper transport
+
+2. service peer-MCP transport
+   - move service evidence acquisition to orchestrator-owned Prometheus MCP calls first
+   - keep Kubernetes enrichment or fallback explicit where still needed
+
+3. node peer-MCP transport
+   - apply the same transport split to node evidence
+   - keep planner/reconciler semantics unchanged
+
+4. runtime seam cleanup
+   - tighten `runtime_api.py`
+   - refine the product-owned submission/materialization seam
+   - reduce dependence on transitional helper coupling
+
+5. low-level tool transition cleanup
+   - keep low-level handoff tools available for debugging as needed
+   - clarify their longer-term support/deprecation status once the high-level path is stable on peer MCP transport
+
+6. real LangGraph execution shell
+   - compile the orchestration core into a true LangGraph runtime
+   - add checkpointing/resume support
+   - keep `investigation_service` as the semantic owner
+
+7. optional shadow BYO LangGraph agent
+   - package the LangGraph-backed runtime as a BYO agent only after orchestration and transport are stable
+   - compare it side by side with the declarative path before deciding on any hosting cutover
 
 ## Completed Slices
 
