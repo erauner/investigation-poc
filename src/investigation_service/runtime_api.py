@@ -3,6 +3,7 @@ from .models import (
     ActiveEvidenceBatchContract,
     AdvanceInvestigationRuntimeResponse,
     BuildInvestigationPlanRequest,
+    CollectServiceContextRequest,
     EvidenceStepContract,
     GetActiveEvidenceBatchRequest,
     InvestigationPlan,
@@ -14,7 +15,7 @@ from .models import (
 )
 from .planner import advance_active_evidence_batch, get_active_evidence_batch_contract, PlannerDeps
 from .reporting import _planner_deps, render_investigation_report
-from .tools import materialize_workload_evidence
+from .tools import materialize_service_evidence, materialize_workload_evidence
 
 
 def seed_execution_context(
@@ -128,6 +129,40 @@ def materialize_workload_submission(
         object_state=object_state,
         events=events,
         log_excerpt=log_excerpt,
+        cluster_alias=cluster_alias,
+        extra_limitations=extra_limitations,
+    )
+    return SubmittedStepArtifact(
+        step_id=step.step_id,
+        evidence_bundle=bundle,
+        actual_route=actual_route,
+    )
+
+
+def materialize_service_submission(
+    step: EvidenceStepContract,
+    *,
+    target,
+    metrics: dict,
+    actual_route: ActualRoute,
+    object_state: dict | None = None,
+    events: list[str] | None = None,
+    cluster_alias: str | None = None,
+    extra_limitations: list[str] | None = None,
+) -> SubmittedStepArtifact:
+    inputs = step.execution_inputs
+    bundle = materialize_service_evidence(
+        CollectServiceContextRequest(
+            cluster=inputs.cluster,
+            namespace=inputs.namespace or "",
+            service_name=inputs.service_name or target.name,
+            target=inputs.target,
+            lookback_minutes=inputs.lookback_minutes or 15,
+        ),
+        target=target,
+        metrics=metrics,
+        object_state=object_state,
+        events=events,
         cluster_alias=cluster_alias,
         extra_limitations=extra_limitations,
     )

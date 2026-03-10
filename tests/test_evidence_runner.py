@@ -1,6 +1,8 @@
 from investigation_orchestrator import evidence_runner
 from investigation_orchestrator.mcp_clients import (
     PeerMcpError,
+    ServiceMetricsSnapshot,
+    ServiceRuntimeSnapshot,
     WorkloadRuntimeSnapshot,
     _normalize_object_state,
 )
@@ -26,6 +28,30 @@ def _workload_step() -> EvidenceStepContract:
             namespace="operator-smoke",
             target="pod/crashy-abc123",
             profile="workload",
+            lookback_minutes=15,
+        ),
+    )
+
+
+def _service_step() -> EvidenceStepContract:
+    return EvidenceStepContract(
+        step_id="collect-target-evidence",
+        title="Collect service evidence",
+        plane="service",
+        artifact_type="evidence_bundle",
+        requested_capability="service_evidence_plane",
+        preferred_mcp_server="prometheus-mcp-server",
+        preferred_tool_names=["execute_query", "execute_range_query"],
+        fallback_mcp_server="kubernetes-mcp-server",
+        fallback_tool_names=["resources_get", "events_list"],
+        execution_mode="external_preferred",
+        execution_inputs=StepExecutionInputs(
+            request_kind="service_context",
+            cluster=None,
+            namespace="operator-smoke",
+            target="service/api",
+            profile="service",
+            service_name="api",
             lookback_minutes=15,
         ),
     )
@@ -94,6 +120,150 @@ def test_workload_external_step_falls_back_explicitly(monkeypatch) -> None:
     assert artifact.actual_route.tool_name == "collect_workload_evidence"
     assert artifact.evidence_bundle is not None
     assert "peer workload MCP fallback: peer unavailable" in artifact.evidence_bundle.limitations
+
+
+def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:
+    step = _service_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": 12.5,
+                        "service_error_rate": 0.5,
+                        "service_latency_p95_seconds": 1.2,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route is not None
+    assert artifact.actual_route.source_kind == "peer_mcp"
+    assert artifact.actual_route.mcp_server == "prometheus-mcp-server"
+    assert artifact.actual_route.tool_name == "execute_query"
+    assert artifact.evidence_bundle is not None
+    assert artifact.evidence_bundle.metrics["service_error_rate"] == 0.5
+    assert artifact.evidence_bundle.object_state["kind"] == "service"
+    assert artifact.evidence_bundle.events == ["Warning Unhealthy service/api"]
+    assert any(item.title == "High Service Latency" for item in artifact.evidence_bundle.findings)
+
+
+def test_service_external_step_uses_kubernetes_peer_fallback_when_prometheus_is_empty(monkeypatch) -> None:
+    step = _service_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": None,
+                        "service_error_rate": None,
+                        "service_latency_p95_seconds": None,
+                        "prometheus_available": False,
+                    },
+                    limitations=["prometheus unavailable or returned no usable results"],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route is not None
+    assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
+    assert artifact.evidence_bundle is not None
+    assert artifact.evidence_bundle.object_state["kind"] == "service"
+    assert "prometheus unavailable or returned no usable results" in artifact.evidence_bundle.limitations
+
+
+def test_service_external_step_falls_back_internally_after_peer_failures(monkeypatch) -> None:
+    step = _service_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: (_ for _ in ()).throw(PeerMcpError("prom down"))
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: (_ for _ in ()).throw(PeerMcpError("kube down"))
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route is not None
+    assert artifact.actual_route.source_kind == "investigation_internal"
+    assert artifact.actual_route.tool_name == "collect_service_evidence"
+    assert (
+        "peer service MCP fallback: prometheus peer failed: prom down; kubernetes peer fallback failed: kube down"
+        in artifact.evidence_bundle.limitations
+    )
 
 
 def test_pick_runtime_pod_for_workload_uses_selector_not_prefix() -> None:

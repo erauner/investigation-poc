@@ -239,6 +239,45 @@ def materialize_workload_evidence(
     )
 
 
+def materialize_service_evidence(
+    req: CollectServiceContextRequest,
+    *,
+    target,
+    metrics: dict,
+    object_state: dict | None = None,
+    events: list[str] | None = None,
+    cluster_alias: str | None = None,
+    extra_limitations: list[str] | None = None,
+) -> EvidenceBundle:
+    cluster = resolve_cluster(req.cluster)
+    context_req = CollectContextRequest(
+        cluster=req.cluster,
+        namespace=req.namespace,
+        target=_canonical_target(req.target or req.service_name, profile="service", service_name=req.service_name),
+        profile="service",
+        service_name=req.service_name,
+        lookback_minutes=req.lookback_minutes,
+    )
+    findings = derive_findings("service", object_state or {}, events or ["no related events"], "", metrics)
+    limitations = [*(extra_limitations or [])]
+    if (object_state or {}).get("error"):
+        limitations.append("kubernetes object query failed")
+    if events == ["no related events"]:
+        limitations.append("no related Kubernetes events found")
+    enrichment_hints = _build_enrichment_hints("service", "service", metrics, limitations, findings)
+    return EvidenceBundle(
+        cluster=cluster_alias or cluster.alias,
+        target=target,
+        object_state=object_state or {},
+        events=events or ["no related events"],
+        log_excerpt="",
+        metrics={**metrics, "profile": "service", "lookback_minutes": context_req.lookback_minutes},
+        findings=findings,
+        limitations=sorted(set(limitations)),
+        enrichment_hints=sorted(set(enrichment_hints)),
+    )
+
+
 def collect_evidence_bundle(req: CollectContextRequest) -> EvidenceBundle:
     cluster = resolve_cluster(req.cluster)
     requested_target = _call_with_optional_cluster(resolve_target, req.namespace, req.target, cluster=cluster)
