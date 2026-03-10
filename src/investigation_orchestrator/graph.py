@@ -267,8 +267,9 @@ def resume_investigation_graph(
         interrupt_after=interrupt_after,
         enable_exploration_review_interrupt=enable_exploration_review_interrupt,
     )
-    config = build_graph_config(checkpoint_config)
-    snapshot = graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
+    latest_head_checkpoint_config = _state_read_checkpoint_config(checkpoint_config)
+    config = build_graph_config(latest_head_checkpoint_config)
+    snapshot = graph.get_state(config)
     if not snapshot.values:
         raise ValueError("no resumable graph state exists for the requested thread_id")
     if not snapshot.next:
@@ -292,7 +293,7 @@ def resume_investigation_graph(
             error_type=type(exc).__name__,
         )
         raise
-    resumed_snapshot = graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
+    resumed_snapshot = graph.get_state(config)
     if resumed_snapshot.next:
         log_graph_run(
             mode="resume",
@@ -328,7 +329,7 @@ def get_investigation_graph_state(
         interrupt_after=interrupt_after,
         enable_exploration_review_interrupt=enable_exploration_review_interrupt,
     )
-    return graph.get_state(build_graph_config(checkpoint_config))
+    return graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
 
 
 def update_investigation_graph_state(

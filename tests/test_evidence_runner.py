@@ -727,6 +727,86 @@ def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:
     assert any(item.title == "High Service Latency" for item in artifact.evidence_bundle.findings)
 
 
+def test_collect_external_steps_replays_only_deferred_external_steps(monkeypatch) -> None:
+    workload_step = _workload_step()
+    step = _service_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_workload_runtime": lambda _self, _inputs: pytest.fail("original batch workload step should not run during deferred replay"),
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": 12.5,
+                        "service_error_rate": 0.5,
+                        "service_latency_p95_seconds": 1.2,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_query"],
+                )
+            },
+        )(),
+    )
+
+    result = evidence_runner.collect_external_steps(
+        ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect workload evidence",
+            subject=InvestigationSubject(
+                source="alert",
+                kind="alert",
+                summary="Investigate PodCrashLooping",
+                requested_target="pod/crashy",
+                alertname="PodCrashLooping",
+            ),
+            canonical_target=InvestigationTarget(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="pod/crashy",
+                target="deployment/crashy",
+                service_name="api",
+                node_name=None,
+                profile="workload",
+                lookback_minutes=15,
+                normalization_notes=[],
+            ),
+            steps=[workload_step],
+        ),
+        steps=[step],
+    )
+
+    assert result.pending_exploration_review is None
+    assert result.deferred_external_steps == ()
+    assert [artifact.step_id for artifact in result.submitted_steps] == [step.step_id]
+
+
 def test_service_external_step_uses_kubernetes_peer_fallback_when_prometheus_is_empty(monkeypatch) -> None:
     step = _service_step()
     monkeypatch.setattr(
