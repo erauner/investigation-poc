@@ -15,6 +15,13 @@ from .runtime_logging import log_graph_node, log_graph_run
 from .state import OrchestrationState
 
 
+def _state_read_checkpoint_config(checkpoint_config: GraphCheckpointConfig) -> GraphCheckpointConfig:
+    return GraphCheckpointConfig(
+        thread_id=checkpoint_config.thread_id,
+        checkpoint_ns=checkpoint_config.checkpoint_ns,
+    )
+
+
 def _route_after_context(
     state: OrchestrationState,
     deps: OrchestratorRuntimeDeps,
@@ -166,7 +173,7 @@ def invoke_investigation_graph(
         )
         raise
     if checkpointer is not None:
-        snapshot = graph.get_state(config)
+        snapshot = graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
         if snapshot.next:
             log_graph_run(
                 mode="invoke",
@@ -201,7 +208,7 @@ def resume_investigation_graph(
         interrupt_after=interrupt_after,
     )
     config = build_graph_config(checkpoint_config)
-    snapshot = graph.get_state(config)
+    snapshot = graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
     if not snapshot.values:
         raise ValueError("no resumable graph state exists for the requested thread_id")
     if not snapshot.next:
@@ -225,7 +232,7 @@ def resume_investigation_graph(
             error_type=type(exc).__name__,
         )
         raise
-    resumed_snapshot = graph.get_state(config)
+    resumed_snapshot = graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
     if resumed_snapshot.next:
         log_graph_run(
             mode="resume",

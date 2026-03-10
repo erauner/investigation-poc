@@ -1,5 +1,6 @@
 import json
 import logging
+import hashlib
 from typing import Any
 
 from .checkpointing import GraphCheckpointConfig
@@ -25,9 +26,13 @@ def _ensure_logger() -> logging.Logger:
 
 
 def _checkpoint_summary(checkpoint_config: GraphCheckpointConfig | None) -> dict[str, Any]:
+    thread_id = checkpoint_config.thread_id if checkpoint_config else None
+    checkpoint_ns = checkpoint_config.checkpoint_ns if checkpoint_config else None
     return {
-        "thread_id": checkpoint_config.thread_id if checkpoint_config else None,
-        "checkpoint_ns": checkpoint_config.checkpoint_ns if checkpoint_config else None,
+        "has_thread_id": bool(thread_id),
+        "thread_id_token": hashlib.sha256(thread_id.encode("utf-8")).hexdigest()[:12] if thread_id else None,
+        "has_checkpoint_ns": bool(checkpoint_ns),
+        "checkpoint_ns_token": hashlib.sha256(checkpoint_ns.encode("utf-8")).hexdigest()[:12] if checkpoint_ns else None,
         "has_checkpoint_id": bool(checkpoint_config.checkpoint_id) if checkpoint_config else False,
     }
 

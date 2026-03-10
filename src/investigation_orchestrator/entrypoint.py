@@ -128,6 +128,7 @@ def _run_orchestrated_investigation_graph(
 def _resume_orchestrated_investigation_graph(
     *,
     checkpointer,
+    req: InvestigationReportRequest | None = None,
     checkpoint_config: GraphCheckpointConfig | None = None,
     thread_id: str | None = None,
     checkpoint_ns: str | None = None,
@@ -152,7 +153,9 @@ def _resume_orchestrated_investigation_graph(
     report = final_state["final_report"]
     if report is None:
         raise ValueError("orchestration graph resumed without rendering a final report")
-    return report
+    if req is None:
+        return report
+    return _maybe_attach_resolved_pod_context(req, report)
 
 
 def run_orchestrated_investigation(

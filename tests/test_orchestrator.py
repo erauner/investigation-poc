@@ -1329,6 +1329,79 @@ def test_internal_graph_runner_resumes_after_external_step_materialization(monke
     assert report.target == "deployment/crashy"
 
 
+def test_internal_graph_runner_reads_latest_state_even_with_pinned_checkpoint_id(monkeypatch) -> None:
+    incident = _incident()
+    checkpointer = create_in_memory_checkpointer()
+    monkeypatch.setattr(entrypoint, "find_unhealthy_pod", lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})())
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context())
+    monkeypatch.setattr(
+        entrypoint,
+        "get_active_batch",
+        lambda *_args, **_kwargs: ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect workload evidence",
+            subject=InvestigationSubject(source="alert", kind="alert", summary="Investigate PodCrashLooping", requested_target="pod/crashy", alertname="PodCrashLooping"),
+            canonical_target=InvestigationTarget(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="pod/crashy",
+                target="pod/crashy-abc123",
+                service_name=None,
+                node_name=None,
+                profile="workload",
+                lookback_minutes=15,
+                normalization_notes=["alertname=PodCrashLooping"],
+            ),
+            steps=[],
+        ),
+    )
+    monkeypatch.setattr(entrypoint, "run_required_external_steps", lambda _batch: [])
+    monkeypatch.setattr(
+        entrypoint,
+        "advance_batch",
+        lambda *_args, **_kwargs: AdvanceInvestigationRuntimeResponse(
+            execution_context=_context(active_batch_id=None),
+            next_active_batch=None,
+        ),
+    )
+    monkeypatch.setattr(entrypoint, "render_report", lambda *_args, **_kwargs: _report())
+
+    with pytest.raises(ValueError, match="completed without rendering"):
+        entrypoint._run_orchestrated_investigation_graph(
+            InvestigationReportRequest(
+                cluster=incident.cluster,
+                namespace=incident.namespace,
+                target=incident.target,
+                profile=incident.profile,
+                lookback_minutes=incident.lookback_minutes,
+                alertname=incident.alertname,
+                labels=incident.labels,
+                annotations=incident.annotations,
+            ),
+            checkpointer=checkpointer,
+            thread_id="pinned-checkpoint-thread",
+            interrupt_after=["ensure_context"],
+        )
+
+    head_snapshot = get_investigation_graph_state(
+        deps=entrypoint._runtime_deps(),
+        checkpointer=checkpointer,
+        checkpoint_config=GraphCheckpointConfig(thread_id="pinned-checkpoint-thread"),
+    )
+    pinned_checkpoint_id = head_snapshot.config["configurable"]["checkpoint_id"]
+
+    report = entrypoint._resume_orchestrated_investigation_graph(
+        checkpointer=checkpointer,
+        thread_id="pinned-checkpoint-thread",
+        checkpoint_id=pinned_checkpoint_id,
+    )
+
+    assert report.target == "deployment/crashy"
+
+
 def test_internal_graph_resume_rejects_missing_state() -> None:
     with pytest.raises(ValueError, match="no resumable graph state exists"):
         entrypoint._resume_orchestrated_investigation_graph(
@@ -1369,6 +1442,97 @@ def test_orchestrator_runtime_logs_are_redacted(monkeypatch, caplog) -> None:
     assert report.target == "deployment/crashy"
     assert "orchestrator_graph_run mode=invoke status=start" in caplog.text
     assert "orchestrator_graph_node event=enter node=ensure_context" in caplog.text
-    assert '"thread_id": "log-thread"' in caplog.text
+    assert '"has_thread_id": true' in caplog.text
+    assert '"thread_id_token":' in caplog.text
+    assert "log-thread" not in caplog.text
     assert "operator-smoke" not in caplog.text
     assert "PodCrashLooping" not in caplog.text
+
+
+def test_internal_graph_resume_applies_pod_compatibility_when_request_is_provided(monkeypatch) -> None:
+    incident = _incident()
+    checkpointer = create_in_memory_checkpointer()
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="deployment/crashy",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=[
+                "Alert PodCrashLooping requested pod/crashy",
+                "Resolved runtime target: deployment/crashy",
+            ],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="next",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=[],
+            tool_path_trace=None,
+        ),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "find_unhealthy_pod",
+        lambda _req: type(
+            "UnhealthyPodResponseStub",
+            (),
+            {
+                "candidate": type(
+                    "CandidateStub",
+                    (),
+                    {
+                        "target": "pod/crashy-abc123",
+                        "namespace": "operator-smoke",
+                        "kind": "pod",
+                        "name": "crashy-abc123",
+                        "phase": "Running",
+                        "reason": "CrashLoopBackOff",
+                        "restart_count": 3,
+                        "ready": False,
+                        "summary": "Crash looping",
+                    },
+                )()
+            },
+        )(),
+    )
+
+    with pytest.raises(ValueError, match="completed without rendering"):
+        entrypoint._run_orchestrated_investigation_graph(
+            InvestigationReportRequest(
+                cluster=incident.cluster,
+                namespace=incident.namespace,
+                target=incident.target,
+                profile=incident.profile,
+                lookback_minutes=incident.lookback_minutes,
+                alertname=incident.alertname,
+                labels=incident.labels,
+                annotations=incident.annotations,
+            ),
+            checkpointer=checkpointer,
+            thread_id="resume-pod-compat",
+            interrupt_after=["ensure_context"],
+        )
+
+    report = entrypoint._resume_orchestrated_investigation_graph(
+        checkpointer=checkpointer,
+        req=InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+        ),
+        thread_id="resume-pod-compat",
+    )
+
+    assert any("Resolved concrete crash-looping pod: pod/crashy-abc123" in item for item in report.evidence)
