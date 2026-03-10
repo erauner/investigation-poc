@@ -18,7 +18,7 @@ def canonical_target(target: str, profile: str, service_name: str | None = None)
     normalized_target = target.strip()
     if not normalized_target:
         return normalized_target
-    if normalized_target.startswith(("pod/", "deployment/", "service/", "node/")):
+    if normalized_target.startswith(("pod/", "deployment/", "statefulset/", "service/", "node/")):
         return normalized_target
     scope = scope_from_target(normalized_target, profile)
     if scope == "service":

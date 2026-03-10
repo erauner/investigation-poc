@@ -164,7 +164,7 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
         findings.extend(_derive_node_findings(object_state, metrics))
 
     runtime_state = object_state
-    if object_state.get("kind") == "deployment" and object_state.get("runtimePod"):
+    if object_state.get("kind") in {"deployment", "statefulset"} and object_state.get("runtimePod"):
         runtime_state = object_state["runtimePod"]
 
     init_containers = runtime_state.get("initContainers", [])

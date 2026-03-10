@@ -8,7 +8,9 @@ from investigation_service.models import (
     EvidenceStepContract,
     SubmittedStepArtifact,
 )
+from investigation_service import runtime_api
 from investigation_service.tools import collect_node_evidence, collect_service_evidence, collect_workload_evidence
+from .mcp_clients import KubernetesMcpClient, PeerMcpError
 
 
 def _actual_route(tool_name: str) -> ActualRoute:
@@ -18,6 +20,18 @@ def _actual_route(tool_name: str) -> ActualRoute:
         tool_name=tool_name,
         tool_path=["investigation_orchestrator.evidence_runner", tool_name],
     )
+
+
+def _peer_route(tool_path: list[str]) -> ActualRoute:
+    return ActualRoute(
+        source_kind="peer_mcp",
+        mcp_server="kubernetes-mcp-server",
+        tool_name="resources_get",
+        tool_path=tool_path,
+    )
+
+
+_kubernetes_mcp_client = KubernetesMcpClient()
 
 
 def _workload_bundle(step: EvidenceStepContract) -> EvidenceBundle:
@@ -58,13 +72,36 @@ def _node_bundle(step: EvidenceStepContract) -> EvidenceBundle:
     )
 
 
+def _workload_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepArtifact:
+    snapshot = _kubernetes_mcp_client.collect_workload_runtime(step.execution_inputs)
+    return runtime_api.materialize_workload_submission(
+        step,
+        target=snapshot.target,
+        object_state=snapshot.object_state,
+        events=snapshot.events,
+        log_excerpt=snapshot.log_excerpt,
+        actual_route=_peer_route(snapshot.tool_path),
+        cluster_alias=snapshot.cluster_alias,
+        extra_limitations=snapshot.limitations,
+    )
+
+
+def _workload_submission_via_internal_fallback(step: EvidenceStepContract, reason: str) -> SubmittedStepArtifact:
+    bundle = _workload_bundle(step)
+    limitations = sorted(set([*bundle.limitations, f"peer workload MCP fallback: {reason}"]))
+    return SubmittedStepArtifact(
+        step_id=step.step_id,
+        evidence_bundle=bundle.model_copy(update={"limitations": limitations}),
+        actual_route=_actual_route("collect_workload_evidence"),
+    )
+
+
 def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact:
     if step.requested_capability == "workload_evidence_plane":
-        return SubmittedStepArtifact(
-            step_id=step.step_id,
-            evidence_bundle=_workload_bundle(step),
-            actual_route=_actual_route("collect_workload_evidence"),
-        )
+        try:
+            return _workload_submission_via_peer_mcp(step)
+        except PeerMcpError as exc:
+            return _workload_submission_via_internal_fallback(step, str(exc))
     if step.requested_capability == "service_evidence_plane":
         return SubmittedStepArtifact(
             step_id=step.step_id,

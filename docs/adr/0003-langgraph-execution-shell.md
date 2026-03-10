@@ -69,6 +69,17 @@ This means:
 - BYO LangGraph hosting through kagent is the preferred future deployment direction if hosted resumable execution proves worth the added operational complexity
 - that BYO move is a later deployment step, not the first architectural step
 
+This is intentionally a two-stage flexibility model:
+
+- near-term:
+  - reduce flexibility in the core happy path by moving orchestration into deterministic code
+  - do not return to prompt-owned raw MCP choreography for routine investigations
+- later:
+  - reintroduce richer execution flexibility through the LangGraph shell itself
+  - use graph nodes, bounded branches, retries, resume, and checkpointed state transitions as the controlled place where the runtime becomes more capable again
+
+So the expected place where the system becomes more flexible is not the prompt/tool surface. It is the future execution shell.
+
 LangGraph is not intended to become:
 
 - the owner of plan semantics
@@ -83,7 +94,55 @@ Instead, LangGraph should provide:
 - resumability
 - replay/debuggability
 - bounded retry/fallback behavior
+- richer controlled branching than the current bounded hand-written loop
 - a clean future path to BYO hosted execution
+
+This is the main future capability gain beyond the orchestration-core-first merge:
+
+- today, the orchestrator is intentionally narrow and mostly linear
+- later, the LangGraph shell is expected to become the place where more flexible investigation control lives
+  - continue or stop based on richer state
+  - resume a partially completed run
+  - branch to follow-up evidence batches with checkpointed state
+  - retry or degrade gracefully without returning to agent-improvised raw tool choreography
+
+## Intended Future Flexibility
+
+The desired future flexibility is:
+
+- graph-guided and state-aware
+- bounded by code-owned node and edge definitions
+- resumable through checkpointed execution state
+- capable of retries, fallback branches, and follow-up evidence passes
+
+The desired future flexibility is **not**:
+
+- reopening routine investigation flow to free-form raw MCP choreography in prompts
+- asking the model to re-materialize typed submission payloads ad hoc
+- treating graph state as a second semantic model beside `ReportingExecutionContext`
+
+Representative examples of the flexibility this ADR is working toward:
+
+1. **Conditional follow-up evidence**
+   - if workload evidence is weak but service context exists, branch to a service-evidence node
+   - otherwise stop and render from the current reconciled state
+
+2. **Bounded retry and degrade**
+   - if peer workload acquisition fails once, retry through a bounded edge
+   - if it still fails, record a blocked/fallback state and continue to a partial render instead of reopening prompt improvisation
+
+3. **Resume after interruption**
+   - if an investigation pauses after one batch, resume from the checkpointed node with the same `ReportingExecutionContext`
+   - do not rebuild the workflow from scratch or rely on the model to remember the prior handoff state
+
+4. **Follow-up investigations from prior state**
+   - if a user asks a follow-up question on an already running or recently completed investigation, re-enter from a graph node that already has the reconciled state and remaining budget
+   - do not force a completely fresh investigation unless policy requires it
+
+So the intended future flexibility is:
+
+- more branching and recovery at the execution-shell layer
+- not more freedom for the prompt layer to improvise the core runtime loop
 
 ## What Stays Product-Owned
 

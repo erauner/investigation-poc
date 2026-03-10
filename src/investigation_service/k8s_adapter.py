@@ -22,6 +22,8 @@ def resolve_target(namespace: str, target: str, cluster: ResolvedCluster | None 
             kind = "pod"
         elif normalized in ("deploy", "deployment", "deployments"):
             kind = "deployment"
+        elif normalized in ("sts", "statefulset", "statefulsets"):
+            kind = "statefulset"
         elif normalized in ("svc", "service", "services"):
             kind = "service"
         elif normalized in ("node", "nodes"):
@@ -36,6 +38,8 @@ def resolve_target(namespace: str, target: str, cluster: ResolvedCluster | None 
             return TargetRef(namespace=normalized_namespace, kind="pod", name=target)
         if _call_with_optional_cluster(_resource_exists, normalized_namespace, "deployment", target, cluster=cluster):
             return TargetRef(namespace=normalized_namespace, kind="deployment", name=target)
+        if _call_with_optional_cluster(_resource_exists, normalized_namespace, "statefulset", target, cluster=cluster):
+            return TargetRef(namespace=normalized_namespace, kind="statefulset", name=target)
         if _call_with_optional_cluster(_resource_exists, normalized_namespace, "service", target, cluster=cluster):
             return TargetRef(namespace=normalized_namespace, kind="service", name=target)
 
@@ -147,6 +151,8 @@ def resolve_runtime_target(target: TargetRef, cluster: ResolvedCluster | None = 
         return target
     if _call_with_optional_cluster(_resource_exists, target.namespace, "deployment", target.name, cluster=cluster):
         return TargetRef(namespace=target.namespace, kind="deployment", name=target.name)
+    if _call_with_optional_cluster(_resource_exists, target.namespace, "statefulset", target.name, cluster=cluster):
+        return TargetRef(namespace=target.namespace, kind="statefulset", name=target.name)
 
     matched_pod = _call_with_optional_cluster(_first_pod_with_prefix, target.namespace, target.name, cluster=cluster)
     if matched_pod:
@@ -185,19 +191,12 @@ def _container_status_details(spec_containers: list[dict], status_containers: li
     return details
 
 
-def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) -> dict:
-    args = ["get", target.kind, target.name, "-o", "json"]
-    if target.namespace:
-        args = ["-n", target.namespace, *args]
-    ok, output = _call_with_optional_cluster(_run_kubectl, args, cluster=cluster)
-    if not ok:
-        return {"error": output, "namespace": target.namespace, "kind": target.kind, "name": target.name}
-
-    try:
-        parsed = json.loads(output)
-    except json.JSONDecodeError:
-        return {"error": "invalid kubectl json", "raw": output[:400]}
-
+def normalize_k8s_object_payload(
+    parsed: dict,
+    target: TargetRef,
+    *,
+    runtime_pod: dict | None = None,
+) -> dict:
     metadata = parsed.get("metadata", {})
     status = parsed.get("status", {})
     spec = parsed.get("spec", {})
@@ -224,10 +223,34 @@ def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) ->
             spec.get("initContainers", []),
             status.get("initContainerStatuses", []) or [],
         )
-    if target.kind == "deployment" and target.namespace:
+    if target.kind in {"deployment", "statefulset"} and runtime_pod and not runtime_pod.get("error"):
+        response["runtimePod"] = runtime_pod
+    if target.kind == "node":
+        response["conditions"] = status.get("conditions", [])
+        response["allocatable"] = status.get("allocatable", {})
+        response["capacity"] = status.get("capacity", {})
+    return response
+
+
+def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) -> dict:
+    args = ["get", target.kind, target.name, "-o", "json"]
+    if target.namespace:
+        args = ["-n", target.namespace, *args]
+    ok, output = _call_with_optional_cluster(_run_kubectl, args, cluster=cluster)
+    if not ok:
+        return {"error": output, "namespace": target.namespace, "kind": target.kind, "name": target.name}
+
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return {"error": "invalid kubectl json", "raw": output[:400]}
+
+    response = normalize_k8s_object_payload(parsed, target)
+    if target.kind in {"deployment", "statefulset"} and target.namespace:
         runtime_pod_name = _call_with_optional_cluster(
-            _first_pod_for_deployment,
+            _first_pod_for_workload,
             target.namespace,
+            target.kind,
             target.name,
             cluster=cluster,
         )
@@ -235,11 +258,8 @@ def get_k8s_object(target: TargetRef, cluster: ResolvedCluster | None = None) ->
             runtime_target = TargetRef(namespace=target.namespace, kind="pod", name=runtime_pod_name)
             runtime_pod = get_k8s_object(runtime_target, cluster=cluster)
             if not runtime_pod.get("error"):
-                response["runtimePod"] = runtime_pod
+                response = normalize_k8s_object_payload(parsed, target, runtime_pod=runtime_pod)
     if target.kind == "node":
-        response["conditions"] = status.get("conditions", [])
-        response["allocatable"] = status.get("allocatable", {})
-        response["capacity"] = status.get("capacity", {})
         response["top_pods_by_memory_request"] = _top_pods_for_node(target.name, cluster=cluster)
     return response
 
@@ -563,11 +583,19 @@ def find_unhealthy_workloads(
 
 
 def get_related_events(target: TargetRef, limit: int = 20, cluster: ResolvedCluster | None = None) -> list[str]:
-    event_targets: list[tuple[str | None, str]] = [(target.kind.capitalize(), target.name)]
-    if target.kind == "deployment":
+    kind_map = {
+        "pod": "Pod",
+        "deployment": "Deployment",
+        "statefulset": "StatefulSet",
+        "service": "Service",
+        "node": "Node",
+    }
+    event_targets: list[tuple[str | None, str]] = [(kind_map.get(target.kind), target.name)]
+    if target.kind in {"deployment", "statefulset"}:
         pod_name = _call_with_optional_cluster(
-            _first_pod_for_deployment,
+            _first_pod_for_workload,
             target.namespace,
+            target.kind,
             target.name,
             cluster=cluster,
         )
@@ -604,14 +632,15 @@ def get_related_events(target: TargetRef, limit: int = 20, cluster: ResolvedClus
     return lines
 
 
-def _first_pod_for_deployment(
+def _first_pod_for_workload(
     namespace: str,
-    deployment_name: str,
+    workload_kind: str,
+    workload_name: str,
     cluster: ResolvedCluster | None = None,
 ) -> str | None:
     ok, deploy_json = _call_with_optional_cluster(
         _run_kubectl,
-        ["-n", namespace, "get", "deployment", deployment_name, "-o", "json"],
+        ["-n", namespace, "get", workload_kind, workload_name, "-o", "json"],
         cluster=cluster,
     )
     if not ok:
@@ -640,28 +669,84 @@ def _first_pod_for_deployment(
     except json.JSONDecodeError:
         return None
 
-    if not pod_list:
+    return pick_runtime_pod_for_workload(parsed, pod_list)
+
+
+def pick_runtime_pod_for_workload(workload_raw: dict, pods_raw: dict | list[dict]) -> str | None:
+    if not isinstance(workload_raw, dict):
         return None
-    return pod_list[0].get("metadata", {}).get("name")
+    if isinstance(pods_raw, dict):
+        items = pods_raw.get("pods") or pods_raw.get("items") or []
+    elif isinstance(pods_raw, list):
+        items = pods_raw
+    else:
+        items = []
+
+    workload_meta = workload_raw.get("metadata", {}) or {}
+    workload_name = workload_meta.get("name")
+    workload_kind = str(workload_raw.get("kind") or "").lower()
+    selector = workload_raw.get("spec", {}).get("selector", {}).get("matchLabels", {}) or {}
+    if not selector:
+        return None
+    selector_items = set(selector.items())
+
+    def _matches_selector(item: dict) -> bool:
+        labels = item.get("metadata", {}).get("labels", {}) or {}
+        return selector_items.issubset(set(labels.items()))
+
+    def _owner_hint_score(item: dict) -> int:
+        owner_refs = item.get("metadata", {}).get("ownerReferences", []) or []
+        if workload_kind == "deployment":
+            if any(
+                owner.get("kind") == "ReplicaSet"
+                and workload_name
+                and str(owner.get("name", "")).startswith(f"{workload_name}-")
+                for owner in owner_refs
+            ):
+                return 2
+        if workload_kind == "statefulset":
+            if any(
+                owner.get("kind") == "StatefulSet" and owner.get("name") == workload_name
+                for owner in owner_refs
+            ):
+                return 2
+        if any(owner.get("name") == workload_name for owner in owner_refs):
+            return 1
+        return 0
+
+    def _score(item: dict) -> tuple[int, str, str]:
+        metadata = item.get("metadata", {}) or {}
+        return (
+            _owner_hint_score(item),
+            metadata.get("creationTimestamp", "") or "",
+            metadata.get("name", "") or "",
+        )
+
+    candidates = [item for item in items if isinstance(item, dict) and _matches_selector(item)]
+    if not candidates:
+        return None
+    candidates.sort(key=_score, reverse=True)
+    return candidates[0].get("metadata", {}).get("name")
 
 
 def get_pod_logs(target: TargetRef, tail: int = 200, cluster: ResolvedCluster | None = None) -> str:
     if target.kind == "node":
         return "logs unavailable for node targets"
     pod_name = target.name
-    if target.kind == "deployment":
+    if target.kind in {"deployment", "statefulset"}:
         resolved = _call_with_optional_cluster(
-            _first_pod_for_deployment,
+            _first_pod_for_workload,
             target.namespace,
+            target.kind,
             target.name,
             cluster=cluster,
         )
         if not resolved:
-            return "no pod found for deployment"
+            return f"no pod found for {target.kind}"
         pod_name = resolved
 
-    if target.kind not in ("pod", "deployment"):
-        return "logs only supported for pod or deployment targets"
+    if target.kind not in ("pod", "deployment", "statefulset"):
+        return "logs only supported for pod, deployment, or statefulset targets"
 
     ok, output = _call_with_optional_cluster(
         _run_kubectl,

@@ -15,7 +15,7 @@ HandoffNextAction = Literal["submit_external_steps", "call_handoff_again", "rend
 
 class TargetRef(BaseModel):
     namespace: str | None = None
-    kind: Literal["pod", "deployment", "service", "node"]
+    kind: Literal["pod", "deployment", "statefulset", "service", "node"]
     name: str
 
 
