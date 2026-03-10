@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-enable-http-debug kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-metrics kind-validate-service-metrics kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
+.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-enable-http-debug kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-metrics kind-validate-service-metrics kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -166,6 +166,9 @@ kind-validate-metrics:
 
 kind-validate-service-metrics:
 	@./scripts/kind-validate-service-metrics.sh
+
+kind-validate-node:
+	@./scripts/kind-validate-node.sh
 
 kind-validate-operator:
 	@./scripts/kind-validate-operator.sh
