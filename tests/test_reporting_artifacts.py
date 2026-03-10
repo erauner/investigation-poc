@@ -212,7 +212,7 @@ def _alert_execution() -> EvidenceBatchExecution:
                 ),
                 route_provenance=StepRouteProvenance(
                     requested_capability="alert_evidence_plane",
-                    route_satisfaction="unmatched",
+                    route_satisfaction="preferred",
                     actual_route=ActualRoute(
                         source_kind="investigation_internal",
                         mcp_server="investigation-mcp-server",

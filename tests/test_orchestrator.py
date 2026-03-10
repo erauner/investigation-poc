@@ -187,10 +187,10 @@ def test_run_orchestrated_investigation_advances_and_renders(monkeypatch) -> Non
             SubmittedStepArtifact(
                 step_id="collect-target-evidence",
                 actual_route={
-                    "source_kind": "investigation_internal",
-                    "mcp_server": "investigation-mcp-server",
-                    "tool_name": "collect_workload_evidence",
-                    "tool_path": ["investigation_orchestrator.evidence_runner", "collect_workload_evidence"],
+                    "source_kind": "peer_mcp",
+                    "mcp_server": "kubernetes-mcp-server",
+                    "tool_name": "pods_log",
+                    "tool_path": ["kubernetes-mcp-server", "pods_log"],
                 },
                 evidence_bundle={
                     "cluster": "erauner-home",

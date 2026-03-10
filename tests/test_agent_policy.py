@@ -142,6 +142,7 @@ def test_agent_manifest_tool_catalog_is_subset_of_exported_mcp_tools() -> None:
     exported_tools = set(mcp_server.mcp._tool_manager._tools.keys())
 
     assert set(investigation_tools) <= exported_tools
+    assert "normalize_alert_input" not in exported_tools
 
 
 def test_execution_policy_preferred_tool_names_are_backed_by_manifest_catalogs() -> None:

@@ -5,7 +5,6 @@ from .models import (
     AdvanceInvestigationRuntimeRequest,
     AdvanceInvestigationRuntimeResponse,
     BuildInvestigationPlanRequest,
-    CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
     CorrelatedChangesResponse,
     EvidenceBatchExecution,
@@ -44,7 +43,6 @@ from investigation_orchestrator.entrypoint import run_orchestrated_investigation
 from .tools import (
     find_unhealthy_pod,
     find_unhealthy_workloads,
-    normalize_alert_input,
 )
 
 app = FastAPI(title="Investigation Service", version="0.2.0")
@@ -53,11 +51,6 @@ app = FastAPI(title="Investigation Service", version="0.2.0")
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok"}
-
-
-@app.post("/tools/normalize_alert_input")
-def normalize_alert(req: CollectAlertContextRequest) -> dict:
-    return normalize_alert_input(req).model_dump(mode="json")
 
 
 @app.post("/tools/resolve_primary_target", response_model=InvestigationTarget)

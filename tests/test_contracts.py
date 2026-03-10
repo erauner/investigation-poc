@@ -836,16 +836,7 @@ def test_normalize_alert_input_accepts_explicit_node_name() -> None:
     assert normalized.node_name == "worker3"
 
 
-def test_normalize_alert_route_returns_normalized_request(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "investigation_service.main.normalize_alert_input",
-        lambda _req: normalize_alert_input(
-            CollectAlertContextRequest(
-                alertname="NodeHighMemoryAllocation",
-                node_name="worker3",
-            )
-        ),
-    )
+def test_normalize_alert_route_is_not_public() -> None:
     client = TestClient(app)
 
     response = client.post(
@@ -853,10 +844,7 @@ def test_normalize_alert_route_returns_normalized_request(monkeypatch) -> None:
         json={"alertname": "NodeHighMemoryAllocation", "node_name": "worker3"},
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["scope"] == "node"
-    assert body["target"] == "node/worker3"
+    assert response.status_code == 404
 
 
 def test_resolve_primary_target_route_returns_target_artifact(monkeypatch) -> None:

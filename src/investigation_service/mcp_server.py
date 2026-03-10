@@ -6,7 +6,6 @@ from .mcp_logging import run_logged_tool
 from .models import (
     AdvanceInvestigationRuntimeRequest,
     BuildInvestigationPlanRequest,
-    CollectAlertContextRequest,
     CollectCorrelatedChangesRequest,
     CollectContextRequest,
     CollectNodeContextRequest,
@@ -35,7 +34,6 @@ from .reporting import update_investigation_plan as update_investigation_plan_im
 from investigation_orchestrator.entrypoint import run_orchestrated_investigation as run_orchestrated_investigation_impl
 from .tools import find_unhealthy_pod as find_unhealthy_pod_impl
 from .tools import find_unhealthy_workloads as find_unhealthy_workloads_impl
-from .tools import normalize_alert_input as normalize_alert_input_impl
 
 mcp = FastMCP(
     "investigation-mcp-server",
@@ -43,51 +41,6 @@ mcp = FastMCP(
     port=int(os.getenv("MCP_PORT", "8001")),
     streamable_http_path=os.getenv("MCP_PATH", "/mcp"),
 )
-
-
-@mcp.tool()
-def normalize_alert_input(
-    alertname: str,
-    labels: dict[str, str] | None = None,
-    annotations: dict[str, str] | None = None,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    node_name: str | None = None,
-    target: str | None = None,
-    profile: str = "workload",
-    service_name: str | None = None,
-    lookback_minutes: int = 15,
-) -> dict:
-    """Normalize alert-shaped input into a typed investigation request without collecting data. Use mainly for debugging or explicit routing inspection."""
-    return run_logged_tool(
-        "normalize_alert_input",
-        {
-            "alertname": alertname,
-            "labels": labels or {},
-            "annotations": annotations or {},
-            "cluster": cluster,
-            "namespace": namespace,
-            "node_name": node_name,
-            "target": target,
-            "profile": profile,
-            "service_name": service_name,
-            "lookback_minutes": lookback_minutes,
-        },
-        lambda: normalize_alert_input_impl(
-            CollectAlertContextRequest(
-                alertname=alertname,
-                labels=labels or {},
-                annotations=annotations or {},
-                cluster=cluster,
-                namespace=namespace,
-                node_name=node_name,
-                target=target,
-                profile=profile,
-                service_name=service_name,
-                lookback_minutes=lookback_minutes,
-            )
-        ).model_dump(mode="json")
-    )
 
 
 @mcp.tool()

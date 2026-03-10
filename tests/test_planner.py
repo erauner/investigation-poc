@@ -290,7 +290,7 @@ def test_execute_investigation_step_runs_alert_batch_from_alert_input() -> None:
     ]
     assert execution.artifacts[0].route_provenance is not None
     assert execution.artifacts[0].route_provenance.requested_capability == "alert_evidence_plane"
-    assert execution.artifacts[0].route_provenance.route_satisfaction == "unmatched"
+    assert execution.artifacts[0].route_provenance.route_satisfaction == "preferred"
     assert execution.artifacts[0].route_provenance.actual_route.tool_name == "collect_alert_evidence"
     assert execution.artifacts[1].route_provenance is not None
     assert execution.artifacts[1].route_provenance.requested_capability == "workload_evidence_plane"

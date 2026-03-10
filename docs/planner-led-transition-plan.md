@@ -85,8 +85,8 @@ These should stop being part of the intentional kagent tool vocabulary as Slice 
 - `collect_service_context`
 - `collect_node_context`
 - `collect_alert_context`
-- likely `normalize_alert_input`
-- likely `normalize_incident_input`
+- `normalize_alert_input` should remain internal-only and no longer be part of the public helper surface
+- `normalize_incident_input` should remain internal-only rather than part of the public helper surface
 
 These may remain reachable at the MCP or HTTP layer briefly during transition, but they should not be taught as canonical tools once the planner-led path is the intended runtime model.
 
@@ -668,6 +668,7 @@ Once the peer evidence-plane servers are the normal path, the next cleanup shoul
 Remove from the intentional public/agent contract:
 
 - `normalize_incident_input`
+- `normalize_alert_input`
 - `collect_workload_evidence`
 - `collect_service_evidence`
 - `collect_node_evidence`
