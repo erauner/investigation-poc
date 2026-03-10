@@ -663,3 +663,45 @@ def test_internal_graph_runner_rejects_checkpointer_without_explicit_thread_id(m
             ),
             checkpointer=create_in_memory_checkpointer(),
         )
+
+
+def test_internal_graph_runner_rejects_empty_thread_id_with_checkpointer(monkeypatch) -> None:
+    incident = _incident()
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context(active_batch_id=None))
+    monkeypatch.setattr(
+        entrypoint,
+        "render_report",
+        lambda *_args, **_kwargs: InvestigationReport(
+            cluster="erauner-home",
+            scope="workload",
+            target="deployment/crashy",
+            diagnosis="Crash Loop Detected",
+            confidence="high",
+            evidence=["evidence"],
+            evidence_items=[],
+            related_data=[],
+            related_data_note="No meaningful correlated changes found in the requested time window.",
+            limitations=[],
+            recommended_next_step="next",
+            suggested_follow_ups=[],
+            guidelines=[],
+            normalization_notes=[],
+            tool_path_trace=None,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="thread_id is required"):
+        entrypoint._run_orchestrated_investigation_graph(
+            InvestigationReportRequest(
+                cluster=incident.cluster,
+                namespace=incident.namespace,
+                target=incident.target,
+                profile=incident.profile,
+                lookback_minutes=incident.lookback_minutes,
+                alertname=incident.alertname,
+                labels=incident.labels,
+                annotations=incident.annotations,
+            ),
+            checkpointer=create_in_memory_checkpointer(),
+            checkpoint_config=GraphCheckpointConfig(),
+        )
