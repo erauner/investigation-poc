@@ -911,6 +911,48 @@ def test_advance_active_evidence_batch_preserves_node_peer_failure_provenance() 
     assert "kubernetes peer fallback failed: kube down" in result.execution.execution_notes
 
 
+def test_advance_active_evidence_batch_still_rejects_node_batch_without_attempt_metadata() -> None:
+    deps = _deps([])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "scope_from_target": lambda target, profile: "node",
+        }
+    )
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(target="node/worker3", profile="workload", node_name="worker3"),
+        deps,
+    )
+
+    with pytest.raises(ValueError, match="step collect-target-evidence requires evidence_bundle payload"):
+        advance_active_evidence_batch(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(target="node/worker3", profile="workload", node_name="worker3"),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="prometheus-mcp-server",
+                        tool_name=None,
+                        tool_path=["prometheus-mcp-server"],
+                    ),
+                    attempted_routes=[
+                        ActualRoute(
+                            source_kind="peer_mcp",
+                            mcp_server="prometheus-mcp-server",
+                            tool_name=None,
+                            tool_path=["prometheus-mcp-server"],
+                        )
+                    ],
+                    limitations=[],
+                )
+            ],
+            batch_id="batch-1",
+            deps=deps,
+        )
+
+
 def test_update_investigation_plan_unlocks_analysis_after_first_batch() -> None:
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),

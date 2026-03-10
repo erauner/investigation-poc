@@ -290,7 +290,7 @@ def advance_investigation_runtime(
     - metadata-only workload submissions are accepted here when peer MCP workload collection was attempted but failed
     - metadata-only service submissions are accepted here when peer MCP service collection was attempted but failed
     - metadata-only node submissions are accepted here when peer MCP node collection was attempted but failed
-    - include step_id, actual_route for the attempted peer route, and limitations describing the failure
+    - include step_id, peer-attempt route metadata, and limitations describing the failure
     - service/node peer-failure submissions may also include attempted_routes to preserve multiple failed peer attempts
     - omit evidence_bundle so planner-owned bounded fallback can execute for that workload/service/node step
 
