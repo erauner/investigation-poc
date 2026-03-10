@@ -168,6 +168,41 @@ def test_build_investigation_plan_sets_metrics_first_policy_for_service_targets(
     assert target_step.fallback_tool_names == ["resources_get", "events_list"]
 
 
+def test_build_investigation_plan_keeps_alert_step_internal_only_in_public_metadata() -> None:
+    deps = _deps([])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "normalize_alert_input": lambda req: NormalizedInvestigationRequest(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace=req.namespace,
+                target=req.target or "pod/api",
+                profile=req.profile,
+                lookback_minutes=req.lookback_minutes,
+                normalization_notes=["alertname=PodCrashLooping"],
+            ),
+        }
+    )
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(
+            alertname="PodCrashLooping",
+            namespace="default",
+            target="pod/api",
+        ),
+        deps,
+    )
+
+    alert_step = next(step for step in plan.steps if step.id == "collect-alert-evidence")
+
+    assert alert_step.suggested_capability == "alert_evidence_plane"
+    assert alert_step.preferred_mcp_server is None
+    assert alert_step.preferred_tool_names == []
+    assert alert_step.fallback_mcp_server is None
+    assert alert_step.fallback_tool_names == []
+
+
 def test_build_investigation_plan_resolves_convenience_targets_before_plan_construction() -> None:
     calls: list[str] = []
     deps = _deps(calls)
@@ -290,7 +325,7 @@ def test_execute_investigation_step_runs_alert_batch_from_alert_input() -> None:
     ]
     assert execution.artifacts[0].route_provenance is not None
     assert execution.artifacts[0].route_provenance.requested_capability == "alert_evidence_plane"
-    assert execution.artifacts[0].route_provenance.route_satisfaction == "preferred"
+    assert execution.artifacts[0].route_provenance.route_satisfaction == "not_applicable"
     assert execution.artifacts[0].route_provenance.actual_route.tool_name == "collect_alert_evidence"
     assert execution.artifacts[1].route_provenance is not None
     assert execution.artifacts[1].route_provenance.requested_capability == "workload_evidence_plane"

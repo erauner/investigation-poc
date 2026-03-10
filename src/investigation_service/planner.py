@@ -505,6 +505,14 @@ def _route_satisfaction(step: PlanStep, actual_route: ActualRoute) -> str:
         return "not_applicable"
 
     if (
+        step.preferred_mcp_server is None
+        and not step.preferred_tool_names
+        and step.fallback_mcp_server is None
+        and not step.fallback_tool_names
+    ):
+        return "not_applicable"
+
+    if (
         actual_route.mcp_server == step.preferred_mcp_server
         and actual_route.tool_name in step.preferred_tool_names
     ):
