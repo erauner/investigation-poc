@@ -206,8 +206,8 @@ The intended sequence after the orchestration-core-first merge is:
    - keep Kubernetes enrichment or fallback explicit where still needed
 
 3. node peer-MCP transport
-   - apply the same transport split to node evidence
-   - keep planner/reconciler semantics unchanged
+   - completed: node evidence now follows the same peer-attempt plus planner-owned bounded fallback split as workload and service
+   - planner/reconciler semantics remain unchanged
 
 4. runtime seam cleanup
    - keep `investigation_orchestrator.control_plane` as the orchestrator-side runtime adapter

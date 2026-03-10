@@ -527,6 +527,75 @@ def test_submit_evidence_step_artifacts_route_rejects_metadata_only_service_subm
     assert "requires evidence_bundle payload" in response.json()["detail"]
 
 
+def test_submit_evidence_step_artifacts_route_rejects_metadata_only_node_submission(monkeypatch) -> None:
+    def fake_submit(_req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
+        assert isinstance(_req.submitted_steps[0], SubmittedStepArtifact)
+        assert [route.tool_path for route in _req.submitted_steps[0].attempted_routes] == [
+            ["prometheus-mcp-server"],
+            ["kubernetes-mcp-server"],
+        ]
+        raise HTTPException(status_code=400, detail="step collect-target-evidence requires evidence_bundle payload")
+
+    monkeypatch.setattr("investigation_service.main.submit_evidence_step_artifacts_from_request", fake_submit)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/submit_evidence_step_artifacts",
+        json={
+            "plan": {
+                "mode": "targeted_rca",
+                "objective": "Investigate node/worker3",
+                "target": {
+                    "source": "manual",
+                    "scope": "node",
+                    "cluster": "test-cluster",
+                    "namespace": None,
+                    "requested_target": "node/worker3",
+                    "target": "node/worker3",
+                    "node_name": "worker3",
+                    "profile": "workload",
+                    "lookback_minutes": 15,
+                    "normalization_notes": [],
+                },
+                "steps": [],
+                "evidence_batches": [],
+                "active_batch_id": "batch-1",
+                "planning_notes": [],
+            },
+            "incident": {"target": "node/worker3", "profile": "workload", "node_name": "worker3"},
+            "submitted_steps": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "actual_route": {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "prometheus-mcp-server",
+                        "tool_name": None,
+                        "tool_path": ["prometheus-mcp-server"],
+                    },
+                    "attempted_routes": [
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "prometheus-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["prometheus-mcp-server"],
+                        },
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "kubernetes-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["kubernetes-mcp-server"],
+                        },
+                    ],
+                    "limitations": ["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "requires evidence_bundle payload" in response.json()["detail"]
+
+
 def test_update_investigation_plan_route_returns_plan(monkeypatch) -> None:
     monkeypatch.setattr(
         "investigation_service.main.update_investigation_plan_from_request",
@@ -1307,6 +1376,106 @@ def test_advance_investigation_runtime_route_accepts_metadata_only_service_submi
     assert response.json()["execution_context"]["allow_bounded_fallback_execution"] is False
 
 
+def test_advance_investigation_runtime_route_accepts_metadata_only_node_submission(monkeypatch) -> None:
+    captured = {}
+
+    def fake_advance(req: AdvanceInvestigationRuntimeRequest) -> AdvanceInvestigationRuntimeResponse:
+        captured["request"] = req
+        return AdvanceInvestigationRuntimeResponse(
+            execution_context={
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate node/worker3",
+                    "target": {
+                        "source": "manual",
+                        "scope": "node",
+                        "cluster": "test-cluster",
+                        "namespace": None,
+                        "requested_target": "node/worker3",
+                        "target": "node/worker3",
+                        "node_name": "worker3",
+                        "profile": "workload",
+                        "lookback_minutes": 15,
+                        "normalization_notes": [],
+                    },
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": False,
+            },
+            next_active_batch=None,
+        )
+
+    monkeypatch.setattr("investigation_service.main.advance_investigation_runtime_from_request", fake_advance)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/advance_investigation_runtime",
+        json={
+            "incident": {"target": "node/worker3", "profile": "workload", "node_name": "worker3"},
+            "execution_context": {
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate node/worker3",
+                    "target": {
+                        "source": "manual",
+                        "scope": "node",
+                        "cluster": "test-cluster",
+                        "namespace": None,
+                        "requested_target": "node/worker3",
+                        "target": "node/worker3",
+                        "node_name": "worker3",
+                        "profile": "workload",
+                        "lookback_minutes": 15,
+                        "normalization_notes": [],
+                    },
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": True,
+            },
+            "submitted_steps": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "actual_route": {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "prometheus-mcp-server",
+                        "tool_name": None,
+                        "tool_path": ["prometheus-mcp-server"],
+                    },
+                    "attempted_routes": [
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "prometheus-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["prometheus-mcp-server"],
+                        },
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "kubernetes-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["kubernetes-mcp-server"],
+                        },
+                    ],
+                    "limitations": ["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert isinstance(captured["request"].submitted_steps[0], SubmittedStepArtifact)
+    assert [route.mcp_server for route in captured["request"].submitted_steps[0].attempted_routes] == [
+        "prometheus-mcp-server",
+        "kubernetes-mcp-server",
+    ]
+    assert response.json()["execution_context"]["allow_bounded_fallback_execution"] is False
+
+
 def test_handoff_active_evidence_batch_route_returns_actionable_batch_and_context(monkeypatch) -> None:
     captured = {}
 
@@ -1445,6 +1614,76 @@ def test_handoff_active_evidence_batch_route_accepts_service_attempted_routes(mo
         "/tools/handoff_active_evidence_batch",
         json={
             "incident": {"namespace": "default", "target": "service/api", "profile": "service", "service_name": "api"},
+            "submitted_steps": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "actual_route": {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "prometheus-mcp-server",
+                        "tool_name": None,
+                        "tool_path": ["prometheus-mcp-server"],
+                    },
+                    "attempted_routes": [
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "prometheus-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["prometheus-mcp-server"],
+                        },
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "kubernetes-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["kubernetes-mcp-server"],
+                        },
+                    ],
+                    "limitations": ["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert isinstance(captured["request"].submitted_steps[0], SubmittedStepArtifact)
+    assert [route.tool_path for route in captured["request"].submitted_steps[0].attempted_routes] == [
+        ["prometheus-mcp-server"],
+        ["kubernetes-mcp-server"],
+    ]
+
+
+def test_handoff_active_evidence_batch_route_accepts_node_attempted_routes(monkeypatch) -> None:
+    captured = {}
+
+    def fake_handoff(req: HandoffActiveEvidenceBatchRequest) -> HandoffActiveEvidenceBatchResponse:
+        captured["request"] = req
+        return HandoffActiveEvidenceBatchResponse(
+            execution_context={
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate node/worker3",
+                    "target": None,
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": False,
+            },
+            handoff_token="opaque-handoff-token",
+            active_batch=None,
+            execution=None,
+            handoff_status="ready_for_next_handoff",
+            next_action="call_handoff_again",
+            required_external_step_ids=[],
+        )
+
+    monkeypatch.setattr("investigation_service.main.handoff_active_evidence_batch_from_request", fake_handoff)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/handoff_active_evidence_batch",
+        json={
+            "incident": {"target": "node/worker3", "profile": "workload", "node_name": "worker3"},
             "submitted_steps": [
                 {
                     "step_id": "collect-target-evidence",

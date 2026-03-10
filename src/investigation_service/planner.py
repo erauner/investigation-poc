@@ -731,13 +731,22 @@ def _attempt_only_peer_submission(
     step: PlanStep,
     submission: SubmittedStepArtifact,
 ) -> bool:
-    if step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane"}:
+    if step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}:
         return False
+    allowed_servers = {
+        server
+        for server in (step.preferred_mcp_server, step.fallback_mcp_server)
+        if server
+    }
+    routes = [submission.actual_route, *submission.attempted_routes]
     return (
         submission.evidence_bundle is None
         and submission.change_candidates is None
+        and bool(submission.limitations)
         and submission.actual_route.source_kind == "peer_mcp"
         and bool(submission.actual_route.mcp_server)
+        and all(route.source_kind == "peer_mcp" and bool(route.mcp_server) for route in routes)
+        and all(route.mcp_server in allowed_servers for route in routes)
     )
 
 
@@ -892,7 +901,7 @@ def advance_active_evidence_batch(
         for step in remaining_steps
         if _runtime_spec(step).execution_mode != "control_plane_only"
         and (
-            step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane"}
+            step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}
             or step.id not in attempted_peer_submissions
         )
     ]

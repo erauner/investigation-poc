@@ -833,6 +833,126 @@ def test_advance_active_evidence_batch_preserves_service_peer_failure_provenance
     assert "kubernetes peer fallback failed: kube down" in result.execution.execution_notes
 
 
+def test_advance_active_evidence_batch_preserves_node_peer_failure_provenance() -> None:
+    calls: list[str] = []
+    deps = _deps(calls)
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "scope_from_target": lambda target, profile: "node",
+        }
+    )
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(target="node/worker3", profile="workload", node_name="worker3"),
+        deps,
+    )
+
+    result = advance_active_evidence_batch(
+        plan=plan,
+        incident=BuildInvestigationPlanRequest(target="node/worker3", profile="workload", node_name="worker3"),
+        submitted_steps=[
+            SubmittedStepArtifact(
+                step_id="collect-target-evidence",
+                actual_route=ActualRoute(
+                    source_kind="peer_mcp",
+                    mcp_server="prometheus-mcp-server",
+                    tool_name=None,
+                    tool_path=["prometheus-mcp-server"],
+                ),
+                attempted_routes=[
+                    ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="prometheus-mcp-server",
+                        tool_name=None,
+                        tool_path=["prometheus-mcp-server"],
+                    ),
+                    ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="kubernetes-mcp-server",
+                        tool_name=None,
+                        tool_path=["kubernetes-mcp-server"],
+                    ),
+                ],
+                limitations=["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
+            )
+        ],
+        batch_id="batch-1",
+        deps=deps,
+    )
+
+    artifact = next(item for item in result.execution.artifacts if item.step_id == "collect-target-evidence")
+    assert artifact.route_provenance == StepRouteProvenance(
+        requested_capability="node_evidence_plane",
+        route_satisfaction="unmatched",
+        actual_route=ActualRoute(
+            source_kind="investigation_internal",
+            mcp_server="investigation-mcp-server",
+            tool_name="collect_node_evidence",
+            tool_path=["planner._execute_step", "deps.collect_node_evidence"],
+        ),
+        attempted_routes=[
+            ActualRoute(
+                source_kind="peer_mcp",
+                mcp_server="prometheus-mcp-server",
+                tool_name=None,
+                tool_path=["prometheus-mcp-server"],
+            ),
+            ActualRoute(
+                source_kind="peer_mcp",
+                mcp_server="kubernetes-mcp-server",
+                tool_name=None,
+                tool_path=["kubernetes-mcp-server"],
+            ),
+        ],
+    )
+    assert "prometheus peer failed: prom down" in artifact.limitations
+    assert "kubernetes peer fallback failed: kube down" in artifact.limitations
+    assert "prometheus peer failed: prom down" in result.execution.execution_notes
+    assert "kubernetes peer fallback failed: kube down" in result.execution.execution_notes
+
+
+def test_advance_active_evidence_batch_still_rejects_node_batch_without_attempt_metadata() -> None:
+    deps = _deps([])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "scope_from_target": lambda target, profile: "node",
+        }
+    )
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(target="node/worker3", profile="workload", node_name="worker3"),
+        deps,
+    )
+
+    with pytest.raises(ValueError, match="step collect-target-evidence requires evidence_bundle payload"):
+        advance_active_evidence_batch(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(target="node/worker3", profile="workload", node_name="worker3"),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="prometheus-mcp-server",
+                        tool_name=None,
+                        tool_path=["prometheus-mcp-server"],
+                    ),
+                    attempted_routes=[
+                        ActualRoute(
+                            source_kind="peer_mcp",
+                            mcp_server="prometheus-mcp-server",
+                            tool_name=None,
+                            tool_path=["prometheus-mcp-server"],
+                        )
+                    ],
+                    limitations=[],
+                )
+            ],
+            batch_id="batch-1",
+            deps=deps,
+        )
+
+
 def test_update_investigation_plan_unlocks_analysis_after_first_batch() -> None:
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
