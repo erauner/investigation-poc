@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 import pytest
 
 from investigation_service.analysis import derive_findings
@@ -33,6 +34,7 @@ from investigation_service.models import (
     InvestigationTarget,
     SubmitEvidenceArtifactsRequest,
     SubmittedEvidenceReconciliationResult,
+    SubmittedStepArtifact,
     StepArtifact,
     StepRouteProvenance,
     TargetRef,
@@ -454,6 +456,75 @@ def test_submit_evidence_step_artifacts_route_returns_execution_and_updated_plan
     assert body["execution"]["batch_id"] == "batch-1"
     assert body["execution"]["executed_step_ids"] == ["collect-target-evidence"]
     assert body["updated_plan"]["active_batch_id"] == "batch-1"
+
+
+def test_submit_evidence_step_artifacts_route_rejects_metadata_only_service_submission(monkeypatch) -> None:
+    def fake_submit(_req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
+        assert isinstance(_req.submitted_steps[0], SubmittedStepArtifact)
+        assert [route.tool_path for route in _req.submitted_steps[0].attempted_routes] == [
+            ["prometheus-mcp-server"],
+            ["kubernetes-mcp-server"],
+        ]
+        raise HTTPException(status_code=400, detail="step collect-target-evidence requires evidence_bundle payload")
+
+    monkeypatch.setattr("investigation_service.main.submit_evidence_step_artifacts_from_request", fake_submit)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/submit_evidence_step_artifacts",
+        json={
+            "plan": {
+                "mode": "targeted_rca",
+                "objective": "Investigate service/api",
+                "target": {
+                    "source": "manual",
+                    "scope": "service",
+                    "cluster": "test-cluster",
+                    "namespace": "default",
+                    "requested_target": "service/api",
+                    "target": "service/api",
+                    "service_name": "api",
+                    "profile": "service",
+                    "lookback_minutes": 15,
+                    "normalization_notes": [],
+                },
+                "steps": [],
+                "evidence_batches": [],
+                "active_batch_id": "batch-1",
+                "planning_notes": [],
+            },
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service", "service_name": "api"},
+            "submitted_steps": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "actual_route": {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "prometheus-mcp-server",
+                        "tool_name": None,
+                        "tool_path": ["prometheus-mcp-server"],
+                    },
+                    "attempted_routes": [
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "prometheus-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["prometheus-mcp-server"],
+                        },
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "kubernetes-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["kubernetes-mcp-server"],
+                        },
+                    ],
+                    "limitations": ["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "requires evidence_bundle payload" in response.json()["detail"]
 
 
 def test_update_investigation_plan_route_returns_plan(monkeypatch) -> None:
@@ -1136,6 +1207,106 @@ def test_advance_investigation_runtime_route_returns_execution_context(monkeypat
     assert response.json()["execution_context"]["allow_bounded_fallback_execution"] is False
 
 
+def test_advance_investigation_runtime_route_accepts_metadata_only_service_submission(monkeypatch) -> None:
+    captured = {}
+
+    def fake_advance(req: AdvanceInvestigationRuntimeRequest) -> AdvanceInvestigationRuntimeResponse:
+        captured["request"] = req
+        return AdvanceInvestigationRuntimeResponse(
+            execution_context={
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": {
+                        "source": "manual",
+                        "scope": "service",
+                        "cluster": "test-cluster",
+                        "namespace": "default",
+                        "requested_target": "service/api",
+                        "target": "service/api",
+                        "service_name": "api",
+                        "profile": "service",
+                        "lookback_minutes": 15,
+                        "normalization_notes": [],
+                    },
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": False,
+            },
+            next_active_batch=None,
+        )
+
+    monkeypatch.setattr("investigation_service.main.advance_investigation_runtime_from_request", fake_advance)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/advance_investigation_runtime",
+        json={
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service", "service_name": "api"},
+            "execution_context": {
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": {
+                        "source": "manual",
+                        "scope": "service",
+                        "cluster": "test-cluster",
+                        "namespace": "default",
+                        "requested_target": "service/api",
+                        "target": "service/api",
+                        "service_name": "api",
+                        "profile": "service",
+                        "lookback_minutes": 15,
+                        "normalization_notes": [],
+                    },
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": True,
+            },
+            "submitted_steps": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "actual_route": {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "prometheus-mcp-server",
+                        "tool_name": None,
+                        "tool_path": ["prometheus-mcp-server"],
+                    },
+                    "attempted_routes": [
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "prometheus-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["prometheus-mcp-server"],
+                        },
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "kubernetes-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["kubernetes-mcp-server"],
+                        },
+                    ],
+                    "limitations": ["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert isinstance(captured["request"].submitted_steps[0], SubmittedStepArtifact)
+    assert [route.mcp_server for route in captured["request"].submitted_steps[0].attempted_routes] == [
+        "prometheus-mcp-server",
+        "kubernetes-mcp-server",
+    ]
+    assert response.json()["execution_context"]["allow_bounded_fallback_execution"] is False
+
+
 def test_handoff_active_evidence_batch_route_returns_actionable_batch_and_context(monkeypatch) -> None:
     captured = {}
 
@@ -1239,6 +1410,76 @@ def test_handoff_active_evidence_batch_route_returns_actionable_batch_and_contex
     assert response.json()["handoff_status"] == "awaiting_external_submission"
     assert response.json()["next_action"] == "submit_external_steps"
     assert response.json()["required_external_step_ids"] == ["collect-target-evidence"]
+
+
+def test_handoff_active_evidence_batch_route_accepts_service_attempted_routes(monkeypatch) -> None:
+    captured = {}
+
+    def fake_handoff(req: HandoffActiveEvidenceBatchRequest) -> HandoffActiveEvidenceBatchResponse:
+        captured["request"] = req
+        return HandoffActiveEvidenceBatchResponse(
+            execution_context={
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": None,
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": False,
+            },
+            handoff_token="opaque-handoff-token",
+            active_batch=None,
+            execution=None,
+            handoff_status="ready_for_next_handoff",
+            next_action="call_handoff_again",
+            required_external_step_ids=[],
+        )
+
+    monkeypatch.setattr("investigation_service.main.handoff_active_evidence_batch_from_request", fake_handoff)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/handoff_active_evidence_batch",
+        json={
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service", "service_name": "api"},
+            "submitted_steps": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "actual_route": {
+                        "source_kind": "peer_mcp",
+                        "mcp_server": "prometheus-mcp-server",
+                        "tool_name": None,
+                        "tool_path": ["prometheus-mcp-server"],
+                    },
+                    "attempted_routes": [
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "prometheus-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["prometheus-mcp-server"],
+                        },
+                        {
+                            "source_kind": "peer_mcp",
+                            "mcp_server": "kubernetes-mcp-server",
+                            "tool_name": None,
+                            "tool_path": ["kubernetes-mcp-server"],
+                        },
+                    ],
+                    "limitations": ["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert isinstance(captured["request"].submitted_steps[0], SubmittedStepArtifact)
+    assert [route.tool_path for route in captured["request"].submitted_steps[0].attempted_routes] == [
+        ["prometheus-mcp-server"],
+        ["kubernetes-mcp-server"],
+    ]
 
 
 def test_run_orchestrated_investigation_route_returns_typed_report(monkeypatch) -> None:

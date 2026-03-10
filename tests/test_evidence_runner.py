@@ -260,6 +260,49 @@ def test_service_external_step_uses_kubernetes_peer_fallback_when_prometheus_is_
     assert "prometheus unavailable or returned no usable results" in artifact.evidence_bundle.limitations
 
 
+def test_service_external_step_uses_kubernetes_peer_when_prometheus_hard_fails(monkeypatch) -> None:
+    step = _service_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: (_ for _ in ()).throw(PeerMcpError("prom down"))
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=["runtime data limited to namespace scope"],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
+    assert artifact.actual_route.tool_path == ["kubernetes-mcp-server", "resources_get", "events_list"]
+    assert [route.mcp_server for route in artifact.attempted_routes] == ["prometheus-mcp-server"]
+    assert artifact.attempted_routes[0].tool_path == ["prometheus-mcp-server"]
+    assert artifact.evidence_bundle is not None
+    assert "prometheus peer failed: prom down" in artifact.evidence_bundle.limitations
+    assert "runtime data limited to namespace scope" in artifact.evidence_bundle.limitations
+
+
 def test_service_external_step_records_failed_peer_attempts_for_downstream_fallback(monkeypatch) -> None:
     step = _service_step()
     monkeypatch.setattr(

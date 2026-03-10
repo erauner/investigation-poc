@@ -387,6 +387,7 @@ def test_run_orchestrated_investigation_forwards_workload_peer_failure_metadata(
     assert captured["submitted"] is not None
     assert captured["submitted"][0].actual_route.mcp_server == "kubernetes-mcp-server"
     assert "peer workload MCP attempt failed: peer unavailable" in captured["submitted"][0].limitations
+    assert report.target == "pod/crashy-abc123"
 
 
 def test_run_orchestrated_investigation_forwards_service_peer_failure_metadata(monkeypatch) -> None:

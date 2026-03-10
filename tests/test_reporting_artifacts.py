@@ -1266,5 +1266,9 @@ def test_service_peer_failure_provenance_flows_into_rendered_report(monkeypatch)
         "prometheus-mcp-server",
         "kubernetes-mcp-server",
     ]
+    assert [route.tool_path for route in trace.provenance.attempted_routes] == [
+        ["prometheus-mcp-server"],
+        ["kubernetes-mcp-server"],
+    ]
     assert "prometheus peer failed: prom down" in report.limitations
     assert "kubernetes peer fallback failed: kube down" in report.limitations
