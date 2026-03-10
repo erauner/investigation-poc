@@ -246,6 +246,29 @@ def test_build_shadow_app_enables_thread_dump_when_requested(monkeypatch) -> Non
     assert "/thread_dump" in paths
 
 
+def test_build_shadow_app_keeps_thread_dump_disabled_for_falsey_value(monkeypatch) -> None:
+    monkeypatch.setenv("SHADOW_DEBUG_ENDPOINTS_ENABLED", "false")
+    config = SimpleNamespace(app_name="incident-triage-shadow")
+    app = build_shadow_app(
+        graph=None,  # type: ignore[arg-type]
+        agent_card={
+            "name": "incident-triage-shadow",
+            "description": "test",
+            "url": "http://example.com",
+            "version": "0.1.0",
+            "defaultInputModes": ["text"],
+            "defaultOutputModes": ["text"],
+            "capabilities": {},
+            "skills": [],
+        },
+        config=config,  # type: ignore[arg-type]
+        tracing=False,
+    )
+
+    paths = {route.path for route in app.routes}
+    assert "/thread_dump" not in paths
+
+
 def test_shadow_checkpointer_alist_preserves_extra_config_fields() -> None:
     async def run() -> None:
         probe = ShadowKAgentCheckpointer(
@@ -262,8 +285,8 @@ def test_shadow_checkpointer_alist_preserves_extra_config_fields() -> None:
                 json={
                     "data": [
                         {
-                            "thread_id": "thread-1",
-                            "checkpoint_ns": "shadow",
+                            "thread_id": "thread-2",
+                            "checkpoint_ns": "shadow-listed",
                             "checkpoint_id": "cp-1",
                             "parent_checkpoint_id": None,
                             "checkpoint": __import__("base64").b64encode(checkpoint_bytes).decode("ascii"),
@@ -281,7 +304,7 @@ def test_shadow_checkpointer_alist_preserves_extra_config_fields() -> None:
             config = {
                 "configurable": {
                     "thread_id": "thread-1",
-                    "checkpoint_ns": "shadow",
+                    "checkpoint_ns": "shadow-seed",
                     "checkpoint_id": "seed",
                     "user_id": "shadow-user@example.com",
                 }
@@ -289,6 +312,8 @@ def test_shadow_checkpointer_alist_preserves_extra_config_fields() -> None:
             tuples = [item async for item in checkpointer.alist(config, limit=1)]
 
         assert len(tuples) == 1
+        assert tuples[0].config["configurable"]["thread_id"] == "thread-2"
+        assert tuples[0].config["configurable"]["checkpoint_ns"] == "shadow-listed"
         assert tuples[0].config["configurable"]["checkpoint_id"] == "cp-1"
         assert tuples[0].config["configurable"]["user_id"] == "shadow-user@example.com"
         await probe.client.aclose()
