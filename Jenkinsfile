@@ -54,6 +54,7 @@ spec:
 
     environment {
         IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/investigation-poc'
+        SHADOW_IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/investigation-shadow-runtime'
         DOCKER_CONFIG = '/kaniko/.docker'
     }
 
@@ -81,7 +82,7 @@ spec:
             }
         }
 
-        stage('Build & Push Image') {
+        stage('Build & Push Images') {
             when {
                 branch 'main'
             }
@@ -98,6 +99,16 @@ spec:
                                 --destination=${IMAGE_NAME}:latest \
                                 --cache=true \
                                 --cache-repo=${IMAGE_NAME}-cache \
+                                --skip-tls-verify-registry=docker.nexus.erauner.dev \
+                                --custom-platform=linux/amd64
+
+                            /kaniko/executor \
+                                --dockerfile=Dockerfile.shadow \
+                                --context=dir://. \
+                                --destination=${SHADOW_IMAGE_NAME}:${shortCommit} \
+                                --destination=${SHADOW_IMAGE_NAME}:latest \
+                                --cache=true \
+                                --cache-repo=${SHADOW_IMAGE_NAME}-cache \
                                 --skip-tls-verify-registry=docker.nexus.erauner.dev \
                                 --custom-platform=linux/amd64
                         """

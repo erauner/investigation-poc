@@ -251,13 +251,16 @@ class ShadowKAgentCheckpointer(BaseCheckpointSaver[str]):
         data = KAgentCheckpointTupleResponse.model_validate_json(response.text)
         if data.data:
             for checkpoint_tuple in data.data:
-                tuple_config = {
-                    "configurable": {
+                tuple_config = dict(config)
+                tuple_configurable = dict(config.get("configurable", {}))
+                tuple_configurable.update(
+                    {
                         "thread_id": checkpoint_tuple.thread_id,
                         "checkpoint_ns": checkpoint_tuple.checkpoint_ns,
                         "checkpoint_id": checkpoint_tuple.checkpoint_id,
                     }
-                }
+                )
+                tuple_config["configurable"] = tuple_configurable
                 yield self._convert_to_checkpoint_tuple(tuple_config, checkpoint_tuple)
 
     def get_next_version(self, current: str | None, channel: None) -> str:

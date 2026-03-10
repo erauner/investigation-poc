@@ -1,8 +1,12 @@
+import asyncio
 from types import SimpleNamespace
+
+import httpx
 
 from investigation_orchestrator import OrchestratorRuntimeConfig
 from investigation_service.models import CorrelatedChange, EvidenceItem, InvestigationReport
 from investigation_shadow_runtime.a2a_app import build_shadow_app
+from investigation_shadow_runtime.checkpoint_adapter import ShadowKAgentCheckpointer
 from investigation_shadow_runtime.host_adapter import format_shadow_report, parse_shadow_task
 from investigation_shadow_runtime.runner import run_shadow_investigation
 
@@ -195,7 +199,8 @@ def test_run_shadow_investigation_applies_pod_compatibility(monkeypatch) -> None
     assert "Resolved concrete crash-looping pod: pod/crashy-abc123" in result.markdown
 
 
-def test_build_shadow_app_disables_thread_dump_by_default() -> None:
+def test_build_shadow_app_disables_thread_dump_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("SHADOW_DEBUG_ENDPOINTS_ENABLED", raising=False)
     config = SimpleNamespace(app_name="incident-triage-shadow")
     app = build_shadow_app(
         graph=None,  # type: ignore[arg-type]
@@ -216,3 +221,76 @@ def test_build_shadow_app_disables_thread_dump_by_default() -> None:
     paths = {route.path for route in app.routes}
     assert "/health" in paths
     assert "/thread_dump" not in paths
+
+
+def test_build_shadow_app_enables_thread_dump_when_requested(monkeypatch) -> None:
+    monkeypatch.setenv("SHADOW_DEBUG_ENDPOINTS_ENABLED", "true")
+    config = SimpleNamespace(app_name="incident-triage-shadow")
+    app = build_shadow_app(
+        graph=None,  # type: ignore[arg-type]
+        agent_card={
+            "name": "incident-triage-shadow",
+            "description": "test",
+            "url": "http://example.com",
+            "version": "0.1.0",
+            "defaultInputModes": ["text"],
+            "defaultOutputModes": ["text"],
+            "capabilities": {},
+            "skills": [],
+        },
+        config=config,  # type: ignore[arg-type]
+        tracing=False,
+    )
+
+    paths = {route.path for route in app.routes}
+    assert "/thread_dump" in paths
+
+
+def test_shadow_checkpointer_alist_preserves_extra_config_fields() -> None:
+    async def run() -> None:
+        probe = ShadowKAgentCheckpointer(
+            client=httpx.AsyncClient(base_url="http://example.com"),
+            app_name="incident-triage-shadow",
+        )
+        checkpoint_type, checkpoint_bytes = probe.serde.dumps_typed({"id": "cp-1", "v": 1})
+        metadata_bytes = b'{"source":"shadow"}'
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.headers["X-User-ID"] == "shadow-user@example.com"
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "thread_id": "thread-1",
+                            "checkpoint_ns": "shadow",
+                            "checkpoint_id": "cp-1",
+                            "parent_checkpoint_id": None,
+                            "checkpoint": __import__("base64").b64encode(checkpoint_bytes).decode("ascii"),
+                            "metadata": __import__("base64").b64encode(metadata_bytes).decode("ascii"),
+                            "type_": checkpoint_type,
+                            "writes": None,
+                        }
+                    ]
+                },
+            )
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, base_url="http://example.com") as client:
+            checkpointer = ShadowKAgentCheckpointer(client=client, app_name="incident-triage-shadow")
+            config = {
+                "configurable": {
+                    "thread_id": "thread-1",
+                    "checkpoint_ns": "shadow",
+                    "checkpoint_id": "seed",
+                    "user_id": "shadow-user@example.com",
+                }
+            }
+            tuples = [item async for item in checkpointer.alist(config, limit=1)]
+
+        assert len(tuples) == 1
+        assert tuples[0].config["configurable"]["checkpoint_id"] == "cp-1"
+        assert tuples[0].config["configurable"]["user_id"] == "shadow-user@example.com"
+        await probe.client.aclose()
+
+    asyncio.run(run())
