@@ -154,20 +154,22 @@ def evidence_bundle_from_context(context: CollectedContextResponse) -> EvidenceB
     )
 
 
-def collect_evidence_bundle(req: CollectContextRequest) -> EvidenceBundle:
+def _materialize_evidence_bundle(
+    req: CollectContextRequest,
+    *,
+    cluster_alias: str,
+    target,
+    object_state: dict,
+    events: list[str],
+    logs: str,
+    extra_limitations: list[str] | None = None,
+) -> EvidenceBundle:
     cluster = resolve_cluster(req.cluster)
-    requested_target = _call_with_optional_cluster(resolve_target, req.namespace, req.target, cluster=cluster)
-    target = _call_with_optional_cluster(resolve_runtime_target, requested_target, cluster=cluster)
     effective_profile = req.profile
     effective_service_name = req.service_name
     if target.kind == "service":
         effective_profile = "service"
         effective_service_name = req.service_name or target.name
-    object_state = _call_with_optional_cluster(get_k8s_object, target, cluster=cluster)
-    events = _call_with_optional_cluster(get_related_events, target, cluster=cluster)
-    logs = ""
-    if target.kind in {"pod", "deployment"}:
-        logs = _call_with_optional_cluster(get_pod_logs, target, tail=get_log_tail_lines(), cluster=cluster)
     lookback_minutes = req.lookback_minutes or get_default_lookback_minutes()
     metrics, metric_limitations = _call_with_optional_cluster(
         collect_metrics_for_scope,
@@ -191,7 +193,7 @@ def collect_evidence_bundle(req: CollectContextRequest) -> EvidenceBundle:
         if any(value is not None for value in service_metrics.values()):
             metrics["prometheus_available"] = True
     findings = derive_findings(effective_profile, object_state, events, logs, metrics)
-    limitations = list(metric_limitations)
+    limitations = [*metric_limitations, *(extra_limitations or [])]
     if object_state.get("error"):
         limitations.append("kubernetes object query failed")
     if events == ["no related events"]:
@@ -202,7 +204,7 @@ def collect_evidence_bundle(req: CollectContextRequest) -> EvidenceBundle:
     enrichment_hints.extend(_build_operator_ownership_hints(target.kind, object_state))
 
     return EvidenceBundle(
-        cluster=cluster.alias,
+        cluster=cluster_alias,
         target=target,
         object_state=object_state,
         events=events,
@@ -211,6 +213,47 @@ def collect_evidence_bundle(req: CollectContextRequest) -> EvidenceBundle:
         findings=findings,
         limitations=sorted(set(limitations)),
         enrichment_hints=sorted(set(enrichment_hints)),
+    )
+
+
+def materialize_workload_evidence(
+    req: CollectContextRequest,
+    *,
+    target,
+    object_state: dict,
+    events: list[str],
+    log_excerpt: str,
+    cluster_alias: str | None = None,
+    extra_limitations: list[str] | None = None,
+) -> EvidenceBundle:
+    cluster = resolve_cluster(req.cluster)
+    return _materialize_evidence_bundle(
+        req,
+        cluster_alias=cluster_alias or cluster.alias,
+        target=target,
+        object_state=object_state,
+        events=events,
+        logs=log_excerpt,
+        extra_limitations=extra_limitations,
+    )
+
+
+def collect_evidence_bundle(req: CollectContextRequest) -> EvidenceBundle:
+    cluster = resolve_cluster(req.cluster)
+    requested_target = _call_with_optional_cluster(resolve_target, req.namespace, req.target, cluster=cluster)
+    target = _call_with_optional_cluster(resolve_runtime_target, requested_target, cluster=cluster)
+    object_state = _call_with_optional_cluster(get_k8s_object, target, cluster=cluster)
+    events = _call_with_optional_cluster(get_related_events, target, cluster=cluster)
+    logs = ""
+    if target.kind in {"pod", "deployment"}:
+        logs = _call_with_optional_cluster(get_pod_logs, target, tail=get_log_tail_lines(), cluster=cluster)
+    return _materialize_evidence_bundle(
+        req,
+        cluster_alias=cluster.alias,
+        target=target,
+        object_state=object_state,
+        events=events,
+        logs=logs,
     )
 
 

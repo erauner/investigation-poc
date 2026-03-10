@@ -5,6 +5,23 @@ def get_prometheus_url() -> str:
     return os.getenv("PROMETHEUS_URL", "http://localhost:9090")
 
 
+def get_kubernetes_mcp_url() -> str:
+    return os.getenv("KUBERNETES_MCP_URL", "http://kubernetes-mcp-server.kagent:8080/mcp")
+
+
+def get_prometheus_mcp_url() -> str:
+    return os.getenv("PROMETHEUS_MCP_URL", "http://prometheus-mcp-server.kagent:8080/mcp")
+
+
+def get_peer_mcp_timeout_seconds() -> float:
+    raw = os.getenv("PEER_MCP_TIMEOUT_SECONDS", "10").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 10.0
+    return min(max(value, 1.0), 60.0)
+
+
 def get_cluster_registry_path() -> str | None:
     value = os.getenv("CLUSTER_REGISTRY_PATH", "").strip()
     return value or None

@@ -3,6 +3,7 @@ from pathlib import Path
 import yaml
 
 from investigation_service import mcp_server
+from investigation_service.execution_policy import policy_for_capability
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,6 +142,33 @@ def test_agent_manifest_tool_catalog_is_subset_of_exported_mcp_tools() -> None:
     exported_tools = set(mcp_server.mcp._tool_manager._tools.keys())
 
     assert set(investigation_tools) <= exported_tools
+
+
+def test_execution_policy_preferred_tool_names_are_backed_by_manifest_catalogs() -> None:
+    manifest = _load_yaml("k8s/agent.yaml")
+    tools = manifest["spec"]["declarative"]["tools"]
+    kubernetes_tools = set(
+        next(
+            item["mcpServer"]["toolNames"]
+            for item in tools
+            if item["type"] == "McpServer" and item["mcpServer"]["name"] == "kubernetes-mcp-server"
+        )
+    )
+    prometheus_tools = set(
+        next(
+            item["mcpServer"]["toolNames"]
+            for item in tools
+            if item["type"] == "McpServer" and item["mcpServer"]["name"] == "prometheus-mcp-server"
+        )
+    )
+
+    workload_policy = policy_for_capability("workload_evidence_plane")
+    service_policy = policy_for_capability("service_evidence_plane")
+    node_policy = policy_for_capability("node_evidence_plane")
+
+    assert set(workload_policy.preferred_tool_names) <= kubernetes_tools
+    assert set(service_policy.preferred_tool_names) <= prometheus_tools
+    assert set(node_policy.preferred_tool_names) <= prometheus_tools
 
 
 def test_skill_configmap_stops_teaching_report_first_or_hidden_tools() -> None:
