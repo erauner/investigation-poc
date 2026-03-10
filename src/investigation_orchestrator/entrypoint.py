@@ -6,7 +6,6 @@ from investigation_service.models import (
     InvestigationReportRequest,
 )
 from investigation_service.tools import find_unhealthy_pod
-from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from .control_plane import advance_batch, get_active_batch, render_report, seed_context
 from .evidence_runner import run_required_external_steps
@@ -88,11 +87,11 @@ def _runtime_deps() -> OrchestratorRuntimeDeps:
     )
 
 
-def run_orchestrated_investigation(
+def _run_orchestrated_investigation_graph(
     req: InvestigationReportRequest,
     *,
     max_batches: int = 2,
-    checkpointer: BaseCheckpointSaver | None = None,
+    checkpointer=None,
     checkpoint_config: GraphCheckpointConfig | None = None,
 ) -> InvestigationReport:
     incident = _incident_from_request(req)
@@ -109,4 +108,16 @@ def run_orchestrated_investigation(
     report = final_state["final_report"]
     if report is None:
         raise ValueError("orchestration graph completed without rendering a final report")
+    return report
+
+
+def run_orchestrated_investigation(
+    req: InvestigationReportRequest,
+    *,
+    max_batches: int = 2,
+) -> InvestigationReport:
+    report = _run_orchestrated_investigation_graph(
+        req,
+        max_batches=max_batches,
+    )
     return _maybe_attach_resolved_pod_context(req, report)

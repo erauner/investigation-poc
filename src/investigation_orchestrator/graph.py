@@ -79,8 +79,13 @@ def invoke_investigation_graph(
     checkpointer: BaseCheckpointSaver | None = None,
     checkpoint_config: GraphCheckpointConfig | None = None,
 ) -> OrchestrationState:
+    if checkpoint_config is not None and checkpointer is None:
+        raise ValueError("checkpoint_config requires a checkpointer")
+    if checkpointer is not None and checkpoint_config is None:
+        raise ValueError("checkpoint_config with an explicit thread_id is required when checkpointing is enabled")
+
     graph = build_investigation_graph(deps=deps, checkpointer=checkpointer)
-    config = build_graph_config(checkpoint_config) if checkpointer or checkpoint_config else None
+    config = build_graph_config(checkpoint_config) if checkpointer else None
     return graph.invoke(initial_state, config=config)
 
 

@@ -1,7 +1,5 @@
 from dataclasses import dataclass
-from uuid import uuid4
 
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 @dataclass(frozen=True)
@@ -12,12 +10,12 @@ class GraphCheckpointConfig:
 
 
 def build_graph_config(
-    checkpoint_config: GraphCheckpointConfig | None = None,
+    checkpoint_config: GraphCheckpointConfig,
 ) -> dict[str, dict[str, str]]:
-    checkpoint_config = checkpoint_config or GraphCheckpointConfig()
-    configurable = {
-        "thread_id": checkpoint_config.thread_id or str(uuid4()),
-    }
+    if not checkpoint_config.thread_id:
+        raise ValueError("checkpoint_config.thread_id is required when checkpointing is enabled")
+
+    configurable = {"thread_id": checkpoint_config.thread_id}
     if checkpoint_config.checkpoint_ns:
         configurable["checkpoint_ns"] = checkpoint_config.checkpoint_ns
     if checkpoint_config.checkpoint_id:
@@ -25,5 +23,5 @@ def build_graph_config(
     return {"configurable": configurable}
 
 
-def create_in_memory_checkpointer() -> BaseCheckpointSaver:
+def create_in_memory_checkpointer() -> InMemorySaver:
     return InMemorySaver()
