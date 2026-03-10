@@ -3,8 +3,8 @@ from investigation_orchestrator.mcp_clients import (
     PeerMcpError,
     WorkloadRuntimeSnapshot,
     _normalize_object_state,
-    _pick_runtime_pod_for_deployment,
 )
+from investigation_service.k8s_adapter import pick_runtime_pod_for_workload
 from investigation_service.models import EvidenceStepContract, StepExecutionInputs, TargetRef
 
 
@@ -96,8 +96,9 @@ def test_workload_external_step_falls_back_explicitly(monkeypatch) -> None:
     assert "peer workload MCP fallback: peer unavailable" in artifact.evidence_bundle.limitations
 
 
-def test_pick_runtime_pod_for_deployment_uses_selector_not_prefix() -> None:
+def test_pick_runtime_pod_for_workload_uses_selector_not_prefix() -> None:
     deployment = {
+        "kind": "Deployment",
         "metadata": {"name": "crashy"},
         "spec": {
             "selector": {
@@ -135,11 +136,12 @@ def test_pick_runtime_pod_for_deployment_uses_selector_not_prefix() -> None:
         ]
     }
 
-    assert _pick_runtime_pod_for_deployment(deployment, pods) == "crashy-58b5897796-lckp9"
+    assert pick_runtime_pod_for_workload(deployment, pods) == "crashy-58b5897796-lckp9"
 
 
-def test_pick_runtime_pod_for_deployment_without_match_labels_fails_closed() -> None:
+def test_pick_runtime_pod_for_workload_without_match_labels_fails_closed() -> None:
     deployment = {
+        "kind": "Deployment",
         "metadata": {"name": "crashy"},
         "spec": {"selector": {}},
     }
@@ -154,7 +156,43 @@ def test_pick_runtime_pod_for_deployment_without_match_labels_fails_closed() -> 
         ]
     }
 
-    assert _pick_runtime_pod_for_deployment(deployment, pods) is None
+    assert pick_runtime_pod_for_workload(deployment, pods) is None
+
+
+def test_pick_runtime_pod_for_statefulset_prefers_owned_pod() -> None:
+    statefulset = {
+        "kind": "StatefulSet",
+        "metadata": {"name": "postgres"},
+        "spec": {
+            "selector": {
+                "matchLabels": {
+                    "app.kubernetes.io/name": "postgres",
+                }
+            }
+        },
+    }
+    pods = {
+        "items": [
+            {
+                "metadata": {
+                    "name": "postgres-sidecar-0",
+                    "creationTimestamp": "2026-03-09T12:02:00Z",
+                    "labels": {"app.kubernetes.io/name": "postgres"},
+                    "ownerReferences": [{"kind": "Job", "name": "postgres-sidecar"}],
+                }
+            },
+            {
+                "metadata": {
+                    "name": "postgres-0",
+                    "creationTimestamp": "2026-03-09T12:01:00Z",
+                    "labels": {"app.kubernetes.io/name": "postgres"},
+                    "ownerReferences": [{"kind": "StatefulSet", "name": "postgres"}],
+                }
+            },
+        ]
+    }
+
+    assert pick_runtime_pod_for_workload(statefulset, pods) == "postgres-0"
 
 
 def test_normalize_object_state_for_deployment_attaches_runtime_pod() -> None:

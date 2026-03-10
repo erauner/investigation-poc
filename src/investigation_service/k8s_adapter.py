@@ -669,9 +669,64 @@ def _first_pod_for_workload(
     except json.JSONDecodeError:
         return None
 
-    if not pod_list:
+    return pick_runtime_pod_for_workload(parsed, pod_list)
+
+
+def pick_runtime_pod_for_workload(workload_raw: dict, pods_raw: dict | list[dict]) -> str | None:
+    if not isinstance(workload_raw, dict):
         return None
-    return pod_list[0].get("metadata", {}).get("name")
+    if isinstance(pods_raw, dict):
+        items = pods_raw.get("pods") or pods_raw.get("items") or []
+    elif isinstance(pods_raw, list):
+        items = pods_raw
+    else:
+        items = []
+
+    workload_meta = workload_raw.get("metadata", {}) or {}
+    workload_name = workload_meta.get("name")
+    workload_kind = str(workload_raw.get("kind") or "").lower()
+    selector = workload_raw.get("spec", {}).get("selector", {}).get("matchLabels", {}) or {}
+    if not selector:
+        return None
+    selector_items = set(selector.items())
+
+    def _matches_selector(item: dict) -> bool:
+        labels = item.get("metadata", {}).get("labels", {}) or {}
+        return selector_items.issubset(set(labels.items()))
+
+    def _owner_hint_score(item: dict) -> int:
+        owner_refs = item.get("metadata", {}).get("ownerReferences", []) or []
+        if workload_kind == "deployment":
+            if any(
+                owner.get("kind") == "ReplicaSet"
+                and workload_name
+                and str(owner.get("name", "")).startswith(f"{workload_name}-")
+                for owner in owner_refs
+            ):
+                return 2
+        if workload_kind == "statefulset":
+            if any(
+                owner.get("kind") == "StatefulSet" and owner.get("name") == workload_name
+                for owner in owner_refs
+            ):
+                return 2
+        if any(owner.get("name") == workload_name for owner in owner_refs):
+            return 1
+        return 0
+
+    def _score(item: dict) -> tuple[int, str, str]:
+        metadata = item.get("metadata", {}) or {}
+        return (
+            _owner_hint_score(item),
+            metadata.get("creationTimestamp", "") or "",
+            metadata.get("name", "") or "",
+        )
+
+    candidates = [item for item in items if isinstance(item, dict) and _matches_selector(item)]
+    if not candidates:
+        return None
+    candidates.sort(key=_score, reverse=True)
+    return candidates[0].get("metadata", {}).get("name")
 
 
 def get_pod_logs(target: TargetRef, tail: int = 200, cluster: ResolvedCluster | None = None) -> str:

@@ -12,6 +12,7 @@ from mcp.client.streamable_http import streamable_http_client
 from investigation_service.cluster_registry import resolve_cluster
 from investigation_service.k8s_adapter import (
     normalize_k8s_object_payload,
+    pick_runtime_pod_for_workload,
     resolve_runtime_target,
     resolve_target,
 )
@@ -114,48 +115,6 @@ def _pick_runtime_pod(prefix: str, raw: Any) -> str | None:
     return None
 
 
-def _pick_runtime_pod_for_deployment(deployment_raw: Any, pods_raw: Any) -> str | None:
-    if not isinstance(deployment_raw, dict):
-        return None
-    if isinstance(pods_raw, dict):
-        items = pods_raw.get("pods") or pods_raw.get("items") or []
-    elif isinstance(pods_raw, list):
-        items = pods_raw
-    else:
-        items = []
-
-    deployment_meta = deployment_raw.get("metadata", {}) or {}
-    deployment_name = deployment_meta.get("name")
-    selector = deployment_raw.get("spec", {}).get("selector", {}).get("matchLabels", {}) or {}
-    if not selector:
-        return None
-    selector_items = set(selector.items())
-
-    def _matches_selector(item: Any) -> bool:
-        if not isinstance(item, dict):
-            return False
-        labels = item.get("metadata", {}).get("labels", {}) or {}
-        if selector_items and not selector_items.issubset(set(labels.items())):
-            return False
-        return True
-
-    def _score(item: dict) -> tuple[int, str]:
-        owner_refs = item.get("metadata", {}).get("ownerReferences", []) or []
-        has_owner_hint = any(
-            owner.get("kind") == "ReplicaSet"
-            and deployment_name
-            and str(owner.get("name", "")).startswith(f"{deployment_name}-")
-            for owner in owner_refs
-        )
-        return (1 if has_owner_hint else 0, item.get("metadata", {}).get("creationTimestamp", "") or "")
-
-    candidates = [item for item in items if _matches_selector(item)]
-    if not candidates:
-        return None
-    candidates.sort(key=_score, reverse=True)
-    return _extract_name(candidates[0])
-
-
 def _api_version_for_target(target: TargetRef) -> str:
     if target.kind in {"deployment", "statefulset"}:
         return "apps/v1"
@@ -254,7 +213,7 @@ class KubernetesMcpClient:
                                 {"namespace": target.namespace},
                             )
                             tool_path.append("pods_list_in_namespace")
-                            pod_name = _pick_runtime_pod_for_deployment(raw_object_state, pods_raw)
+                            pod_name = pick_runtime_pod_for_workload(raw_object_state, pods_raw)
                             if not pod_name:
                                 raise PeerMcpError("could not resolve runtime pod for deployment target")
                             runtime_pod_raw = await self._call_tool(
