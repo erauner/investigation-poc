@@ -36,6 +36,18 @@ def _peer_route(tool_path: list[str]) -> ActualRoute:
     )
 
 
+def _planned_peer_route(step: EvidenceStepContract) -> ActualRoute:
+    server = step.preferred_mcp_server or "kubernetes-mcp-server"
+    tool_path = [server, *step.preferred_tool_names]
+    tool_name = step.preferred_tool_names[0] if step.preferred_tool_names else None
+    return ActualRoute(
+        source_kind="peer_mcp",
+        mcp_server=server,
+        tool_name=tool_name,
+        tool_path=tool_path,
+    )
+
+
 _kubernetes_mcp_client = KubernetesMcpClient()
 _prometheus_mcp_client = PrometheusMcpClient()
 
@@ -191,8 +203,12 @@ def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact | N
     if step.requested_capability == "workload_evidence_plane":
         try:
             return _workload_submission_via_peer_mcp(step)
-        except PeerMcpError:
-            return None
+        except PeerMcpError as exc:
+            return SubmittedStepArtifact(
+                step_id=step.step_id,
+                actual_route=_planned_peer_route(step),
+                limitations=[f"peer workload MCP attempt failed: {exc}"],
+            )
     if step.requested_capability == "service_evidence_plane":
         try:
             return _service_submission_via_peer_mcp(step)

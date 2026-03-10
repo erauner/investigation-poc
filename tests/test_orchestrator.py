@@ -263,7 +263,7 @@ def test_run_orchestrated_investigation_advances_and_renders(monkeypatch) -> Non
     assert report.diagnosis == "Crash Loop Detected"
 
 
-def test_run_orchestrated_investigation_allows_empty_workload_submissions_for_downstream_fallback(monkeypatch) -> None:
+def test_run_orchestrated_investigation_forwards_workload_peer_failure_metadata(monkeypatch) -> None:
     incident = _incident()
     captured = {"submitted": None}
 
@@ -324,7 +324,22 @@ def test_run_orchestrated_investigation_allows_empty_workload_submissions_for_do
             ],
         ),
     )
-    monkeypatch.setattr(entrypoint, "run_required_external_steps", lambda _batch: [])
+    monkeypatch.setattr(
+        entrypoint,
+        "run_required_external_steps",
+        lambda _batch: [
+            SubmittedStepArtifact(
+                step_id="collect-target-evidence",
+                actual_route={
+                    "source_kind": "peer_mcp",
+                    "mcp_server": "kubernetes-mcp-server",
+                    "tool_name": "resources_get",
+                    "tool_path": ["kubernetes-mcp-server", "resources_get", "events_list", "pods_log"],
+                },
+                limitations=["peer workload MCP attempt failed: peer unavailable"],
+            )
+        ],
+    )
 
     def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
         captured["submitted"] = submitted_steps
@@ -369,7 +384,9 @@ def test_run_orchestrated_investigation_allows_empty_workload_submissions_for_do
         )
     )
 
-    assert captured["submitted"] == []
+    assert captured["submitted"] is not None
+    assert captured["submitted"][0].actual_route.mcp_server == "kubernetes-mcp-server"
+    assert "peer workload MCP attempt failed: peer unavailable" in captured["submitted"][0].limitations
     assert report.target == "pod/crashy-abc123"
 
 

@@ -123,15 +123,8 @@ def test_workload_external_step_prefers_peer_mcp(monkeypatch) -> None:
     assert "peer partial: events only from namespace scope" in artifact.evidence_bundle.limitations
 
 
-def test_workload_external_step_defers_to_downstream_fallback_when_peer_fails(monkeypatch) -> None:
+def test_workload_external_step_records_failed_peer_attempt_for_downstream_fallback(monkeypatch) -> None:
     step = _workload_step()
-    active_batch = type(
-        "ActiveBatchStub",
-        (),
-        {
-            "steps": [step],
-        },
-    )()
 
     monkeypatch.setattr(
         evidence_runner,
@@ -147,9 +140,13 @@ def test_workload_external_step_defers_to_downstream_fallback_when_peer_fails(mo
         )(),
     )
 
-    submissions = evidence_runner.run_required_external_steps(active_batch)
+    artifact = evidence_runner._submitted_artifact(step)
 
-    assert submissions == []
+    assert artifact is not None
+    assert artifact.actual_route.source_kind == "peer_mcp"
+    assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
+    assert artifact.evidence_bundle is None
+    assert "peer workload MCP attempt failed: peer unavailable" in artifact.limitations
 
 
 def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:

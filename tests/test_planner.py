@@ -15,6 +15,7 @@ from investigation_service.models import (
     NormalizedInvestigationRequest,
     PlanStep,
     SubmitEvidenceArtifactsRequest,
+    StepRouteProvenance,
     TargetRef,
     SubmittedStepArtifact,
     UpdateInvestigationPlanRequest,
@@ -534,18 +535,25 @@ def test_advance_active_evidence_batch_combines_submitted_and_control_plane_step
 
 
 def test_advance_active_evidence_batch_rejects_missing_external_submission() -> None:
+    deps = _deps([])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "scope_from_target": lambda target, profile: "service",
+        }
+    )
     plan = build_investigation_plan(
-        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
-        _deps([]),
+        BuildInvestigationPlanRequest(namespace="default", target="service/api", profile="service", service_name="api"),
+        deps,
     )
 
     with pytest.raises(ValueError, match="active batch still requires external evidence submission for: collect-target-evidence"):
         advance_active_evidence_batch(
             plan=plan,
-            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+            incident=BuildInvestigationPlanRequest(namespace="default", target="service/api", profile="service", service_name="api"),
             submitted_steps=[],
             batch_id=None,
-            deps=_deps([]),
+            deps=deps,
         )
 
 
@@ -673,6 +681,56 @@ def test_advance_active_evidence_batch_preserves_service_follow_up_insertion() -
     assert result.updated_plan.active_batch_id == "batch-follow-up-service"
     follow_up = next(step for step in result.updated_plan.steps if step.id == "collect-service-follow-up-evidence")
     assert follow_up.status == "pending"
+
+
+def test_advance_active_evidence_batch_preserves_workload_peer_failure_provenance() -> None:
+    calls: list[str] = []
+    deps = _deps(calls)
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        deps,
+    )
+
+    result = advance_active_evidence_batch(
+        plan=plan,
+        incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api"),
+        submitted_steps=[
+            SubmittedStepArtifact(
+                step_id="collect-target-evidence",
+                actual_route=ActualRoute(
+                    source_kind="peer_mcp",
+                    mcp_server="kubernetes-mcp-server",
+                    tool_name="resources_get",
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_log"],
+                ),
+                limitations=["peer workload MCP attempt failed: peer unavailable"],
+            )
+        ],
+        batch_id="batch-1",
+        deps=deps,
+    )
+
+    artifact = next(item for item in result.execution.artifacts if item.step_id == "collect-target-evidence")
+    assert artifact.route_provenance == StepRouteProvenance(
+        requested_capability="workload_evidence_plane",
+        route_satisfaction="unmatched",
+        actual_route=ActualRoute(
+            source_kind="investigation_internal",
+            mcp_server="investigation-mcp-server",
+            tool_name="collect_workload_evidence",
+            tool_path=["planner._execute_step", "deps.collect_workload_evidence"],
+        ),
+        attempted_routes=[
+            ActualRoute(
+                source_kind="peer_mcp",
+                mcp_server="kubernetes-mcp-server",
+                tool_name="resources_get",
+                tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_log"],
+            )
+        ],
+    )
+    assert "peer workload MCP attempt failed: peer unavailable" in artifact.limitations
+    assert "peer workload MCP attempt failed: peer unavailable" in result.execution.execution_notes
 
 
 def test_update_investigation_plan_unlocks_analysis_after_first_batch() -> None:

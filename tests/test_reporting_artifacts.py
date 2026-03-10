@@ -994,3 +994,125 @@ def test_render_investigation_report_uses_advanced_runtime_context_without_fallb
         "collect-target-evidence",
         "collect-change-candidates",
     ]
+
+
+def test_render_investigation_report_preserves_failed_workload_peer_attempt_in_tool_trace(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "load_guideline_rules", lambda: ([], []))
+    monkeypatch.setattr(
+        reporting,
+        "collect_workload_evidence",
+        lambda _req: EvidenceBundle(
+            cluster="artifact-cluster",
+            target=TargetRef(namespace="artifact-ns", kind="pod", name="api-123"),
+            object_state={"kind": "pod", "name": "api-123"},
+            events=[],
+            log_excerpt="",
+            metrics={},
+            findings=[
+                Finding(
+                    severity="warning",
+                    source="heuristic",
+                    title="Workload instability",
+                    evidence="Observed instability in workload signals",
+                )
+            ],
+            limitations=[],
+            enrichment_hints=[],
+        ),
+    )
+    monkeypatch.setattr(
+        reporting,
+        "collect_change_candidates",
+        lambda _req: CorrelatedChangesResponse(
+            cluster="artifact-cluster",
+            scope="workload",
+            target="deployment/api",
+            changes=[],
+            limitations=[],
+        ),
+    )
+
+    workload_target = InvestigationTarget(
+        source="manual",
+        scope="workload",
+        cluster="artifact-cluster",
+        namespace="artifact-ns",
+        requested_target="deployment/api",
+        target="deployment/api",
+        node_name=None,
+        service_name=None,
+        profile="workload",
+        lookback_minutes=15,
+        normalization_notes=["artifact-note"],
+    )
+    workload_plan = InvestigationPlan(
+        mode="targeted_rca",
+        objective="Investigate deployment/api",
+        target=workload_target,
+        steps=[
+            PlanStep(
+                id="collect-target-evidence",
+                title="Collect workload evidence",
+                category="evidence",
+                plane="workload",
+                rationale="Collect target evidence",
+                suggested_capability="workload_evidence_plane",
+                preferred_mcp_server="kubernetes-mcp-server",
+                preferred_tool_names=["resources_get", "events_list", "pods_log"],
+            ),
+            PlanStep(
+                id="collect-change-candidates",
+                title="Collect change candidates",
+                category="evidence",
+                plane="changes",
+                rationale="Collect change candidates",
+                suggested_capability="collect_change_candidates",
+            ),
+        ],
+        evidence_batches=[
+            EvidenceBatch(
+                id="batch-1",
+                title="Initial evidence",
+                status="pending",
+                intent="Collect target evidence.",
+                step_ids=["collect-target-evidence", "collect-change-candidates"],
+            )
+        ],
+        active_batch_id="batch-1",
+        planning_notes=["artifact-note"],
+    )
+
+    runtime = reporting.advance_investigation_runtime(
+        AdvanceInvestigationRuntimeRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="deployment/api"),
+            execution_context=ReportingExecutionContext(updated_plan=workload_plan, executions=[]),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="kubernetes-mcp-server",
+                        tool_name="resources_get",
+                        tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_log"],
+                    ),
+                    limitations=["peer workload MCP attempt failed: peer unavailable"],
+                )
+            ],
+        )
+    )
+
+    report = reporting.render_investigation_report(
+        InvestigationReportingRequest(
+            target="deployment/api",
+            profile="workload",
+            include_related_data=False,
+            execution_context=runtime.execution_context,
+        )
+    )
+
+    assert report.tool_path_trace is not None
+    trace = report.tool_path_trace.step_provenance[0]
+    assert trace.step_id == "collect-target-evidence"
+    assert trace.provenance.actual_route.tool_name == "collect_workload_evidence"
+    assert trace.provenance.attempted_routes[0].mcp_server == "kubernetes-mcp-server"
+    assert "peer workload MCP attempt failed: peer unavailable" in report.limitations

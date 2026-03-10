@@ -189,6 +189,7 @@ class StepRouteProvenance(BaseModel):
     requested_capability: str | None = None
     route_satisfaction: Literal["preferred", "fallback", "unmatched", "not_applicable"] = "not_applicable"
     actual_route: ActualRoute
+    attempted_routes: list[ActualRoute] = Field(default_factory=list)
 
 
 class ExecutedStepTrace(BaseModel):
