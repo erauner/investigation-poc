@@ -184,6 +184,39 @@ def _normalize_metric_value(raw: Any) -> float | None:
     return None
 
 
+def _latest_non_null_metric_value(raw: Any) -> float | None:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        if "values" in raw and isinstance(raw["values"], list):
+            return _latest_non_null_metric_value(raw["values"])
+        if "result" in raw and isinstance(raw["result"], list):
+            return _latest_non_null_metric_value(raw["result"])
+        if "data" in raw:
+            return _latest_non_null_metric_value(raw["data"])
+        if "text" in raw and isinstance(raw["text"], str):
+            matches = re.findall(r"=>\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*@\[", raw["text"])
+            if matches:
+                try:
+                    return float(matches[-1])
+                except ValueError:
+                    return None
+        return _normalize_metric_value(raw)
+    if isinstance(raw, list):
+        if raw and all(isinstance(item, (list, tuple)) and len(item) >= 2 for item in raw):
+            for item in reversed(raw):
+                value = _normalize_metric_value(item[1])
+                if value is not None:
+                    return value
+            return None
+        for item in reversed(raw):
+            value = _latest_non_null_metric_value(item)
+            if value is not None:
+                return value
+        return None
+    return _normalize_metric_value(raw)
+
+
 def _peer_prometheus_routing_unsupported(cluster, requested_cluster: str | None) -> bool:
     requested_alias = (requested_cluster or "").strip().lower() or None
     local_aliases = {

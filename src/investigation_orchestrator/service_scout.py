@@ -34,6 +34,7 @@ def materialize_service_metrics_snapshot(
     bundle = baseline_artifact.evidence_bundle
     if bundle is None:
         return baseline_artifact
+    retained_limitations = _retained_service_limitations(bundle.limitations, metrics_snapshot.metrics)
     return materialize_service_submission(
         step,
         target=metrics_snapshot.target,
@@ -43,8 +44,25 @@ def materialize_service_metrics_snapshot(
         object_state=bundle.object_state,
         events=bundle.events,
         cluster_alias=metrics_snapshot.cluster_alias,
-        extra_limitations=[*bundle.limitations, *metrics_snapshot.limitations, *(extra_limitations or [])],
+        extra_limitations=[*retained_limitations, *metrics_snapshot.limitations, *(extra_limitations or [])],
     )
+
+
+def _retained_service_limitations(
+    baseline_limitations: list[str],
+    recovered_metrics: dict[str, object],
+) -> list[str]:
+    retained: list[str] = []
+    prometheus_available = bool(recovered_metrics.get("prometheus_available"))
+    for limitation in baseline_limitations:
+        if limitation == "prometheus unavailable or returned no usable results" and prometheus_available:
+            continue
+        if limitation.startswith("metric unavailable: "):
+            metric_key = limitation.removeprefix("metric unavailable: ").strip()
+            if recovered_metrics.get(metric_key) is not None:
+                continue
+        retained.append(limitation)
+    return retained
 
 
 def assess_materialized_service_submission(artifact: SubmittedStepArtifact) -> EvidenceAdequacyAssessment:
