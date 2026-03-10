@@ -60,7 +60,6 @@ The runtime should now be thought of as:
 - bounded-flexible evidence layer
   - selective evidence discovery inside a step
   - bounded follow-up routing when evidence is weak or contradictory
-  - presentation depth and rendering profile selection
 - explicitly non-flexible areas
   - arbitrary raw tool choreography across the whole investigation
   - write actions
@@ -160,12 +159,12 @@ The downstream contracts still remain:
 
 This ADR does not require that bounded exploration be implemented by an LLM-driven scout immediately.
 
-Bounded exploratory evidence may later be implemented by:
+Bounded exploratory evidence should prefer simpler mechanisms first, and may later be implemented by:
 
-- policy-guided branching
+- deterministic policy-guided branching
 - deterministic probe selection
 - structured tool-planning logic
-- or a constrained tool-using agent
+- a constrained tool-using agent only if simpler bounded mechanisms are insufficient
 
 The architectural requirement is:
 
@@ -219,6 +218,32 @@ It is not:
 
 The baseline summary is intentionally separate from the full evidence artifact.
 Exploratory nodes should receive a compact view of what is already known and what is still missing rather than depending on arbitrary prompt reconstruction from raw runtime state.
+
+## Exploratory Node Input And Output Seams
+
+Bounded exploratory nodes should consume a small typed runtime input contract rather than the full investigation state.
+
+That runtime input should be derived from:
+
+- the active step's execution-facing inputs
+- product-owned exploration policy
+- adequacy-derived hints
+- optionally a compact baseline evidence summary
+
+This seam is a transient runtime input contract, not a second semantic model beside `ReportingExecutionContext`.
+
+Exploratory execution may also produce a bounded intermediate probe/result record before deterministic materialization into canonical typed artifacts.
+
+That intermediate seam may capture things such as:
+
+- probes attempted
+- which probes were useful, empty, contradictory, or failed
+- additional evidence recovered
+- additional limitations discovered
+- budget consumed and stop reason
+
+The important invariant is that exploratory nodes do not directly redefine planner or report semantics.
+They still terminate in the same deterministic materialization path into canonical typed step artifacts.
 
 ## Preferred Pattern
 

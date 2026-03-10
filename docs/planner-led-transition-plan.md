@@ -898,6 +898,7 @@ Delivered in this slice should be:
 
 - a product-owned adequacy evaluator that is shared coherently across workload, service, and node scout paths
 - explicit adequacy outcomes that drive bounded routing decisions and honest degradation
+- define the exploratory node input contract and bounded probe/result seam before expanding scout behavior broadly across evidence planes
 - tests proving strong baseline evidence short-circuits without extra exploration
 
 This slice should remain:
@@ -993,6 +994,9 @@ The current intended distinction is:
 - service scout landing earlier than originally sequenced changed rollout order, not architecture
 
 ## Updated Priority Order
+
+Slice numbering remains historical.
+Current implementation priorities may overlap when bounded-exploration work does not conflict with remaining real-cluster correctness or hosted-runtime validation work.
 
 The next implementation order should now be:
 
