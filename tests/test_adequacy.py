@@ -1,9 +1,11 @@
 from investigation_service.adequacy import (
+    assess_service_evidence_bundle,
     assess_target_evidence_adequacy,
     assess_workload_evidence_bundle,
     adequacy_rank,
     assessment_improves,
     is_scout_candidate,
+    service_bundle_improves,
     workload_bundle_improves,
 )
 from investigation_service.models import Finding, InvestigationTarget, StepArtifact, StepRouteProvenance, TargetRef
@@ -244,3 +246,64 @@ def test_workload_bundle_improves_prefers_stronger_findings_with_same_adequacy_b
     assert assess_workload_evidence_bundle(bundle=baseline).outcome == "weak"
     assert assess_workload_evidence_bundle(bundle=candidate).outcome == "weak"
     assert workload_bundle_improves(baseline, candidate) is True
+
+
+def test_assess_service_evidence_bundle_classifies_missing_metrics_as_blocked() -> None:
+    bundle = _artifact(limitations=["prometheus unavailable or returned no usable results"]).evidence_bundle.model_copy(
+        update={
+            "metrics": {
+                "service_request_rate": None,
+                "service_error_rate": None,
+                "service_latency_p95_seconds": None,
+                "prometheus_available": False,
+            }
+        }
+    )
+
+    assessment = assess_service_evidence_bundle(bundle=bundle)
+
+    assert assessment.outcome == "blocked"
+
+
+def test_service_bundle_improves_prefers_recovered_prometheus_signals() -> None:
+    baseline = _artifact(
+        findings=[
+            Finding(
+                severity="info",
+                source="heuristic",
+                title="No Critical Signals Found",
+                evidence="nothing decisive",
+            )
+        ],
+        limitations=["prometheus unavailable or returned no usable results"],
+    ).evidence_bundle.model_copy(
+        update={
+            "metrics": {
+                "service_request_rate": None,
+                "service_error_rate": None,
+                "service_latency_p95_seconds": None,
+                "prometheus_available": False,
+            }
+        }
+    )
+    candidate = baseline.model_copy(
+        update={
+            "findings": [
+                Finding(
+                    severity="warning",
+                    source="prometheus",
+                    title="High Service Latency",
+                    evidence="p95 latency is 1.200s",
+                )
+            ],
+            "limitations": [],
+            "metrics": {
+                "service_request_rate": 12.5,
+                "service_error_rate": 0.5,
+                "service_latency_p95_seconds": 1.2,
+                "prometheus_available": True,
+            },
+        }
+    )
+
+    assert service_bundle_improves(baseline, candidate) is True
