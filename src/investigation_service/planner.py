@@ -731,7 +731,7 @@ def _attempt_only_peer_submission(
     step: PlanStep,
     submission: SubmittedStepArtifact,
 ) -> bool:
-    if step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane"}:
+    if step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}:
         return False
     return (
         submission.evidence_bundle is None
@@ -892,7 +892,7 @@ def advance_active_evidence_batch(
         for step in remaining_steps
         if _runtime_spec(step).execution_mode != "control_plane_only"
         and (
-            step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane"}
+            step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}
             or step.id not in attempted_peer_submissions
         )
     ]

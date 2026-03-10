@@ -247,8 +247,8 @@ def submit_evidence_step_artifacts(
 
     Constraints:
     - each submitted_steps item must be fully materialized for the matching step artifact_type
-    - metadata-only workload or service peer-failure submissions are invalid here
-    - use advance_investigation_runtime or handoff_active_evidence_batch for workload/service peer-failure fallback
+    - metadata-only workload, service, or node peer-failure submissions are invalid here
+    - use advance_investigation_runtime or handoff_active_evidence_batch for workload/service/node peer-failure fallback
 
     Use this after get_active_evidence_batch and before advance_investigation_runtime when the active batch still requires external evidence submission.
     """
@@ -289,9 +289,10 @@ def advance_investigation_runtime(
     Transition behavior:
     - metadata-only workload submissions are accepted here when peer MCP workload collection was attempted but failed
     - metadata-only service submissions are accepted here when peer MCP service collection was attempted but failed
+    - metadata-only node submissions are accepted here when peer MCP node collection was attempted but failed
     - include step_id, actual_route for the attempted peer route, and limitations describing the failure
-    - service peer-failure submissions may also include attempted_routes to preserve multiple failed peer attempts
-    - omit evidence_bundle so planner-owned bounded fallback can execute for that workload/service step
+    - service/node peer-failure submissions may also include attempted_routes to preserve multiple failed peer attempts
+    - omit evidence_bundle so planner-owned bounded fallback can execute for that workload/service/node step
 
     Do not call this tool with only batch_id.
     Prefer this only after external-preferred steps for the active batch have already been submitted, or when the batch is planner-owned only.
@@ -337,9 +338,9 @@ def handoff_active_evidence_batch(
     - on the first call, returns a response with handoff_status=awaiting_external_submission, next_action=submit_external_steps, and required_external_step_ids when peer evidence is still required
     - when next_action=submit_external_steps, build submitted_steps from the matching required_external_step_ids in active_batch.steps
     - each submitted_steps item should include step_id=<the step contract id>, actual_route=<the peer MCP route actually used or attempted>, and the payload field named by that step's artifact_type
-    - for workload/service peer failure during transition, a submitted_steps item may carry only step_id, actual_route, and limitations to record the failed peer attempt before planner-owned bounded fallback runs
-    - service peer-failure submissions may also include attempted_routes when more than one peer route was attempted
-    - metadata-only workload/service submissions are intended for handoff_active_evidence_batch and advance_investigation_runtime; submit_evidence_step_artifacts still expects fully materialized artifacts
+    - for workload/service/node peer failure during transition, a submitted_steps item may carry only step_id, actual_route, and limitations to record the failed peer attempt before planner-owned bounded fallback runs
+    - service/node peer-failure submissions may also include attempted_routes when more than one peer route was attempted
+    - metadata-only workload/service/node submissions are intended for handoff_active_evidence_batch and advance_investigation_runtime; submit_evidence_step_artifacts still expects fully materialized artifacts
     - do not call handoff_active_evidence_batch again with an empty submitted_steps list after next_action=submit_external_steps
     - after submitted_steps are provided, reconciles them, auto-runs only remaining same-batch planner-owned steps, and returns updated execution_context plus a refreshed handoff_token
     - if another planner-owned batch remains, returns handoff_status=ready_for_next_handoff and next_action=call_handoff_again
