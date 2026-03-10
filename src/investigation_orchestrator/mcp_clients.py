@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any
 import asyncio
 import json
+import re
 import threading
 
 import anyio
@@ -150,6 +151,12 @@ def _normalize_metric_value(raw: Any) -> float | None:
         try:
             return float(raw)
         except ValueError:
+            match = re.search(r"=>\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*@\[", raw)
+            if match:
+                try:
+                    return float(match.group(1))
+                except ValueError:
+                    return None
             return None
     if isinstance(raw, list):
         if not raw:

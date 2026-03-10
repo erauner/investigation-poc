@@ -36,6 +36,13 @@ ensure_kind_stack() {
     echo "==> Reusing existing kind stack"
     kubectl config use-context "${KIND_CONTEXT}" >/dev/null
     kubectl get nodes
+    echo "==> Rebuilding and reloading local investigation image"
+    run_make kind-build-investigation-image
+    run_make kind-load-investigation-image
+    kubectl apply -k "${ROOT_DIR}/k8s-overlays/local-kind"
+    kubectl apply -k "${ROOT_DIR}/k8s-overlays/local-kind-optional-http"
+    kubectl -n kagent rollout restart deploy/investigation-service
+    kubectl -n kagent rollout restart deploy/investigation-mcp-server
     return 0
   fi
 
