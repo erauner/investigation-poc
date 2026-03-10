@@ -200,19 +200,6 @@ def service_metric_query_families(
                 ),
             },
         ),
-        (
-            "envoy_downstream_gateway",
-            {
-                "service_request_rate": f"sum(rate(envoy_http_downstream_rq_xx[{lookback}]))",
-                "service_error_rate": (
-                    f'sum(rate(envoy_http_downstream_rq_xx{{envoy_response_code_class="5"}}[{lookback}]))'
-                ),
-                "service_latency_p95_seconds": (
-                    "histogram_quantile(0.95, "
-                    f"sum by (le) (rate(envoy_http_downstream_rq_time_bucket[{lookback}])))"
-                ),
-            },
-        ),
     ]
 
 
@@ -231,7 +218,7 @@ def select_best_service_metric_family(
         family_results,
         key=lambda item: (
             sum(value is not None for value in item[1].values()),
-            item[0] != "envoy_downstream_gateway",
+            item[0] == "http_server_service",
         ),
     )
     metrics: dict[str, float | None | str | bool] = {key: best_metrics.get(key) for key in _SERVICE_METRIC_KEYS}
@@ -326,10 +313,13 @@ def collect_metrics_for_scope(
 
     metrics.update(scoped_metrics)
     limitations.extend(scoped_limitations)
-    metrics["prometheus_available"] = any(
-        value is not None for key, value in metrics.items() if key not in _METRIC_METADATA_KEYS
-    )
-    if not metrics["prometheus_available"]:
+    if target.kind == "service" or profile == "service":
+        metrics["prometheus_available"] = bool(scoped_metrics.get("prometheus_available"))
+    else:
+        metrics["prometheus_available"] = any(
+            value is not None for key, value in metrics.items() if key not in _METRIC_METADATA_KEYS
+        )
+    if not metrics["prometheus_available"] and "prometheus unavailable or returned no usable results" not in limitations:
         limitations.append("prometheus unavailable or returned no usable results")
     return metrics, limitations
 

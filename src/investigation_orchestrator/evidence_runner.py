@@ -103,7 +103,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
                     "kind": metrics_snapshot.target.kind,
                     "name": metrics_snapshot.target.name,
                 },
-                events=["no related events"],
+                events=[],
                 actual_route=_peer_route(metrics_snapshot.tool_path),
                 attempted_routes=[
                     _peer_route(metrics_snapshot.tool_path),

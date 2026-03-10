@@ -423,27 +423,30 @@ class KubernetesMcpClient:
                     )
                     tool_path.append("resources_get")
                     object_state = _normalize_object_state(raw_object_state, target)
-                    pods_raw = await self._call_tool(
-                        session,
-                        "pods_list_in_namespace",
-                        {"namespace": namespace},
-                    )
-                    tool_path.append("pods_list_in_namespace")
-                    pods = []
-                    if isinstance(pods_raw, dict):
-                        pods = pods_raw.get("items") or pods_raw.get("pods") or []
-                    elif isinstance(pods_raw, list):
-                        pods = pods_raw
-                    object_state.update(
-                        summarize_service_topology(
-                            raw_object_state if isinstance(raw_object_state, dict) else {},
-                            [pod for pod in pods if isinstance(pod, dict)],
+                    limitations: list[str] = []
+                    try:
+                        pods_raw = await self._call_tool(
+                            session,
+                            "pods_list_in_namespace",
+                            {"namespace": namespace},
                         )
-                    )
+                        tool_path.append("pods_list_in_namespace")
+                        pods = []
+                        if isinstance(pods_raw, dict):
+                            pods = pods_raw.get("items") or pods_raw.get("pods") or []
+                        elif isinstance(pods_raw, list):
+                            pods = pods_raw
+                        object_state.update(
+                            summarize_service_topology(
+                                raw_object_state if isinstance(raw_object_state, dict) else {},
+                                [pod for pod in pods if isinstance(pod, dict)],
+                            )
+                        )
+                    except PeerMcpError:
+                        limitations.append("peer service Kubernetes fallback could not infer backend topology")
                     events_raw = await self._call_tool(session, "events_list", {"namespace": namespace})
                     tool_path.append("events_list")
                     events = _normalize_events(target, events_raw)
-                    limitations: list[str] = []
                     if events == ["no related events"]:
                         limitations.append("peer service Kubernetes fallback returned no related events")
                     return ServiceRuntimeSnapshot(

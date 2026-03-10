@@ -165,7 +165,7 @@ def test_build_investigation_plan_sets_metrics_first_policy_for_service_targets(
     assert target_step.preferred_mcp_server == "prometheus-mcp-server"
     assert target_step.preferred_tool_names == ["execute_query", "execute_range_query"]
     assert target_step.fallback_mcp_server == "kubernetes-mcp-server"
-    assert target_step.fallback_tool_names == ["resources_get", "events_list"]
+    assert target_step.fallback_tool_names == ["resources_get", "events_list", "pods_list_in_namespace"]
 
 
 def test_build_investigation_plan_keeps_alert_step_internal_only_in_public_metadata() -> None:

@@ -207,11 +207,11 @@ def test_collect_context_for_workload_enriches_with_service_metrics(monkeypatch)
 
 def test_collect_metrics_for_service_uses_best_available_query_family(monkeypatch) -> None:
     def fake_query(query: str, prometheus_url: str | None = None) -> float | None:
-        if "envoy_http_downstream_rq_xx{envoy_response_code_class=\"5\"}" in query:
+        if 'http_server_request_duration_seconds_count{namespace="observability",service="envoy-gateway",status=~"5.."}' in query:
             return 0.12
-        if "envoy_http_downstream_rq_xx[" in query:
+        if 'http_server_request_duration_seconds_count{namespace="observability",service="envoy-gateway"}' in query:
             return 12.0
-        if "envoy_http_downstream_rq_time_bucket" in query:
+        if 'http_server_request_duration_seconds_bucket{namespace="observability",service="envoy-gateway"}' in query:
             return 1.8
         return None
 
@@ -225,11 +225,26 @@ def test_collect_metrics_for_service_uses_best_available_query_family(monkeypatc
     )
 
     assert metrics["prometheus_available"] is True
-    assert metrics["service_metric_family"] == "envoy_downstream_gateway"
+    assert metrics["service_metric_family"] == "http_server_service"
     assert metrics["service_request_rate"] == 12.0
     assert metrics["service_error_rate"] == 0.12
     assert metrics["service_latency_p95_seconds"] == 1.8
     assert limitations == []
+
+
+def test_collect_metrics_for_service_does_not_treat_metric_family_metadata_as_prometheus_success(monkeypatch) -> None:
+    monkeypatch.setattr("investigation_service.prom_adapter.query_instant", lambda query, prometheus_url=None: None)
+
+    metrics, limitations = collect_metrics_for_scope(
+        TargetRef(namespace="observability", kind="service", name="envoy-gateway"),
+        profile="service",
+        service_name="envoy-gateway",
+        lookback_minutes=15,
+    )
+
+    assert metrics["service_metric_family"] == "http_server_service"
+    assert metrics["prometheus_available"] is False
+    assert "prometheus unavailable or returned no usable results" in limitations
 
 
 def test_service_findings_use_backend_topology_when_metrics_are_weak() -> None:

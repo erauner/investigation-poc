@@ -119,16 +119,6 @@ def _derive_node_findings(object_state: dict, metrics: dict) -> list[Finding]:
 def _derive_service_findings(object_state: dict, metrics: dict) -> list[Finding]:
     findings: list[Finding] = []
 
-    if object_state.get("error"):
-        findings.append(
-            Finding(
-                severity="critical",
-                source="k8s",
-                title="Target Not Found",
-                evidence=str(object_state.get("error")),
-            )
-        )
-
     matched_pod_count = object_state.get("matchedPodCount")
     ready_pod_count = object_state.get("readyPodCount")
     matched_pods = object_state.get("matchedPods") or []

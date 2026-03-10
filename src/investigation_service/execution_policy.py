@@ -27,7 +27,7 @@ _POLICIES: dict[str, CapabilityPolicy] = {
         preferred_mcp_server="prometheus-mcp-server",
         preferred_tool_names=("execute_query", "execute_range_query"),
         fallback_mcp_server="kubernetes-mcp-server",
-        fallback_tool_names=("resources_get", "events_list"),
+        fallback_tool_names=("resources_get", "events_list", "pods_list_in_namespace"),
         notes="Use metrics-first evidence for service symptoms, then fall back to Kubernetes runtime inspection if needed.",
     ),
     "node_evidence_plane": CapabilityPolicy(
