@@ -9,6 +9,21 @@ from .models import (
 from .tools import materialize_node_evidence, materialize_service_evidence, materialize_workload_evidence
 
 
+def materialize_attempt_only_submission(
+    step: EvidenceStepContract,
+    *,
+    actual_route: ActualRoute,
+    limitations: list[str],
+    attempted_routes: list[ActualRoute] | None = None,
+) -> SubmittedStepArtifact:
+    return SubmittedStepArtifact(
+        step_id=step.step_id,
+        actual_route=actual_route,
+        attempted_routes=list(attempted_routes or []),
+        limitations=list(limitations),
+    )
+
+
 def materialize_workload_submission(
     step: EvidenceStepContract,
     *,
@@ -54,6 +69,7 @@ def materialize_service_submission(
     target,
     metrics: dict,
     actual_route: ActualRoute,
+    attempted_routes: list[ActualRoute] | None = None,
     object_state: dict | None = None,
     events: list[str] | None = None,
     cluster_alias: str | None = None,
@@ -79,6 +95,7 @@ def materialize_service_submission(
         step_id=step.step_id,
         evidence_bundle=bundle,
         actual_route=actual_route,
+        attempted_routes=list(attempted_routes or []),
     )
 
 
@@ -88,6 +105,7 @@ def materialize_node_submission(
     target,
     metrics: dict,
     actual_route: ActualRoute,
+    attempted_routes: list[ActualRoute] | None = None,
     object_state: dict | None = None,
     events: list[str] | None = None,
     cluster_alias: str | None = None,
@@ -111,4 +129,5 @@ def materialize_node_submission(
         step_id=step.step_id,
         evidence_bundle=bundle,
         actual_route=actual_route,
+        attempted_routes=list(attempted_routes or []),
     )

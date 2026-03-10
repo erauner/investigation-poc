@@ -8,6 +8,7 @@ from investigation_service.models import (
     SubmittedStepArtifact,
 )
 from investigation_service.submission_materialization import (
+    materialize_attempt_only_submission,
     materialize_node_submission,
     materialize_service_submission,
     materialize_workload_submission,
@@ -38,6 +39,16 @@ def _peer_route(tool_path: list[str]) -> ActualRoute:
 
 def _planned_peer_route(step: EvidenceStepContract) -> ActualRoute:
     server = step.preferred_mcp_server or "kubernetes-mcp-server"
+    return ActualRoute(
+        source_kind="peer_mcp",
+        mcp_server=server,
+        tool_name=None,
+        tool_path=[server],
+    )
+
+
+def _planned_fallback_peer_route(step: EvidenceStepContract) -> ActualRoute:
+    server = step.fallback_mcp_server or step.preferred_mcp_server or "kubernetes-mcp-server"
     return ActualRoute(
         source_kind="peer_mcp",
         mcp_server=server,
@@ -95,9 +106,15 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
         try:
             runtime_snapshot = _kubernetes_mcp_client.collect_service_runtime(step.execution_inputs)
         except PeerMcpError as kube_exc:
-            raise PeerMcpError(
-                f"prometheus peer failed: {prom_exc}; kubernetes peer fallback failed: {kube_exc}"
-            ) from kube_exc
+            return materialize_attempt_only_submission(
+                step,
+                actual_route=_planned_peer_route(step),
+                attempted_routes=[_planned_peer_route(step), _planned_fallback_peer_route(step)],
+                limitations=[
+                    f"prometheus peer failed: {prom_exc}",
+                    f"kubernetes peer fallback failed: {kube_exc}",
+                ],
+            )
         return materialize_service_submission(
             step,
             target=runtime_snapshot.target,
@@ -105,12 +122,24 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             object_state=runtime_snapshot.object_state,
             events=runtime_snapshot.events,
             actual_route=_peer_route(runtime_snapshot.tool_path),
+            attempted_routes=[_planned_peer_route(step)],
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
         )
 
     if metrics_snapshot.metrics.get("prometheus_available"):
-        runtime_snapshot = _kubernetes_mcp_client.collect_service_runtime(step.execution_inputs)
+        try:
+            runtime_snapshot = _kubernetes_mcp_client.collect_service_runtime(step.execution_inputs)
+        except PeerMcpError as kube_exc:
+            return materialize_attempt_only_submission(
+                step,
+                actual_route=_peer_route(metrics_snapshot.tool_path),
+                attempted_routes=[
+                    _peer_route(metrics_snapshot.tool_path),
+                    _planned_fallback_peer_route(step),
+                ],
+                limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
+            )
         limitations = [*metrics_snapshot.limitations, *runtime_snapshot.limitations]
         return materialize_service_submission(
             step,
@@ -123,7 +152,18 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             extra_limitations=limitations,
         )
 
-    runtime_snapshot = _kubernetes_mcp_client.collect_service_runtime(step.execution_inputs)
+    try:
+        runtime_snapshot = _kubernetes_mcp_client.collect_service_runtime(step.execution_inputs)
+    except PeerMcpError as kube_exc:
+        return materialize_attempt_only_submission(
+            step,
+            actual_route=_peer_route(metrics_snapshot.tool_path),
+            attempted_routes=[
+                _peer_route(metrics_snapshot.tool_path),
+                _planned_fallback_peer_route(step),
+            ],
+            limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
+        )
     limitations = [*metrics_snapshot.limitations, *runtime_snapshot.limitations]
     return materialize_service_submission(
         step,
@@ -132,18 +172,9 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
         object_state=runtime_snapshot.object_state,
         events=runtime_snapshot.events,
         actual_route=_peer_route(runtime_snapshot.tool_path),
+        attempted_routes=[_peer_route(metrics_snapshot.tool_path)],
         cluster_alias=runtime_snapshot.cluster_alias,
         extra_limitations=limitations,
-    )
-
-
-def _service_submission_via_internal_fallback(step: EvidenceStepContract, reason: str) -> SubmittedStepArtifact:
-    bundle = _service_bundle(step)
-    limitations = sorted(set([*bundle.limitations, f"peer service MCP fallback: {reason}"]))
-    return SubmittedStepArtifact(
-        step_id=step.step_id,
-        evidence_bundle=bundle.model_copy(update={"limitations": limitations}),
-        actual_route=_actual_route("collect_service_evidence"),
     )
 
 
@@ -202,16 +233,13 @@ def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact | N
         try:
             return _workload_submission_via_peer_mcp(step)
         except PeerMcpError as exc:
-            return SubmittedStepArtifact(
-                step_id=step.step_id,
+            return materialize_attempt_only_submission(
+                step,
                 actual_route=_planned_peer_route(step),
                 limitations=[f"peer workload MCP attempt failed: {exc}"],
             )
     if step.requested_capability == "service_evidence_plane":
-        try:
-            return _service_submission_via_peer_mcp(step)
-        except PeerMcpError as exc:
-            return _service_submission_via_internal_fallback(step, str(exc))
+        return _service_submission_via_peer_mcp(step)
     if step.requested_capability == "node_evidence_plane":
         try:
             return _node_submission_via_peer_mcp(step)

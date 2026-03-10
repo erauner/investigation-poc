@@ -234,6 +234,7 @@ class SubmittedStepArtifact(BaseModel):
     evidence_bundle: "EvidenceBundle | None" = None
     change_candidates: "CorrelatedChangesResponse | None" = None
     actual_route: ActualRoute
+    attempted_routes: list[ActualRoute] = Field(default_factory=list)
     summary: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
 

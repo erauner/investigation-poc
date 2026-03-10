@@ -694,6 +694,7 @@ def _step_artifact_from_submission(
         requested_capability=step.suggested_capability,
         route_satisfaction=_route_satisfaction(step, submission.actual_route),
         actual_route=submission.actual_route,
+        attempted_routes=list(submission.attempted_routes),
     )
     if artifact_type == "change_candidates":
         if submission.change_candidates is None:
@@ -726,13 +727,14 @@ def _step_artifact_from_submission(
     )
 
 
-def _attempt_only_workload_submission(
+def _attempt_only_peer_submission(
     step: PlanStep,
     submission: SubmittedStepArtifact,
 ) -> bool:
+    if step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane"}:
+        return False
     return (
-        step.suggested_capability == "workload_evidence_plane"
-        and submission.evidence_bundle is None
+        submission.evidence_bundle is None
         and submission.change_candidates is None
         and submission.actual_route.source_kind == "peer_mcp"
         and bool(submission.actual_route.mcp_server)
@@ -871,7 +873,7 @@ def advance_active_evidence_batch(
         )
         for step_id, submission in list(submissions_by_step.items()):
             step = pending_by_id[step_id]
-            if _attempt_only_workload_submission(step, submission):
+            if _attempt_only_peer_submission(step, submission):
                 attempted_peer_submissions[step_id] = submission
                 del submissions_by_step[step_id]
         if submissions_by_step:
@@ -890,7 +892,7 @@ def advance_active_evidence_batch(
         for step in remaining_steps
         if _runtime_spec(step).execution_mode != "control_plane_only"
         and (
-            step.suggested_capability != "workload_evidence_plane"
+            step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane"}
             or step.id not in attempted_peer_submissions
         )
     ]
@@ -939,7 +941,10 @@ def _execute_step(
     limitations: list[str] = []
     if attempted_peer_submission is not None:
         route_provenance = route_provenance.model_copy(
-            update={"attempted_routes": [attempted_peer_submission.actual_route]}
+            update={
+                "attempted_routes": list(attempted_peer_submission.attempted_routes)
+                or [attempted_peer_submission.actual_route]
+            }
         )
         limitations.extend(attempted_peer_submission.limitations)
 

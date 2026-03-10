@@ -1122,3 +1122,149 @@ def test_render_investigation_report_preserves_failed_workload_peer_attempt_in_t
         "pods_log",
     ]
     assert "peer workload MCP attempt failed: peer unavailable" in report.limitations
+
+
+def test_service_peer_failure_provenance_flows_into_rendered_report(monkeypatch) -> None:
+    monkeypatch.setattr(
+        reporting,
+        "collect_service_evidence",
+        lambda _req: EvidenceBundle(
+            cluster="artifact-cluster",
+            target=TargetRef(namespace="artifact-ns", kind="service", name="api"),
+            object_state={"kind": "service", "name": "api"},
+            events=[],
+            log_excerpt="",
+            metrics={"service_error_rate": 0.4, "prometheus_available": False},
+            findings=[
+                Finding(
+                    severity="warning",
+                    source="heuristic",
+                    title="Service instability",
+                    evidence="Observed elevated service error rate",
+                )
+            ],
+            limitations=[],
+            enrichment_hints=[],
+        ),
+    )
+    monkeypatch.setattr(
+        reporting,
+        "collect_change_candidates",
+        lambda _req: CorrelatedChangesResponse(
+            cluster="artifact-cluster",
+            scope="service",
+            target="service/api",
+            changes=[],
+            limitations=[],
+        ),
+    )
+
+    service_target = InvestigationTarget(
+        source="manual",
+        scope="service",
+        cluster="artifact-cluster",
+        namespace="artifact-ns",
+        requested_target="service/api",
+        target="service/api",
+        node_name=None,
+        service_name="api",
+        profile="service",
+        lookback_minutes=15,
+        normalization_notes=["artifact-note"],
+    )
+    service_plan = InvestigationPlan(
+        mode="targeted_rca",
+        objective="Investigate service/api",
+        target=service_target,
+        steps=[
+            PlanStep(
+                id="collect-target-evidence",
+                title="Collect service evidence",
+                category="evidence",
+                plane="service",
+                rationale="Collect target evidence",
+                suggested_capability="service_evidence_plane",
+                preferred_mcp_server="prometheus-mcp-server",
+                preferred_tool_names=["execute_query", "execute_range_query"],
+                fallback_mcp_server="kubernetes-mcp-server",
+                fallback_tool_names=["resources_get", "events_list"],
+            ),
+            PlanStep(
+                id="collect-change-candidates",
+                title="Collect change candidates",
+                category="evidence",
+                plane="changes",
+                rationale="Collect change candidates",
+                suggested_capability="collect_change_candidates",
+            ),
+        ],
+        evidence_batches=[
+            EvidenceBatch(
+                id="batch-1",
+                title="Initial evidence",
+                status="pending",
+                intent="Collect target evidence.",
+                step_ids=["collect-target-evidence", "collect-change-candidates"],
+            )
+        ],
+        active_batch_id="batch-1",
+        planning_notes=["artifact-note"],
+    )
+
+    runtime = reporting.advance_investigation_runtime(
+        AdvanceInvestigationRuntimeRequest(
+            incident=BuildInvestigationPlanRequest(
+                namespace="artifact-ns",
+                target="service/api",
+                profile="service",
+                service_name="api",
+            ),
+            execution_context=ReportingExecutionContext(updated_plan=service_plan, executions=[]),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="prometheus-mcp-server",
+                        tool_name=None,
+                        tool_path=["prometheus-mcp-server"],
+                    ),
+                    attempted_routes=[
+                        ActualRoute(
+                            source_kind="peer_mcp",
+                            mcp_server="prometheus-mcp-server",
+                            tool_name=None,
+                            tool_path=["prometheus-mcp-server"],
+                        ),
+                        ActualRoute(
+                            source_kind="peer_mcp",
+                            mcp_server="kubernetes-mcp-server",
+                            tool_name=None,
+                            tool_path=["kubernetes-mcp-server"],
+                        ),
+                    ],
+                    limitations=["prometheus peer failed: prom down", "kubernetes peer fallback failed: kube down"],
+                )
+            ],
+        )
+    )
+
+    report = reporting.render_investigation_report(
+        InvestigationReportingRequest(
+            target="service/api",
+            profile="service",
+            include_related_data=False,
+            execution_context=runtime.execution_context,
+        )
+    )
+
+    assert report.tool_path_trace is not None
+    trace = report.tool_path_trace.step_provenance[0]
+    assert trace.step_id == "collect-target-evidence"
+    assert trace.provenance.actual_route.tool_name == "collect_service_evidence"
+    assert [route.mcp_server for route in trace.provenance.attempted_routes] == [
+        "prometheus-mcp-server",
+        "kubernetes-mcp-server",
+    ]
+    assert "prometheus peer failed: prom down" in report.limitations
+    assert "kubernetes peer fallback failed: kube down" in report.limitations
