@@ -2,6 +2,7 @@ from investigation_orchestrator.entrypoint import run_orchestrated_investigation
 from investigation_orchestrator.checkpointing import GraphCheckpointConfig, create_in_memory_checkpointer
 from investigation_orchestrator.graph import get_investigation_graph_state, update_investigation_graph_state
 from investigation_orchestrator.evidence_runner import ExternalStepCollectionResult
+from investigation_orchestrator.runtime_logging import summarize_graph_state
 from investigation_orchestrator.state import PendingExplorationReview
 from investigation_service.models import (
     ActiveEvidenceBatchContract,
@@ -1443,6 +1444,7 @@ def test_runtime_pauses_for_pending_workload_exploration_review(monkeypatch) -> 
                     adequacy_outcome="weak",
                     adequacy_reasons=["logs unavailable"],
                     proposed_probe="Probe one additional runtime pod for deployment/crashy excluding crashy-a.",
+                    probe_kind="alternate_runtime_pod",
                 )
             )
             if allow_exploration_review
@@ -1498,6 +1500,9 @@ def test_runtime_pauses_for_pending_workload_exploration_review(monkeypatch) -> 
     assert result.next_nodes == ("apply_exploration_review",)
     assert result.state["pending_exploration_review"] is not None
     assert result.state["pending_exploration_review"].decision is None
+    assert result.state["pending_exploration_review"].probe_kind == "alternate_runtime_pod"
+    assert summarize_graph_state(result.state)["pending_review_probe_kind"] == "alternate_runtime_pod"
+    assert summarize_graph_state(result.state)["pending_review_stop_reason"] == "awaiting_review"
 
     updated_state = entrypoint._apply_exploration_review_decision(
         runtime=entrypoint.OrchestratorRuntimeConfig(
@@ -1615,6 +1620,7 @@ def test_runtime_with_checkpointing_does_not_enable_review_without_flag(monkeypa
                     adequacy_outcome="weak",
                     adequacy_reasons=["logs unavailable"],
                     proposed_probe="Probe one additional runtime pod for deployment/crashy excluding crashy-a.",
+                    probe_kind="alternate_runtime_pod",
                 )
             )
             if allow_exploration_review
@@ -2601,6 +2607,72 @@ def test_orchestrator_runtime_logs_are_redacted(monkeypatch, caplog) -> None:
     assert "log-thread" not in caplog.text
     assert "operator-smoke" not in caplog.text
     assert "PodCrashLooping" not in caplog.text
+
+
+def test_summarize_graph_state_handles_pending_review_without_probe_kind() -> None:
+    step = EvidenceStepContract(
+        step_id="collect-target-evidence",
+        title="Collect workload evidence",
+        plane="workload",
+        artifact_type="evidence_bundle",
+        requested_capability="workload_evidence_plane",
+        preferred_mcp_server="kubernetes-mcp-server",
+        preferred_tool_names=["pods_log"],
+        fallback_mcp_server=None,
+        fallback_tool_names=[],
+        execution_mode="external_preferred",
+        execution_inputs=StepExecutionInputs(
+            request_kind="target_context",
+            cluster="erauner-home",
+            namespace="operator-smoke",
+            target="deployment/crashy",
+            profile="workload",
+            lookback_minutes=15,
+        ),
+    )
+    baseline_artifact = SubmittedStepArtifact(
+        step_id="collect-target-evidence",
+        actual_route={
+            "source_kind": "peer_mcp",
+            "mcp_server": "kubernetes-mcp-server",
+            "tool_name": "pods_log",
+            "tool_path": ["kubernetes-mcp-server", "pods_log"],
+        },
+        evidence_bundle={
+            "cluster": "erauner-home",
+            "target": {"namespace": "operator-smoke", "kind": "deployment", "name": "crashy"},
+            "object_state": {"kind": "deployment", "name": "crashy", "namespace": "operator-smoke"},
+            "events": [],
+            "log_excerpt": "",
+            "metrics": {},
+            "findings": [],
+            "limitations": ["logs unavailable"],
+            "enrichment_hints": [],
+        },
+    )
+
+    summary = summarize_graph_state(
+        {
+            "execution_context": _context(),
+            "active_batch": None,
+            "submitted_steps": [],
+            "pending_exploration_review": PendingExplorationReview(
+                batch_id="batch-1",
+                step=step,
+                capability="workload_evidence_plane",
+                baseline_artifact=baseline_artifact,
+                baseline_runtime_pod_name="crashy-a",
+                adequacy_outcome="weak",
+                adequacy_reasons=["logs unavailable"],
+                proposed_probe="Probe one additional runtime pod for deployment/crashy excluding crashy-a.",
+            ),
+            "remaining_batch_budget": 1,
+            "final_report": None,
+        }
+    )
+
+    assert summary["pending_review_probe_kind"] is None
+    assert summary["pending_review_stop_reason"] == "awaiting_review"
 
 
 def test_internal_graph_resume_applies_pod_compatibility_when_request_is_provided(monkeypatch) -> None:

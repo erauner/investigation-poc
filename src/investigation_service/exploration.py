@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from typing import Literal
 
 from .adequacy import (
+    AdequacyOutcome,
     EvidenceAdequacyAssessment,
     NO_CRITICAL_SIGNALS_TITLE,
     assess_bundle_for_capability,
@@ -49,6 +51,36 @@ class ExploratoryScoutContext:
     baseline_assessment: EvidenceAdequacyAssessment
     baseline_summary: BaselineEvidenceSummary
     hints: ScoutHints
+
+
+ScoutStopReason = Literal[
+    "awaiting_review",
+    "review_skipped",
+    "review_context_not_applicable",
+    "probe_failed",
+    "probe_not_improving",
+    "probe_improved_artifact",
+]
+
+
+@dataclass(frozen=True)
+class ScoutBudgetUsage:
+    probe_runs_used: int = 0
+    additional_pods_used: int = 0
+    metric_families_requested: int = 0
+    related_pods_requested: int = 0
+
+
+@dataclass(frozen=True)
+class BoundedScoutObservation:
+    capability: str
+    step_id: str
+    plane: str
+    probe_kind: ProbeKind
+    baseline_outcome: AdequacyOutcome
+    baseline_reasons: tuple[str, ...]
+    stop_reason: ScoutStopReason
+    budget_usage: ScoutBudgetUsage
 
 
 def build_baseline_evidence_summary(bundle: EvidenceBundle) -> BaselineEvidenceSummary:
@@ -118,4 +150,23 @@ def build_exploratory_scout_context(
         baseline_assessment=assessment,
         baseline_summary=summary,
         hints=hints,
+    )
+
+
+def build_bounded_scout_observation(
+    *,
+    context: ExploratoryScoutContext,
+    probe_kind: ProbeKind,
+    stop_reason: ScoutStopReason,
+    budget_usage: ScoutBudgetUsage,
+) -> BoundedScoutObservation:
+    return BoundedScoutObservation(
+        capability=context.capability,
+        step_id=context.step_id,
+        plane=context.plane,
+        probe_kind=probe_kind,
+        baseline_outcome=context.baseline_assessment.outcome,
+        baseline_reasons=tuple(context.baseline_assessment.reasons),
+        stop_reason=stop_reason,
+        budget_usage=budget_usage,
     )

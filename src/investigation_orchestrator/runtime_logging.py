@@ -3,6 +3,8 @@ import logging
 import hashlib
 from typing import Any
 
+from investigation_service.exploration import BoundedScoutObservation
+
 from .checkpointing import GraphCheckpointConfig
 from .state import OrchestrationState
 
@@ -54,9 +56,42 @@ def summarize_graph_state(state: OrchestrationState | dict[str, Any] | None) -> 
         "pending_review_capability": pending_review.capability if pending_review is not None else None,
         "pending_review_decision": pending_review.decision if pending_review is not None else None,
         "pending_review_adequacy_outcome": pending_review.adequacy_outcome if pending_review is not None else None,
+        "pending_review_probe_kind": pending_review.probe_kind if pending_review is not None else None,
+        "pending_review_stop_reason": "awaiting_review" if pending_review is not None else None,
         "remaining_batch_budget": state.get("remaining_batch_budget"),
         "has_final_report": final_report is not None,
     }
+
+
+def summarize_bounded_scout_observation(
+    observation: BoundedScoutObservation,
+    *,
+    batch_id: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "batch_id": batch_id,
+        "capability": observation.capability,
+        "step_id": observation.step_id,
+        "plane": observation.plane,
+        "probe_kind": observation.probe_kind,
+        "baseline_outcome": observation.baseline_outcome,
+        "baseline_reasons": list(observation.baseline_reasons),
+        "stop_reason": observation.stop_reason,
+        "probe_runs_used": observation.budget_usage.probe_runs_used,
+        "additional_pods_used": observation.budget_usage.additional_pods_used,
+        "metric_families_requested": observation.budget_usage.metric_families_requested,
+        "related_pods_requested": observation.budget_usage.related_pods_requested,
+    }
+
+
+def log_bounded_scout(
+    observation: BoundedScoutObservation,
+    *,
+    batch_id: str | None = None,
+) -> None:
+    logger = _ensure_logger()
+    encoded_summary = json.dumps(summarize_bounded_scout_observation(observation, batch_id=batch_id), sort_keys=True)
+    logger.info("orchestrator_bounded_scout summary=%s", encoded_summary)
 
 
 def log_graph_run(

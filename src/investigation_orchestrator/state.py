@@ -12,6 +12,7 @@ from investigation_service.models import (
     ReportingExecutionContext,
     SubmittedStepArtifact,
 )
+from investigation_service.execution_policy import ProbeKind
 
 
 class PendingExplorationReview(BaseModel):
@@ -23,6 +24,7 @@ class PendingExplorationReview(BaseModel):
     adequacy_outcome: Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"]
     adequacy_reasons: list[str] = Field(default_factory=list)
     proposed_probe: str
+    probe_kind: ProbeKind | None = None
     decision: Literal["approve", "skip"] | None = None
 
 

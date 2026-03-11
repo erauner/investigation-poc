@@ -4,11 +4,18 @@ from investigation_service.adequacy import (
     assessment_improves,
     bundle_improves_for_capability,
 )
-from investigation_service.exploration import ExploratoryScoutContext, build_exploratory_scout_context
+from investigation_service.exploration import (
+    BoundedScoutObservation,
+    ExploratoryScoutContext,
+    ScoutBudgetUsage,
+    build_bounded_scout_observation,
+    build_exploratory_scout_context,
+)
 from investigation_service.models import ActualRoute, EvidenceStepContract, SubmittedStepArtifact
 from investigation_service.submission_materialization import materialize_workload_submission
 
 from .mcp_clients import KubernetesMcpClient, PeerMcpError, WorkloadRuntimeSnapshot
+from .runtime_logging import log_bounded_scout
 from .state import PendingExplorationReview
 
 
@@ -87,7 +94,7 @@ def maybe_plan_workload_exploration_review(
     if baseline_assessment.outcome not in policy.human_review_outcomes:
         return None
     target = step.execution_inputs.target or baseline_snapshot.target.name
-    return PendingExplorationReview(
+    review = PendingExplorationReview(
         batch_id=batch_id,
         step=step,
         capability=step.requested_capability or "workload_evidence_plane",
@@ -96,7 +103,18 @@ def maybe_plan_workload_exploration_review(
         adequacy_outcome=baseline_assessment.outcome,
         adequacy_reasons=list(baseline_assessment.reasons),
         proposed_probe=f"Probe one additional runtime pod for {target} excluding {runtime_pod_name}.",
+        probe_kind="alternate_runtime_pod",
     )
+    log_bounded_scout(
+        build_bounded_scout_observation(
+            context=scout_context,
+            probe_kind="alternate_runtime_pod",
+            stop_reason="awaiting_review",
+            budget_usage=ScoutBudgetUsage(),
+        ),
+        batch_id=batch_id,
+    )
+    return review
 
 
 def _failed_scout_artifact(
@@ -140,6 +158,19 @@ def execute_workload_exploration_review(
     baseline_artifact = review.baseline_artifact
     scout_context = build_exploratory_scout_context(step=review.step, artifact=baseline_artifact)
     if scout_context is None:
+        log_bounded_scout(
+            BoundedScoutObservation(
+                capability=review.capability,
+                step_id=review.step.step_id,
+                plane=review.step.plane,
+                probe_kind=review.probe_kind or "alternate_runtime_pod",
+                baseline_outcome=review.adequacy_outcome,
+                baseline_reasons=tuple(review.adequacy_reasons),
+                stop_reason="review_context_not_applicable",
+                budget_usage=ScoutBudgetUsage(),
+            ),
+            batch_id=review.batch_id,
+        )
         if baseline_artifact.evidence_bundle is None:
             return baseline_artifact
         return baseline_artifact.model_copy(
@@ -158,12 +189,25 @@ def execute_workload_exploration_review(
                 )
             }
         )
+    budget_usage = ScoutBudgetUsage(
+        probe_runs_used=1,
+        additional_pods_used=1,
+    )
     try:
         scout_snapshot = kubernetes_mcp_client.collect_workload_runtime(
             review.step.execution_inputs,
             excluded_pod_names=(review.baseline_runtime_pod_name,),
         )
     except PeerMcpError as exc:
+        log_bounded_scout(
+            build_bounded_scout_observation(
+                context=scout_context,
+                probe_kind=review.probe_kind or "alternate_runtime_pod",
+                stop_reason="probe_failed",
+                budget_usage=budget_usage,
+            ),
+            batch_id=review.batch_id,
+        )
         return _failed_scout_artifact(
             review.step,
             baseline_artifact=baseline_artifact,
@@ -182,10 +226,28 @@ def execute_workload_exploration_review(
         baseline_artifact.evidence_bundle,
         scout_artifact.evidence_bundle,
     ):
+        log_bounded_scout(
+            build_bounded_scout_observation(
+                context=scout_context,
+                probe_kind=review.probe_kind or "alternate_runtime_pod",
+                stop_reason="probe_improved_artifact",
+                budget_usage=budget_usage,
+            ),
+            batch_id=review.batch_id,
+        )
         return scout_artifact
 
     if baseline_artifact.evidence_bundle is None:
         return baseline_artifact
+    log_bounded_scout(
+        build_bounded_scout_observation(
+            context=scout_context,
+            probe_kind=review.probe_kind or "alternate_runtime_pod",
+            stop_reason="probe_not_improving",
+            budget_usage=budget_usage,
+        ),
+        batch_id=review.batch_id,
+    )
     return baseline_artifact.model_copy(
         update={
             "attempted_routes": [*baseline_artifact.attempted_routes, scout_artifact.actual_route],
@@ -198,6 +260,17 @@ def skip_workload_exploration_review(review: PendingExplorationReview) -> Submit
         raise ValueError("skip decision is required before skipping workload exploration review")
 
     baseline_artifact = review.baseline_artifact
+    scout_context = build_exploratory_scout_context(step=review.step, artifact=baseline_artifact)
+    if scout_context is not None:
+        log_bounded_scout(
+            build_bounded_scout_observation(
+                context=scout_context,
+                probe_kind=review.probe_kind or "alternate_runtime_pod",
+                stop_reason="review_skipped",
+                budget_usage=ScoutBudgetUsage(),
+            ),
+            batch_id=review.batch_id,
+        )
     if baseline_artifact.evidence_bundle is None:
         return baseline_artifact
     note = "bounded workload scout skipped by review decision"
@@ -237,6 +310,7 @@ def maybe_run_bounded_workload_scout(
             adequacy_outcome=baseline_assessment.outcome,
             adequacy_reasons=list(baseline_assessment.reasons),
             proposed_probe="auto-approved bounded workload scout",
+            probe_kind="alternate_runtime_pod",
             decision="approve",
         ),
         kubernetes_mcp_client=kubernetes_mcp_client,

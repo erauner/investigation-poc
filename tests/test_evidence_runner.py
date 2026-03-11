@@ -1,3 +1,6 @@
+import json
+import logging
+
 from investigation_orchestrator import evidence_runner
 from investigation_orchestrator.mcp_clients import (
     NodePodSummarySnapshot,
@@ -10,6 +13,19 @@ from investigation_orchestrator.mcp_clients import (
     _peer_prometheus_routing_unsupported,
     _normalize_object_state,
 )
+import pytest
+
+
+def _bounded_scout_summaries(caplog: pytest.LogCaptureFixture) -> list[dict[str, object]]:
+    summaries: list[dict[str, object]] = []
+    marker = "orchestrator_bounded_scout summary="
+    for record in caplog.records:
+        if record.name != "investigation_orchestrator.runtime":
+            continue
+        if marker not in record.message:
+            continue
+        summaries.append(json.loads(record.message.split(marker, 1)[1]))
+    return summaries
 from investigation_service.cluster_registry import ResolvedCluster
 from investigation_service.k8s_adapter import pick_runtime_pod_for_workload
 from investigation_service.models import (
@@ -170,7 +186,9 @@ def test_workload_external_step_records_failed_peer_attempt_for_downstream_fallb
     assert "peer workload MCP attempt failed: peer unavailable" in artifact.limitations
 
 
-def test_workload_external_step_runs_bounded_scout_and_keeps_improved_artifact(monkeypatch) -> None:
+def test_workload_external_step_runs_bounded_scout_and_keeps_improved_artifact(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _workload_step().model_copy(
         update={
             "execution_inputs": _workload_step().execution_inputs.model_copy(
@@ -179,6 +197,7 @@ def test_workload_external_step_runs_bounded_scout_and_keeps_improved_artifact(m
         }
     )
     calls: list[tuple[str, tuple[str, ...]]] = []
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
 
     def _collect(_self, _inputs, *, excluded_pod_names=()):
         calls.append((_inputs.target or "", excluded_pod_names))
@@ -234,9 +253,12 @@ def test_workload_external_step_runs_bounded_scout_and_keeps_improved_artifact(m
     assert any(item.title == "Crash Loop Detected" for item in artifact.evidence_bundle.findings)
     assert artifact.actual_route.tool_path[-1] == "pods_log"
     assert artifact.attempted_routes[0].tool_path[-1] == "pods_log"
+    assert _bounded_scout_summaries(caplog)[-1]["stop_reason"] == "probe_improved_artifact"
 
 
-def test_workload_external_step_keeps_baseline_when_scout_is_not_better(monkeypatch) -> None:
+def test_workload_external_step_keeps_baseline_when_scout_is_not_better(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _workload_step().model_copy(
         update={
             "execution_inputs": _workload_step().execution_inputs.model_copy(
@@ -244,6 +266,8 @@ def test_workload_external_step_keeps_baseline_when_scout_is_not_better(monkeypa
             )
         }
     )
+
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
 
     def _collect(_self, _inputs, *, excluded_pod_names=()):
         pod_name = "crashy-a" if not excluded_pod_names else "crashy-b"
@@ -276,9 +300,12 @@ def test_workload_external_step_keeps_baseline_when_scout_is_not_better(monkeypa
     assert artifact.evidence_bundle is not None
     assert any(item.title == "No Critical Signals Found" for item in artifact.evidence_bundle.findings)
     assert artifact.attempted_routes
+    assert _bounded_scout_summaries(caplog)[-1]["stop_reason"] == "probe_not_improving"
 
 
-def test_workload_external_step_keeps_baseline_and_records_failed_scout(monkeypatch) -> None:
+def test_workload_external_step_keeps_baseline_and_records_failed_scout(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _workload_step().model_copy(
         update={
             "execution_inputs": _workload_step().execution_inputs.model_copy(
@@ -286,6 +313,8 @@ def test_workload_external_step_keeps_baseline_and_records_failed_scout(monkeypa
             )
         }
     )
+
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
 
     def _collect(_self, _inputs, *, excluded_pod_names=()):
         if excluded_pod_names:
@@ -319,6 +348,9 @@ def test_workload_external_step_keeps_baseline_and_records_failed_scout(monkeypa
     assert artifact.evidence_bundle is not None
     assert "bounded workload scout failed: no sibling pod available" in artifact.evidence_bundle.limitations
     assert artifact.attempted_routes[0].tool_path == ["kubernetes-mcp-server"]
+    summary = _bounded_scout_summaries(caplog)[-1]
+    assert summary["stop_reason"] == "probe_failed"
+    assert summary["additional_pods_used"] == 1
 
 
 def test_workload_external_step_runs_scout_for_blocked_baseline(monkeypatch) -> None:
@@ -447,7 +479,9 @@ def test_workload_external_step_replaces_with_improved_non_adequate_scout(monkey
     assert "logs unavailable" in artifact.evidence_bundle.limitations
 
 
-def test_collect_external_steps_returns_pending_workload_review_when_enabled(monkeypatch) -> None:
+def test_collect_external_steps_returns_pending_workload_review_when_enabled(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _workload_step().model_copy(
         update={
             "execution_inputs": _workload_step().execution_inputs.model_copy(
@@ -455,6 +489,8 @@ def test_collect_external_steps_returns_pending_workload_review_when_enabled(mon
             )
         }
     )
+
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
 
     monkeypatch.setattr(
         evidence_runner,
@@ -518,9 +554,16 @@ def test_collect_external_steps_returns_pending_workload_review_when_enabled(mon
     assert result.pending_exploration_review.step.step_id == "collect-target-evidence"
     assert result.pending_exploration_review.adequacy_outcome == "weak"
     assert result.pending_exploration_review.baseline_runtime_pod_name == "crashy-a"
+    assert result.pending_exploration_review.probe_kind == "alternate_runtime_pod"
+    summary = _bounded_scout_summaries(caplog)[-1]
+    assert summary["batch_id"] == "batch-1"
+    assert summary["probe_kind"] == "alternate_runtime_pod"
+    assert summary["stop_reason"] == "awaiting_review"
 
 
-def test_apply_pending_exploration_review_skip_keeps_baseline_with_review_note(monkeypatch) -> None:
+def test_apply_pending_exploration_review_skip_keeps_baseline_with_review_note(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _workload_step().model_copy(
         update={
             "execution_inputs": _workload_step().execution_inputs.model_copy(
@@ -528,6 +571,8 @@ def test_apply_pending_exploration_review_skip_keeps_baseline_with_review_note(m
             )
         }
     )
+
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
 
     monkeypatch.setattr(
         evidence_runner,
@@ -591,6 +636,7 @@ def test_apply_pending_exploration_review_skip_keeps_baseline_with_review_note(m
 
     assert artifact.evidence_bundle is not None
     assert "bounded workload scout skipped by review decision" in artifact.evidence_bundle.limitations
+    assert _bounded_scout_summaries(caplog)[-1]["stop_reason"] == "review_skipped"
 
 
 def test_collect_external_steps_stops_after_first_pending_review(monkeypatch) -> None:
@@ -1003,9 +1049,12 @@ def test_service_external_step_records_dual_peer_attempts_when_kubernetes_enrich
     assert "kubernetes peer fallback failed: kube down" in artifact.evidence_bundle.limitations
 
 
-def test_service_follow_up_step_runs_bounded_range_scout_when_baseline_is_weak(monkeypatch) -> None:
+def test_service_follow_up_step_runs_bounded_range_scout_when_baseline_is_weak(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _service_follow_up_step()
     range_calls: list[int] = []
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
     monkeypatch.setattr(
         evidence_runner,
         "_prometheus_mcp_client",
@@ -1070,6 +1119,9 @@ def test_service_follow_up_step_runs_bounded_range_scout_when_baseline_is_weak(m
     assert artifact.evidence_bundle.metrics["service_error_rate"] == 0.5
     assert "prometheus unavailable or returned no usable results" not in artifact.evidence_bundle.limitations
     assert artifact.attempted_routes[0].mcp_server == "kubernetes-mcp-server"
+    summary = _bounded_scout_summaries(caplog)[-1]
+    assert summary["stop_reason"] == "probe_improved_artifact"
+    assert summary["metric_families_requested"] == 2
 
 
 def test_service_follow_up_step_clears_stale_prometheus_failure_limitations_after_range_recovery(monkeypatch) -> None:
@@ -1129,8 +1181,11 @@ def test_service_follow_up_step_clears_stale_prometheus_failure_limitations_afte
     ]
 
 
-def test_service_follow_up_step_keeps_baseline_when_range_scout_does_not_improve(monkeypatch) -> None:
+def test_service_follow_up_step_keeps_baseline_when_range_scout_does_not_improve(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _service_follow_up_step()
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
     monkeypatch.setattr(
         evidence_runner,
         "_prometheus_mcp_client",
@@ -1188,10 +1243,14 @@ def test_service_follow_up_step_keeps_baseline_when_range_scout_does_not_improve
 
     assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
     assert artifact.attempted_routes[-1].mcp_server == "prometheus-mcp-server"
+    assert _bounded_scout_summaries(caplog)[-1]["stop_reason"] == "probe_not_improving"
 
 
-def test_service_follow_up_step_records_failed_range_scout_without_changing_shape(monkeypatch) -> None:
+def test_service_follow_up_step_records_failed_range_scout_without_changing_shape(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _service_follow_up_step()
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
     monkeypatch.setattr(
         evidence_runner,
         "_prometheus_mcp_client",
@@ -1241,6 +1300,7 @@ def test_service_follow_up_step_records_failed_range_scout_without_changing_shap
     assert artifact.evidence_bundle is not None
     assert "bounded service scout failed: range scout failed" in artifact.evidence_bundle.limitations
     assert artifact.attempted_routes[-1].tool_path == ["prometheus-mcp-server"]
+    assert _bounded_scout_summaries(caplog)[-1]["stop_reason"] == "probe_failed"
 
 
 def test_primary_service_step_never_invokes_bounded_range_scout(monkeypatch) -> None:
@@ -1564,9 +1624,12 @@ def test_node_external_step_uses_kubernetes_peer_when_prometheus_hard_fails(monk
     assert "runtime data limited to node scope" in artifact.evidence_bundle.limitations
 
 
-def test_node_external_step_runs_bounded_node_scout_for_weak_saturation_signal(monkeypatch) -> None:
+def test_node_external_step_runs_bounded_node_scout_for_weak_saturation_signal(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _node_step()
     scout_calls: list[int] = []
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
     monkeypatch.setattr(
         evidence_runner,
         "_prometheus_mcp_client",
@@ -1632,11 +1695,17 @@ def test_node_external_step_runs_bounded_node_scout_for_weak_saturation_signal(m
     assert artifact.evidence_bundle is not None
     assert artifact.evidence_bundle.object_state["top_pods_by_memory_request"][0]["name"] == "api-0"
     assert artifact.attempted_routes[0].mcp_server == "prometheus-mcp-server"
+    summary = _bounded_scout_summaries(caplog)[-1]
+    assert summary["stop_reason"] == "probe_improved_artifact"
+    assert summary["related_pods_requested"] == 5
 
 
-def test_node_external_step_skips_bounded_node_scout_for_adequate_baseline(monkeypatch) -> None:
+def test_node_external_step_skips_bounded_node_scout_for_adequate_baseline(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _node_step()
     scout_calls: list[int] = []
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
     monkeypatch.setattr(
         evidence_runner,
         "_prometheus_mcp_client",
@@ -1696,10 +1765,14 @@ def test_node_external_step_skips_bounded_node_scout_for_adequate_baseline(monke
         ["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
         ["kubernetes-mcp-server", "resources_get", "events_list"],
     ]
+    assert _bounded_scout_summaries(caplog) == []
 
 
-def test_node_external_step_records_failed_bounded_node_scout_without_changing_shape(monkeypatch) -> None:
+def test_node_external_step_records_failed_bounded_node_scout_without_changing_shape(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
     step = _node_step()
+    caplog.set_level(logging.INFO, logger="investigation_orchestrator.runtime")
     monkeypatch.setattr(
         evidence_runner,
         "_prometheus_mcp_client",
@@ -1749,6 +1822,7 @@ def test_node_external_step_records_failed_bounded_node_scout_without_changing_s
     assert artifact.evidence_bundle is not None
     assert "bounded node scout failed: node scout failed" in artifact.evidence_bundle.limitations
     assert artifact.attempted_routes[-1].tool_path == ["kubernetes-mcp-server"]
+    assert _bounded_scout_summaries(caplog)[-1]["stop_reason"] == "probe_failed"
 
 
 def test_node_external_step_records_failed_peer_attempts_for_downstream_fallback(monkeypatch) -> None:
