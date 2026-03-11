@@ -126,6 +126,42 @@ def test_classify_investigation_mode_promotes_resolved_question_targets_to_targe
     assert mode == "targeted_rca"
 
 
+def test_resolve_primary_target_expands_explicit_pod_shorthand() -> None:
+    unhealthy = type(
+        "UnhealthyPodResponse",
+        (),
+        {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+    )()
+    deps = _deps(calls=[])
+    deps = PlannerDeps(**{**deps.__dict__, "find_unhealthy_pod": lambda req: unhealthy})
+
+    target = resolve_primary_target(
+        InvestigationReportRequest(namespace="default", target="pod"),
+        deps,
+    )
+
+    assert target.target == "pod/crashy-abc123"
+    assert "resolved vague workload target to pod/crashy-abc123" in target.normalization_notes
+
+
+def test_resolve_primary_target_expands_explicit_workload_shorthand() -> None:
+    unhealthy = type(
+        "UnhealthyPodResponse",
+        (),
+        {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+    )()
+    deps = _deps(calls=[])
+    deps = PlannerDeps(**{**deps.__dict__, "find_unhealthy_pod": lambda req: unhealthy})
+
+    target = resolve_primary_target(
+        InvestigationReportRequest(namespace="default", target="workload"),
+        deps,
+    )
+
+    assert target.target == "pod/crashy-abc123"
+    assert "resolved vague workload target to pod/crashy-abc123" in target.normalization_notes
+
+
 def test_build_investigation_plan_creates_targeted_plan_without_collecting_evidence() -> None:
     calls: list[str] = []
 

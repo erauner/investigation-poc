@@ -10,6 +10,9 @@ from .ingress import (
 )
 from .k8s_adapter import (
     find_unhealthy_workloads as find_unhealthy_workloads_impl,
+    get_backend_cr,
+    get_cluster_cr,
+    get_frontend_cr,
     get_k8s_object,
     get_pod_logs,
     get_related_events,
@@ -370,9 +373,9 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
             canonical_target=_canonical_target,
             scope_from_target=_scope_from_target,
             resolve_cluster=resolve_cluster,
-            get_backend_cr=lambda *args, **kwargs: {},
-            get_frontend_cr=lambda *args, **kwargs: {},
-            get_cluster_cr=lambda *args, **kwargs: {},
+            get_backend_cr=get_backend_cr,
+            get_frontend_cr=get_frontend_cr,
+            get_cluster_cr=get_cluster_cr,
         ),
     )
     try:

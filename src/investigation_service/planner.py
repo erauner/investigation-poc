@@ -163,7 +163,7 @@ def normalized_request(
     deps: PlannerDeps,
 ) -> NormalizedInvestigationRequest:
     _, seed = _subject_set_and_seed(req, deps)
-    return normalized_request_from_planner_seed(seed)
+    return _normalized_request_from_seed(seed, deps)
 
 
 def resolve_primary_target(
@@ -171,7 +171,7 @@ def resolve_primary_target(
     deps: PlannerDeps,
 ) -> InvestigationTarget:
     _, seed = _subject_set_and_seed(req, deps)
-    normalized = normalized_request_from_planner_seed(seed)
+    normalized = _normalized_request_from_seed(seed, deps)
     requested_target = seed.requested_target or normalized.target
     return investigation_target_from_normalized(normalized, requested_target=requested_target)
 
@@ -200,9 +200,10 @@ def _subject_set_and_seed(
 
 def _seed_to_normalized_or_none(
     seed: InvestigationPlannerSeed,
+    deps: PlannerDeps,
 ) -> NormalizedInvestigationRequest | None:
     try:
-        return normalized_request_from_planner_seed(seed)
+        return _normalized_request_from_seed(seed, deps)
     except ValueError as exc:
         message = str(exc)
         if message.startswith("bounded ingress ambiguity:") or message == (
@@ -210,6 +211,14 @@ def _seed_to_normalized_or_none(
         ):
             return None
         raise
+
+
+def _normalized_request_from_seed(
+    seed: InvestigationPlannerSeed,
+    deps: PlannerDeps,
+) -> NormalizedInvestigationRequest:
+    normalized = normalized_request_from_planner_seed(seed)
+    return resolve_vague_workload_target(normalized, deps)
 
 
 def resolve_vague_workload_target(
@@ -1355,7 +1364,7 @@ def build_investigation_plan(
     report_req = _report_request_from_plan_request(req)
     subject_set, seed = _subject_set_and_seed(report_req, deps)
     subject_context = seed.subject_context
-    normalized = _seed_to_normalized_or_none(seed)
+    normalized = _seed_to_normalized_or_none(seed, deps)
     resolved_target = (
         investigation_target_from_normalized(
             normalized,
@@ -1371,7 +1380,7 @@ def build_investigation_plan(
         subject_resolution_status=subject_context.resolution_status,
     )
     if mode != "factual_analysis" and resolved_target is None and subject_context.resolution_status != "unresolved":
-        normalized_request_from_planner_seed(seed)
+        _normalized_request_from_seed(seed, deps)
 
     if mode == "alert_rca":
         if resolved_target is None:

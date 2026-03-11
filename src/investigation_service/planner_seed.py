@@ -172,7 +172,7 @@ def _execution_focus_for_subject(
             raise ValueError("namespace is required for Frontend targets")
         cluster = _resolve_cluster(deps, subject_set.scope.cluster)
         frontend = deps.get_frontend_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
-        if profile == "service":
+        if profile == "service" and "explicit_target" not in focus.sources:
             target = f"service/{focus.name}"
             scope = "service"
             profile = "service"
@@ -188,13 +188,7 @@ def _execution_focus_for_subject(
         cluster = _resolve_cluster(deps, subject_set.scope.cluster)
         cluster_cr = deps.get_cluster_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
         if cluster_cr.get("error"):
-            notes.append(f"cluster lookup failed for {focus.name}; retaining logical cluster target")
-            return PlannerSeedExecutionFocus(
-                scope="workload",
-                target=f"Cluster/{focus.name}",
-                profile=profile,
-                service_name=service_name,
-            )
+            raise ValueError(f"cluster lookup failed for {focus.name}: {cluster_cr['error']}")
         statuses = cluster_cr.get("status", {}).get("componentStatuses") or []
         if not statuses:
             raise ValueError(f"cluster {focus.name} has no componentStatuses to investigate")

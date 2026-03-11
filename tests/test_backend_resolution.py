@@ -127,7 +127,7 @@ def test_frontend_resolution_notes_fallback_when_frontend_lookup_fails() -> None
     assert "frontend lookup failed; using deployment/landing fallback" in normalized.normalization_notes
 
 
-def test_frontend_service_profile_resolves_to_service_when_lookup_fails() -> None:
+def test_explicit_frontend_target_stays_workload_scope_even_with_service_profile() -> None:
     deps = _deps(
         get_frontend_cr=lambda namespace, name, cluster=None: {
             "error": "not found",
@@ -145,12 +145,12 @@ def test_frontend_service_profile_resolves_to_service_when_lookup_fails() -> Non
     )
 
     assert normalized.cluster == "erauner-home"
-    assert normalized.scope == "service"
+    assert normalized.scope == "workload"
     assert normalized.profile == "service"
     assert normalized.service_name == "landing"
-    assert normalized.target == "service/landing"
-    assert "resolved Frontend/landing to service/landing" in normalized.normalization_notes
-    assert "frontend lookup failed; using service/landing fallback" in normalized.normalization_notes
+    assert normalized.target == "deployment/landing"
+    assert "resolved Frontend/landing to deployment/landing" in normalized.normalization_notes
+    assert "frontend lookup failed; using deployment/landing fallback" in normalized.normalization_notes
 
 
 def test_cluster_resolution_picks_first_failing_component() -> None:

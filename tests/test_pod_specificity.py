@@ -235,7 +235,8 @@ def test_render_investigation_report_resolves_frontend_service_profile_to_servic
     assert target.profile == "service"
     assert target.service_name == "landing"
     assert target.target == "service/landing"
-    assert "resolved Frontend/landing to service/landing" in target.normalization_notes
+    assert "resolved Frontend/landing to deployment/landing" in target.normalization_notes
+    assert "profile promoted to service after resolving target kind=service" in target.normalization_notes
     assert report.target == "service/landing"
 
 

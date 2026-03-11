@@ -125,3 +125,26 @@ def test_planner_seed_requested_target_uses_primary_subject_when_no_explicit_tar
     )
 
     assert seed.requested_target == "service/checkout"
+
+
+def test_planner_seed_raises_when_cluster_lookup_fails() -> None:
+    focus = InvestigationSubjectRef(
+        kind="express_cluster",
+        name="tenant",
+        cluster="erauner-home",
+        namespace="operator-smoke",
+        confidence="high",
+        sources=["explicit_target"],
+    )
+    subject_set = _subject_set(focus=focus)
+
+    try:
+        planner_seed_from_subject_set(
+            subject_set,
+            subject_context=subject_context_from_subject_set(subject_set),
+            deps=_deps(get_cluster_cr=lambda namespace, name, cluster=None: {"error": "not found"}),
+        )
+    except ValueError as exc:
+        assert str(exc) == "cluster lookup failed for tenant: not found"
+    else:  # pragma: no cover - defensive
+        raise AssertionError("expected cluster lookup failure")
