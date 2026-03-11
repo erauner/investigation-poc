@@ -142,6 +142,7 @@ The intended steady-state architecture is:
 5. Execution remains single-focus for now.
    - richer semantic model first
    - multi-target planning deferred
+   - clarification may appear as a bounded terminal ambiguity outcome before any later resumable human-in-the-loop design is considered
 
 ## Gaps Not To Lose Track Of
 
@@ -153,6 +154,10 @@ These are easy to miss while doing the migration:
 - cross-namespace related subjects are possible semantically, but there is no strong lifecycle/cap enforcement yet
 - generic evidence planes must not become shadow semantic resolvers
 - more probing must not automatically mean higher confidence
+- clarification policy should stay narrow:
+  - deterministic narrowing first
+  - terminal clarification outcome second
+  - no implicit requirement for resumable graph interrupts yet
 
 ## Recommended Phases
 
@@ -226,7 +231,7 @@ Goal:
 - ingress stops at meaning, not final operational commitment
 
 Status:
-- next
+- in progress
 
 Current focus:
 - remove ingress-time vague-workload runtime narrowing

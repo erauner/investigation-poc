@@ -22,6 +22,7 @@ from investigation_service.models import (
     SubmittedStepArtifact,
     UpdateInvestigationPlanRequest,
 )
+from investigation_service.routing import canonical_target, scope_from_target
 from investigation_service.planner import (
     advance_active_evidence_batch,
     PlannerDeps,
@@ -156,6 +157,80 @@ def test_resolve_primary_target_expands_explicit_workload_shorthand() -> None:
         deps,
     )
 
+    assert target.target == "pod/crashy-abc123"
+    assert "resolved vague workload target to pod/crashy-abc123" in target.normalization_notes
+
+
+def test_resolve_primary_target_expands_vague_workload_question_through_post_seed_normalization() -> None:
+    unhealthy = type(
+        "UnhealthyPodResponse",
+        (),
+        {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+    )()
+    deps = _deps(calls=[])
+    deps = PlannerDeps(**{**deps.__dict__, "find_unhealthy_pod": lambda req: unhealthy})
+
+    target = resolve_primary_target(
+        InvestigationReportRequest(
+            namespace="default",
+            question="Investigate unhealthy workload in namespace default",
+        ),
+        deps,
+    )
+
+    assert target.requested_target == "workload"
+    assert target.target == "pod/crashy-abc123"
+    assert target.subject_context is not None
+    assert target.subject_context.primary_subject is not None
+    assert target.subject_context.primary_subject.kind == "resource_hint"
+    assert target.subject_context.primary_subject.name == "workload"
+    assert "resolved vague workload target to pod/crashy-abc123" in target.normalization_notes
+
+
+def test_build_investigation_plan_treats_vague_workload_question_without_candidate_as_factual() -> None:
+    unhealthy = type("UnhealthyPodResponse", (), {"candidate": None})()
+    deps = _deps(calls=[])
+    deps = PlannerDeps(**{**deps.__dict__, "find_unhealthy_pod": lambda req: unhealthy})
+
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(
+            namespace="default",
+            question="Investigate unhealthy workload in namespace default",
+        ),
+        deps,
+    )
+
+    assert plan.mode == "factual_analysis"
+    assert plan.target is None
+
+
+def test_resolve_primary_target_explicit_workload_shorthand_with_service_profile_still_resolves_workload() -> None:
+    unhealthy = type(
+        "UnhealthyPodResponse",
+        (),
+        {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+    )()
+    deps = _deps(calls=[])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "canonical_target": canonical_target,
+            "scope_from_target": scope_from_target,
+            "find_unhealthy_pod": lambda req: unhealthy,
+        }
+    )
+
+    target = resolve_primary_target(
+        InvestigationReportRequest(
+            namespace="default",
+            target="workload",
+            profile="service",
+            service_name="api",
+        ),
+        deps,
+    )
+
+    assert target.scope == "workload"
     assert target.target == "pod/crashy-abc123"
     assert "resolved vague workload target to pod/crashy-abc123" in target.normalization_notes
 

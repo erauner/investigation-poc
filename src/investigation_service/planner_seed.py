@@ -14,6 +14,16 @@ from .models import (
     PlannerSeedExecutionFocus,
 )
 
+_VAGUE_WORKLOAD_TOKENS = {
+    "pod",
+    "pods",
+    "workload",
+    "workloads",
+    "unhealthy",
+    "unhealthy-pod",
+    "unhealthy-workload",
+}
+
 
 @dataclass(frozen=True)
 class PlannerSeedDeps:
@@ -128,15 +138,7 @@ def apply_post_seed_normalization(
         return normalized
 
     lowered = normalized.target.strip().lower()
-    if lowered not in {
-        "pod",
-        "pods",
-        "workload",
-        "workloads",
-        "unhealthy",
-        "unhealthy-pod",
-        "unhealthy-workload",
-    }:
+    if lowered not in _VAGUE_WORKLOAD_TOKENS:
         return normalized
     if not normalized.namespace:
         raise ValueError("namespace is required when resolving a vague workload target")
@@ -151,6 +153,14 @@ def apply_post_seed_normalization(
     notes = list(normalized.normalization_notes)
     notes.append(f"resolved vague workload target to {candidate.target}")
     return normalized.model_copy(update={"target": candidate.target, "normalization_notes": notes})
+
+
+def is_vague_workload_subject(subject: InvestigationSubjectRef | None) -> bool:
+    return bool(
+        subject is not None
+        and subject.kind == "resource_hint"
+        and subject.name.strip().lower() in _VAGUE_WORKLOAD_TOKENS
+    )
 
 
 def _requested_target(
@@ -184,8 +194,12 @@ def _execution_focus_for_subject(
     lookup_cluster = _lookup_cluster_token(subject_set)
 
     if focus.kind == "resource_hint":
-        target = deps.canonical_target(focus.name, profile, service_name)
-        scope = deps.scope_from_target(target, profile)
+        if is_vague_workload_subject(focus):
+            target = focus.name
+            scope = "workload"
+        else:
+            target = deps.canonical_target(focus.name, profile, service_name)
+            scope = deps.scope_from_target(target, profile)
     elif focus.kind == "pod":
         target = f"pod/{focus.name}"
     elif focus.kind == "deployment":

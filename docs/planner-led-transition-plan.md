@@ -1041,6 +1041,7 @@ Delivered in this slice should be:
 - terminology cleanup that reserves `kubernetes_node` for actual cluster machines and avoids bare `node` for Express members in new internal model types
 - deterministic Express-aware grouping and dependency attachment without making Express assumptions mandatory for generic workload paths
 - planner-seed derivation that still feeds the current planner/runtime mostly one bounded execution focus at first
+- clarification as an allowed bounded ambiguity outcome when deterministic narrowing still cannot safely choose one bounded execution focus
 - explicit permission to stop preserving internal eager-collapse helpers whose only job is to force one exact target too early
 - explicit preservation of focus divergence in provenance and reporting when bounded execution focus later differs from the earlier semantic focus
 - explicit caps and lifecycle rules for related-subject expansion so cross-namespace context stays bounded and contextual first
@@ -1054,6 +1055,7 @@ Validation gate:
 - cross-namespace dependencies can be preserved as related subjects without pretending they are part of the tenant application object
 - the planner/runtime can still run mostly unchanged from one bounded execution focus while carrying related context forward
 - generic evidence planes do not become shadow semantic resolvers for subject meaning or dependency semantics
+- clarification is only surfaced when deterministic narrowing is insufficient and proceeding would likely pick the wrong bounded execution focus
 
 Explicitly out of scope in this slice:
 
@@ -1061,6 +1063,7 @@ Explicitly out of scope in this slice:
 - family-scoped parallel execution
 - grouped execution across several namespaces or clusters
 - forcing all investigations to become pod-centric
+- resumable in-graph user clarification or checkpointed human-input workflows
 
 Preserve public surface stability, not internal helper lineage:
 
@@ -1069,6 +1072,12 @@ Preserve public surface stability, not internal helper lineage:
 - planner-seed derivation is the preferred replacement seam for that behavior
 
 Presentation profile work may continue in parallel where it is formatting-only, but unified ingress and subject resolution are the more foundational semantic dependency.
+
+Clarification policy note:
+
+- clarification should be introduced as a bounded terminal outcome first
+- deterministic narrowing should still be preferred before asking the user
+- true interrupt/resume clarification workflows are a later decision only if real usage justifies them
 
 Implementation alignment note:
 

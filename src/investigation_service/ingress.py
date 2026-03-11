@@ -9,7 +9,6 @@ from .models import (
     BuildInvestigationPlanRequest,
     CollectAlertContextRequest,
     ConfidenceType,
-    FindUnhealthyPodRequest,
     InvestigationIngressRequest,
     InvestigationReportRequest,
     InvestigationSubjectContext,
@@ -29,11 +28,6 @@ _UNSUPPORTED_RESOURCE_REF_PATTERN = re.compile(
 _NAMESPACE_PATTERN = re.compile(r"\bnamespace\s+(?P<namespace>[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)
 _IN_CLUSTER_PATTERN = re.compile(r"\bin\s+cluster\s+(?P<cluster>[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)
 _FIELD_PATTERN = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9 _-]*):\s*(?P<value>.+)$")
-_VAGUE_WORKLOAD_PATTERNS = (
-    "unhealthy pod",
-    "unhealthy workload",
-    "unhealthy workloads",
-)
 
 _SOURCE_PRIORITY = {
     "explicit_target": 0,
@@ -67,7 +61,6 @@ _RELATION_PRIORITY = {"candidate": 0, "related": 1, "member": 2, "dependency": 3
 class IngressDeps:
     resolve_cluster: Callable[..., Any]
     get_cluster_cr: Callable[..., dict]
-    find_unhealthy_pod: Callable[[FindUnhealthyPodRequest], Any]
 
 
 def ingress_request_from_report_request(req: InvestigationReportRequest) -> InvestigationIngressRequest:
@@ -128,7 +121,7 @@ def normalize_ingress_request(
 ) -> NormalizedInvestigationSubjectSet:
     notes: list[str] = []
     scope = _resolve_scope(req, deps, notes)
-    candidates = _extract_candidate_refs(req, scope, deps, notes)
+    candidates = _extract_candidate_refs(req, scope, notes)
     candidates = _dedupe_refs(candidates)
     related_refs = _build_related_refs(candidates, scope, deps, notes)
     canonical_focus = _select_canonical_focus(req, scope, candidates, related_refs)
@@ -238,7 +231,6 @@ def _resolve_scope(
 def _extract_candidate_refs(
     req: InvestigationIngressRequest,
     scope: ResolvedIngressScope,
-    deps: IngressDeps,
     notes: list[str],
 ) -> list[InvestigationSubjectRef]:
     _raise_for_unsupported_resource_like_input(req)
@@ -303,27 +295,19 @@ def _extract_candidate_refs(
             elif "alert_annotation" in alert_target.sources:
                 notes.append("inferred target from alert text")
 
-    if not _has_operational_ref(refs) and _should_expand_vague_workload(req):
-        if not scope.namespace:
-            raise ValueError("namespace is required when resolving a vague workload target")
-        unhealthy = deps.find_unhealthy_pod(
-            FindUnhealthyPodRequest(cluster=scope.cluster, namespace=scope.namespace)
-        )
-        candidate = getattr(unhealthy, "candidate", None)
-        if candidate is None:
-            notes.append("no unhealthy pod found for vague workload request")
-        else:
+    if not _has_operational_ref(refs):
+        vague_hint = _vague_workload_hint(req)
+        if vague_hint is not None:
             refs.append(
                 InvestigationSubjectRef(
-                    kind="pod",
-                    name=candidate.target.split("/", 1)[1],
+                    kind="resource_hint",
+                    name=vague_hint,
                     cluster=scope.cluster,
                     namespace=scope.namespace,
                     confidence="medium",
                     sources=["vague_workload"],
                 )
             )
-            notes.append(f"resolved vague workload target to {candidate.target}")
 
     return refs
 
@@ -607,9 +591,13 @@ def _has_operational_ref(refs: list[InvestigationSubjectRef]) -> bool:
     return any(ref.kind != "alert" for ref in refs)
 
 
-def _should_expand_vague_workload(req: InvestigationIngressRequest) -> bool:
+def _vague_workload_hint(req: InvestigationIngressRequest) -> str | None:
     text = " ".join(part for part in [req.target, req.question, req.raw_text] if part).lower()
-    return any(pattern in text for pattern in _VAGUE_WORKLOAD_PATTERNS)
+    if "unhealthy pod" in text:
+        return "pod"
+    if "unhealthy workload" in text or "unhealthy workloads" in text:
+        return "workload"
+    return None
 
 
 def _dedupe_refs(refs: list[InvestigationSubjectRef]) -> list[InvestigationSubjectRef]:
