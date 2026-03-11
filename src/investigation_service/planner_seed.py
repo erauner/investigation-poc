@@ -153,6 +153,14 @@ def apply_post_seed_normalization(
     return normalized.model_copy(update={"target": candidate.target, "normalization_notes": notes})
 
 
+def is_vague_workload_subject(subject: InvestigationSubjectRef | None) -> bool:
+    return bool(
+        subject is not None
+        and subject.kind == "resource_hint"
+        and "vague_workload" in subject.sources
+    )
+
+
 def _requested_target(
     subject_set: NormalizedInvestigationSubjectSet,
     subject_context: InvestigationSubjectContext,
@@ -184,8 +192,12 @@ def _execution_focus_for_subject(
     lookup_cluster = _lookup_cluster_token(subject_set)
 
     if focus.kind == "resource_hint":
-        target = deps.canonical_target(focus.name, profile, service_name)
-        scope = deps.scope_from_target(target, profile)
+        if is_vague_workload_subject(focus):
+            target = focus.name
+            scope = "workload"
+        else:
+            target = deps.canonical_target(focus.name, profile, service_name)
+            scope = deps.scope_from_target(target, profile)
     elif focus.kind == "pod":
         target = f"pod/{focus.name}"
     elif focus.kind == "deployment":

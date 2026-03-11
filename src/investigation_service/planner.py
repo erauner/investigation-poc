@@ -47,6 +47,7 @@ from .models import (
 from .planner_seed import (
     PostSeedNormalizationDeps,
     apply_post_seed_normalization,
+    is_vague_workload_subject,
     PlannerSeedDeps,
     normalized_request_from_planner_seed,
     planner_seed_from_subject_set,
@@ -200,6 +201,8 @@ def _seed_to_normalized_or_none(
             "no canonical investigation subject could be resolved from ingress input"
         ):
             return None
+        if message == "no unhealthy pod found in namespace" and _should_preserve_unresolved_vague_workload(seed):
+            return None
         raise
 
 
@@ -212,6 +215,10 @@ def _normalized_request_from_seed(
         normalized,
         PostSeedNormalizationDeps(find_unhealthy_pod=deps.find_unhealthy_pod),
     )
+
+
+def _should_preserve_unresolved_vague_workload(seed: InvestigationPlannerSeed) -> bool:
+    return is_vague_workload_subject(seed.subject_context.primary_subject)
 
 
 def _report_request_from_plan_request(req: BuildInvestigationPlanRequest) -> InvestigationReportRequest:
@@ -1341,13 +1348,16 @@ def build_investigation_plan(
         if normalized is not None
         else None
     )
+    preserve_unresolved_vague = normalized is None and _should_preserve_unresolved_vague_workload(seed)
     mode = classify_investigation_mode(
         req,
         has_resolved_target=resolved_target is not None,
-        has_subject_candidates=bool(subject_set.candidate_refs),
-        subject_resolution_status=subject_context.resolution_status,
+        has_subject_candidates=bool(subject_set.candidate_refs) and not preserve_unresolved_vague,
+        subject_resolution_status="unresolved" if preserve_unresolved_vague else subject_context.resolution_status,
     )
-    if mode != "factual_analysis" and resolved_target is None and subject_context.resolution_status != "unresolved":
+    if mode != "factual_analysis" and resolved_target is None and (
+        ("unresolved" if preserve_unresolved_vague else subject_context.resolution_status) != "unresolved"
+    ):
         _normalized_request_from_seed(seed, deps)
 
     if mode == "alert_rca":

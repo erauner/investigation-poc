@@ -218,3 +218,122 @@ def test_vague_workload_hint_only_becomes_concrete_in_post_seed_normalization() 
 
     assert concretized.target == "pod/crashy-abc123"
     assert "resolved vague workload target to pod/crashy-abc123" in concretized.normalization_notes
+
+
+def test_vague_workload_hint_stays_workload_scoped_even_with_service_profile() -> None:
+    focus = InvestigationSubjectRef(
+        kind="resource_hint",
+        name="workload",
+        cluster="erauner-home",
+        namespace="default",
+        confidence="medium",
+        sources=["vague_workload"],
+    )
+    subject_set = _subject_set(focus=focus)
+    subject_set = subject_set.model_copy(
+        update={
+            "ingress": subject_set.ingress.model_copy(
+                update={
+                    "target": None,
+                    "question": "Investigate unhealthy workload",
+                    "profile_hint": "service",
+                    "service_name": "api",
+                }
+            ),
+            "candidate_refs": [focus],
+        }
+    )
+
+    seed = planner_seed_from_subject_set(
+        subject_set,
+        subject_context=subject_context_from_subject_set(subject_set),
+        deps=_deps(),
+    )
+
+    assert seed.execution_focus is not None
+    assert seed.execution_focus.scope == "workload"
+    assert seed.execution_focus.target == "workload"
+
+
+def test_apply_post_seed_normalization_raises_when_no_unhealthy_pod_exists() -> None:
+    normalized = normalized_request_from_planner_seed(
+        planner_seed_from_subject_set(
+            _subject_set(
+                focus=InvestigationSubjectRef(
+                    kind="resource_hint",
+                    name="workload",
+                    cluster="erauner-home",
+                    namespace="default",
+                    confidence="medium",
+                    sources=["vague_workload"],
+                )
+            ).model_copy(
+                update={
+                    "ingress": InvestigationIngressRequest(
+                        source="manual",
+                        cluster="erauner-home",
+                        namespace="default",
+                        target=None,
+                        question="Investigate unhealthy workload",
+                        profile_hint="workload",
+                    ),
+                    "candidate_refs": [
+                        InvestigationSubjectRef(
+                            kind="resource_hint",
+                            name="workload",
+                            cluster="erauner-home",
+                            namespace="default",
+                            confidence="medium",
+                            sources=["vague_workload"],
+                        )
+                    ],
+                }
+            ),
+            subject_context=subject_context_from_subject_set(
+                _subject_set(
+                    focus=InvestigationSubjectRef(
+                        kind="resource_hint",
+                        name="workload",
+                        cluster="erauner-home",
+                        namespace="default",
+                        confidence="medium",
+                        sources=["vague_workload"],
+                    )
+                ).model_copy(
+                    update={
+                        "ingress": InvestigationIngressRequest(
+                            source="manual",
+                            cluster="erauner-home",
+                            namespace="default",
+                            target=None,
+                            question="Investigate unhealthy workload",
+                            profile_hint="workload",
+                        ),
+                        "candidate_refs": [
+                            InvestigationSubjectRef(
+                                kind="resource_hint",
+                                name="workload",
+                                cluster="erauner-home",
+                                namespace="default",
+                                confidence="medium",
+                                sources=["vague_workload"],
+                            )
+                        ],
+                    }
+                )
+            ),
+            deps=_deps(canonical_target=lambda target, profile, service_name: target),
+        )
+    )
+
+    try:
+        apply_post_seed_normalization(
+            normalized,
+            PostSeedNormalizationDeps(
+                find_unhealthy_pod=lambda req: type("UnhealthyPodResponse", (), {"candidate": None})()
+            ),
+        )
+    except ValueError as exc:
+        assert str(exc) == "no unhealthy pod found in namespace"
+    else:  # pragma: no cover - defensive
+        raise AssertionError("expected missing unhealthy pod error")

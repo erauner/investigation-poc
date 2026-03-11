@@ -28,11 +28,6 @@ _UNSUPPORTED_RESOURCE_REF_PATTERN = re.compile(
 _NAMESPACE_PATTERN = re.compile(r"\bnamespace\s+(?P<namespace>[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)
 _IN_CLUSTER_PATTERN = re.compile(r"\bin\s+cluster\s+(?P<cluster>[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)
 _FIELD_PATTERN = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9 _-]*):\s*(?P<value>.+)$")
-_VAGUE_WORKLOAD_PATTERNS = (
-    "unhealthy pod",
-    "unhealthy workload",
-    "unhealthy workloads",
-)
 
 _SOURCE_PRIORITY = {
     "explicit_target": 0,
