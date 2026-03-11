@@ -95,6 +95,17 @@ ALERT_CONTEXT_REQUIRED_PHRASE = (
 ALERT_TARGET_VERBATIM_REQUIRED_PHRASE = (
     "preserve the exact original alert-derived target string verbatim"
 )
+ALERT_EXTRACTION_REQUIRED_PHRASE = (
+    "extract alertname, labels, annotations, namespace, pod, service, instance, severity, and status"
+)
+SHARED_RUNTIME_REQUIRED_PHRASES = (
+    "Use the planner-led investigation flow.",
+    "run_orchestrated_investigation keeps batch selection, external-step materialization, advancement, and final rendering in product code.",
+    "Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams for debugging or explicit adapter choreography.",
+    "Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives.",
+    "Use render_investigation_report only as a secondary low-level render seam when you are explicitly debugging the staged runtime path.",
+    "Use exactly these Markdown headings verbatim: ## Diagnosis, ## Evidence, ## Related Data, ## Limitations, ## Recommended next step.",
+)
 
 
 def _load_yaml(path: str) -> dict:
@@ -206,10 +217,8 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
     wrapper_paths = [
         ".claude/commands/investigate.md",
         ".claude/commands/investigate-alert.md",
-        ".claude/skills/investigation-helper/SKILL.md",
         "claude-code-marketplace/investigation-tools/commands/investigate.md",
         "claude-code-marketplace/investigation-tools/commands/investigate-alert.md",
-        "desktop-extension/server/index.js",
     ]
     required_phrases = [
         "run_orchestrated_investigation",
@@ -230,8 +239,31 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
         text = (ROOT / path).read_text()
         for phrase in required_phrases:
             assert phrase in text, path
+        for phrase in SHARED_RUNTIME_REQUIRED_PHRASES:
+            assert phrase in text, path
         if "alert" in path.lower():
             assert ALERT_CONTEXT_REQUIRED_PHRASE in text.lower(), path
             assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE in text.lower(), path
+            assert ALERT_EXTRACTION_REQUIRED_PHRASE in text.lower(), path
+        else:
+            assert ALERT_CONTEXT_REQUIRED_PHRASE not in text.lower(), path
+            assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE not in text.lower(), path
+            assert ALERT_EXTRACTION_REQUIRED_PHRASE not in text.lower(), path
         for phrase in banned_phrases:
             assert phrase not in text, path
+
+
+def test_skill_and_desktop_extension_keep_shared_runtime_block_with_parse_only_alert_delta() -> None:
+    wrapper_paths = [
+        ".claude/skills/investigation-helper/SKILL.md",
+        "desktop-extension/server/index.js",
+    ]
+
+    for path in wrapper_paths:
+        text = (ROOT / path).read_text()
+        for phrase in SHARED_RUNTIME_REQUIRED_PHRASES:
+            assert phrase in text, path
+        assert ALERT_CONTEXT_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_EXTRACTION_REQUIRED_PHRASE in text.lower(), path
+        assert "If the target is vague or operator-backed, resolve it first with resolve_primary_target." in text, path

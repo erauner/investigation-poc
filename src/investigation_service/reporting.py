@@ -11,11 +11,10 @@ from .analysis import (
     primary_hypothesis,
     rendered_evidence_from_hypothesis,
 )
-from .cluster_registry import resolve_cluster
+from .cluster_registry import resolve_cluster as resolve_cluster_impl
 from .correlation import collect_change_candidates, collect_correlated_changes_for_target
 from .event_fingerprints import canonicalize_event_fingerprint
 from .guidelines import guideline_context_from_analysis, load_guideline_rules, resolve_guidelines_for_context
-from .k8s_adapter import get_backend_cr, get_cluster_cr, get_frontend_cr
 from .models import (
     ActiveEvidenceBatchContract,
     AdvanceInvestigationRuntimeRequest,
@@ -34,6 +33,7 @@ from .models import (
     InvestigationReportRequest,
     InvestigationState,
     InvestigationTarget,
+    NormalizedInvestigationRequest,
     ReportingExecutionContext,
     ResolvedGuideline,
     SubmitEvidenceArtifactsRequest,
@@ -43,14 +43,6 @@ from .models import (
 from .planner import PlannerDeps
 from .routing import canonical_target, scope_from_target
 from .state import build_investigation_state as build_investigation_state_artifact
-from .tools import (
-    collect_alert_evidence,
-    collect_node_evidence,
-    collect_service_evidence,
-    collect_workload_evidence,
-    find_unhealthy_pod,
-    normalize_alert_input as normalize_alert_input_impl,
-)
 from . import planner
 
 _EMPTY_CORRELATION_LIMITATION = "no correlated changes found in the requested time window"
@@ -61,6 +53,30 @@ _HANDOFF_TOKEN_VERSION = 1
 def _is_empty_correlation_limitation(value: str) -> bool:
     normalized = value.strip().lower()
     return "correlated changes" in normalized and "requested time window" in normalized
+
+
+def resolve_cluster(cluster):
+    from .tools import resolve_cluster as resolve_cluster_tools_impl
+
+    return resolve_cluster_tools_impl(cluster)
+
+
+def get_backend_cr(namespace, name, cluster=None):
+    from .tools import get_backend_cr as get_backend_cr_impl
+
+    return get_backend_cr_impl(namespace, name, cluster=cluster)
+
+
+def get_frontend_cr(namespace, name, cluster=None):
+    from .tools import get_frontend_cr as get_frontend_cr_impl
+
+    return get_frontend_cr_impl(namespace, name, cluster=cluster)
+
+
+def get_cluster_cr(namespace, name, cluster=None):
+    from .tools import get_cluster_cr as get_cluster_cr_impl
+
+    return get_cluster_cr_impl(namespace, name, cluster=cluster)
 
 
 def _planner_deps() -> PlannerDeps:
@@ -78,6 +94,36 @@ def _planner_deps() -> PlannerDeps:
         collect_workload_evidence=collect_workload_evidence,
         collect_change_candidates=collect_change_candidates,
     )
+
+
+def collect_alert_evidence(req):
+    from .tools import collect_alert_evidence as collect_alert_evidence_impl
+
+    return collect_alert_evidence_impl(req)
+
+
+def collect_workload_evidence(req):
+    from .tools import collect_workload_evidence as collect_workload_evidence_impl
+
+    return collect_workload_evidence_impl(req)
+
+
+def collect_service_evidence(req):
+    from .tools import collect_service_evidence as collect_service_evidence_impl
+
+    return collect_service_evidence_impl(req)
+
+
+def collect_node_evidence(req):
+    from .tools import collect_node_evidence as collect_node_evidence_impl
+
+    return collect_node_evidence_impl(req)
+
+
+def find_unhealthy_pod(req):
+    from .tools import find_unhealthy_pod as find_unhealthy_pod_impl
+
+    return find_unhealthy_pod_impl(req)
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
@@ -616,8 +662,12 @@ def render_investigation_report_from_state(
     )
 
 
+def normalize_investigation_request(req: InvestigationReportRequest) -> NormalizedInvestigationRequest:
+    return planner.normalized_request(req, _planner_deps())
+
+
 def normalize_incident_input(req: InvestigationReportRequest) -> InvestigationTarget:
-    normalized = planner.normalized_request(req, _planner_deps())
+    normalized = normalize_investigation_request(req)
     return planner.investigation_target_from_normalized(
         normalized,
         requested_target=req.target or normalized.target,
@@ -625,6 +675,8 @@ def normalize_incident_input(req: InvestigationReportRequest) -> InvestigationTa
 
 
 def normalize_alert_input(req):
+    from .tools import normalize_alert_input as normalize_alert_input_impl
+
     return normalize_alert_input_impl(req)
 
 

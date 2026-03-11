@@ -1,13 +1,5 @@
-import re
-
 from .analysis import derive_findings
 from .cluster_registry import resolve_cluster
-from .ingress import (
-    IngressDeps,
-    ingress_request_from_alert_request,
-    normalize_ingress_request,
-    subject_context_from_subject_set,
-)
 from .k8s_adapter import (
     find_unhealthy_workloads as find_unhealthy_workloads_impl,
     get_backend_cr,
@@ -28,16 +20,14 @@ from .models import (
     FindUnhealthyWorkloadsRequest,
     CollectedContextResponse,
     EvidenceBundle,
+    InvestigationReportRequest,
     NormalizedInvestigationRequest,
     ScopeType,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
 )
 from .prom_adapter import collect_metrics_for_scope, collect_service_enrichment_metrics
-from .planner_seed import PlannerSeedDeps, normalized_request_from_planner_seed, planner_seed_from_subject_set
-from .planner_seed import PostSeedNormalizationDeps, apply_post_seed_normalization
 from .routing import canonical_target as _canonical_target
-from .routing import scope_from_target as _scope_from_target
 from .settings import get_default_lookback_minutes, get_log_tail_lines
 
 
@@ -48,48 +38,6 @@ def _call_with_optional_cluster(func, *args, cluster=None, **kwargs):
         return func(*args, cluster=cluster, **kwargs)
     except TypeError:
         return func(*args, **kwargs)
-
-
-def _first_non_empty(*values: str | None) -> str | None:
-    for value in values:
-        if value:
-            return value
-    return None
-
-
-def _label_value(labels: dict[str, str], *keys: str) -> str | None:
-    for key in keys:
-        value = labels.get(key)
-        if value:
-            return value
-    return None
-
-
-def _annotation_value(annotations: dict[str, str], *keys: str) -> str | None:
-    for key in keys:
-        value = annotations.get(key)
-        if value:
-            return value
-    return None
-
-
-def _infer_target_from_text(text: str | None) -> str | None:
-    if not text:
-        return None
-    lower = text.lower()
-    patterns = [
-        (r"\bpod\s+([a-z0-9][a-z0-9\-\.]*)\b", "pod"),
-        (r"\bdeployment\s+([a-z0-9][a-z0-9\-\.]*)\b", "deployment"),
-        (r"\bstatefulset\s+([a-z0-9][a-z0-9\-\.]*)\b", "statefulset"),
-        (r"\bservice\s+([a-z0-9][a-z0-9\-\.]*)\b", "service"),
-        (r"\bnode\s+([a-z0-9][a-z0-9\-\.]*)\b", "node"),
-    ]
-
-    for pattern, kind in patterns:
-        match = re.search(pattern, lower)
-        if match:
-            return f"{kind}/{match.group(1)}"
-    return None
 
 
 def _build_enrichment_hints(
@@ -346,50 +294,29 @@ def _collect_context(req: CollectContextRequest) -> CollectedContextResponse:
     return render_collected_context(collect_evidence_bundle(req))
 
 
-def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextRequest:
-    normalized = normalize_alert_input(req)
-    return CollectContextRequest(
-        cluster=normalized.cluster,
-        namespace=normalized.namespace,
-        target=normalized.target,
-        profile=normalized.profile,
-        service_name=normalized.service_name,
-        lookback_minutes=normalized.lookback_minutes,
-    )
-
-
 def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestigationRequest:
-    ingress_req = ingress_request_from_alert_request(req)
-    deps = IngressDeps(
-        resolve_cluster=resolve_cluster,
-        get_cluster_cr=get_cluster_cr,
-    )
-    subject_set = normalize_ingress_request(ingress_req, deps)
-    subject_context = subject_context_from_subject_set(subject_set)
-    planner_seed = planner_seed_from_subject_set(
-        subject_set,
-        subject_context=subject_context,
-        deps=PlannerSeedDeps(
-            canonical_target=_canonical_target,
-            scope_from_target=_scope_from_target,
-            resolve_cluster=resolve_cluster,
-            get_backend_cr=get_backend_cr,
-            get_frontend_cr=get_frontend_cr,
-            get_cluster_cr=get_cluster_cr,
-        ),
-    )
+    from .reporting import normalize_investigation_request
+
     try:
-        normalized = normalized_request_from_planner_seed(planner_seed)
+        normalized = normalize_investigation_request(
+            InvestigationReportRequest(
+                cluster=req.cluster,
+                namespace=req.namespace,
+                target=req.target,
+                profile=req.profile,
+                service_name=req.service_name,
+                lookback_minutes=req.lookback_minutes,
+                alertname=req.alertname,
+                labels=req.labels,
+                annotations=req.annotations,
+                node_name=req.node_name,
+                question=None,
+            )
+        )
     except ValueError as exc:
         if "no canonical investigation subject could be resolved from ingress input" in str(exc):
             raise ValueError("target could not be inferred from alert input") from exc
         raise
-    normalized = apply_post_seed_normalization(
-        normalized,
-        PostSeedNormalizationDeps(find_unhealthy_pod=find_unhealthy_pod),
-    )
-    if not normalized.lookback_minutes:
-        normalized = normalized.model_copy(update={"lookback_minutes": get_default_lookback_minutes()})
     return normalized
 
 
@@ -444,4 +371,14 @@ def collect_service_evidence(req: CollectServiceContextRequest) -> EvidenceBundl
 
 
 def collect_alert_evidence(req: CollectAlertContextRequest) -> EvidenceBundle:
-    return collect_evidence_bundle(_infer_alert_inputs(req))
+    normalized = normalize_alert_input(req)
+    return collect_evidence_bundle(
+        CollectContextRequest(
+            cluster=normalized.cluster,
+            namespace=normalized.namespace,
+            target=normalized.target,
+            profile=normalized.profile,
+            service_name=normalized.service_name,
+            lookback_minutes=normalized.lookback_minutes,
+        )
+    )
