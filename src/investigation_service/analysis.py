@@ -187,6 +187,26 @@ def _derive_service_findings(object_state: dict, metrics: dict) -> list[Finding]
     return findings
 
 
+def _derive_error_like_log_findings(
+    logs: str,
+    *,
+    service_degradation_present: bool,
+    require_corroborating_degradation: bool = False,
+) -> list[Finding]:
+    if "error" not in logs.lower() and "exception" not in logs.lower():
+        return []
+    if require_corroborating_degradation and not service_degradation_present:
+        return []
+    return [
+        Finding(
+            severity="info" if service_degradation_present else "warning",
+            source="logs",
+            title="Error-like Log Patterns",
+            evidence="Recent logs contain 'error' or 'exception'",
+        )
+    ]
+
+
 def _derive_workload_findings(object_state: dict, events: list[str], logs: str, metrics: dict) -> list[Finding]:
     findings: list[Finding] = []
     service_error_rate = metrics.get("service_error_rate")
@@ -304,15 +324,12 @@ def _derive_workload_findings(object_state: dict, events: list[str], logs: str, 
             )
         )
 
-    if "error" in logs.lower() or "exception" in logs.lower():
-        findings.append(
-            Finding(
-                severity="info" if service_degradation_present else "warning",
-                source="logs",
-                title="Error-like Log Patterns",
-                evidence="Recent logs contain 'error' or 'exception'",
-            )
+    findings.extend(
+        _derive_error_like_log_findings(
+            logs,
+            service_degradation_present=service_degradation_present,
         )
+    )
 
     restart_rate = metrics.get("pod_restart_rate")
     if restart_rate is not None and restart_rate > 0:
@@ -352,6 +369,17 @@ def derive_findings(profile: str, object_state: dict, events: list[str], logs: s
         findings.extend(_derive_node_findings(object_state, metrics))
     elif profile == "service":
         findings.extend(_derive_service_findings(object_state, metrics))
+        service_degradation_present = bool(
+            (metrics.get("service_error_rate") is not None and metrics.get("service_error_rate") > 0)
+            or (metrics.get("service_latency_p95_seconds") is not None and metrics.get("service_latency_p95_seconds") > 1.0)
+        )
+        findings.extend(
+            _derive_error_like_log_findings(
+                logs,
+                service_degradation_present=service_degradation_present,
+                require_corroborating_degradation=True,
+            )
+        )
     elif profile == "otel-pipeline":
         findings.extend(_derive_pipeline_findings(metrics))
     else:

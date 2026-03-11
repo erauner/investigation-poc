@@ -32,6 +32,9 @@ from investigation_service.settings import (
     get_cluster_name,
     get_default_cluster_alias,
     get_kubernetes_mcp_url,
+    get_log_tail_lines,
+    get_loki_mcp_url,
+    get_loki_url,
     get_peer_mcp_timeout_seconds,
     get_prometheus_url,
     get_prometheus_mcp_url,
@@ -80,6 +83,15 @@ class ServiceRuntimeSnapshot:
     target: TargetRef
     object_state: dict[str, Any]
     events: list[str]
+    limitations: list[str] = field(default_factory=list)
+    tool_path: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LokiLogsSnapshot:
+    cluster_alias: str
+    target: TargetRef
+    log_excerpt: str
     limitations: list[str] = field(default_factory=list)
     tool_path: list[str] = field(default_factory=list)
 
@@ -162,6 +174,85 @@ def _normalize_logs(raw: Any) -> str:
     return "" if raw is None else str(raw)
 
 
+def _normalize_loki_logs(raw: Any) -> str:
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, dict):
+        for key in ("log_excerpt", "logs", "content", "text"):
+            value = raw.get(key)
+            if isinstance(value, str):
+                return value.strip()
+        if "values" in raw and isinstance(raw["values"], list):
+            return _normalize_loki_logs(raw["values"])
+        for key in ("lines", "entries", "items", "result"):
+            value = raw.get(key)
+            if value is not None:
+                return _normalize_loki_logs(value)
+        if "streams" in raw:
+            return _normalize_loki_logs(raw["streams"])
+        if "data" in raw:
+            return _normalize_loki_logs(raw["data"])
+        for key in ("message", "line"):
+            value = raw.get(key)
+            if isinstance(value, str):
+                return value.strip()
+    if isinstance(raw, list):
+        if len(raw) == 2 and not isinstance(raw[0], (list, dict)) and isinstance(raw[1], str):
+            return raw[1].strip()
+        lines: list[str] = []
+        for item in raw:
+            normalized = _normalize_loki_logs(item)
+            if normalized:
+                lines.append(normalized)
+        return "\n".join(lines).strip()
+    return str(raw).strip()
+
+
+def _format_loki_window(minutes: int | None) -> str:
+    lookback_minutes = max(minutes or 15, 1)
+    return (
+        datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
+    ).isoformat().replace("+00:00", "Z")
+
+
+def _build_workload_loki_query(target: TargetRef, runtime_pod_name: str) -> str:
+    return f'{{namespace="{target.namespace}",pod="{runtime_pod_name}"}}'
+
+
+def _service_loki_pod_candidates(object_state: dict[str, Any] | None, *, max_pods: int = 5) -> tuple[str, ...]:
+    matched_pods = (object_state or {}).get("matchedPods") or []
+    names = sorted(
+        {
+            str(item.get("name")).strip()
+            for item in matched_pods
+            if isinstance(item, dict) and isinstance(item.get("name"), str) and item.get("name").strip()
+        }
+    )
+    return tuple(names[:max_pods])
+
+
+def _service_loki_app_candidates(object_state: dict[str, Any] | None, target: TargetRef) -> tuple[str, ...]:
+    selector = (object_state or {}).get("selector") or {}
+    candidates: list[str] = []
+    value = selector.get("app.kubernetes.io/name")
+    if isinstance(value, str) and value.strip():
+        candidates.append(value.strip())
+    return tuple(dict.fromkeys(candidates))
+
+
+def _build_service_loki_queries(target: TargetRef, object_state: dict[str, Any] | None = None) -> tuple[str, ...]:
+    queries: list[str] = []
+    pod_candidates = _service_loki_pod_candidates(object_state)
+    if pod_candidates:
+        escaped = "|".join(re.escape(name) for name in pod_candidates)
+        queries.append(f'{{namespace="{target.namespace}",pod=~"{escaped}"}}')
+    for app_candidate in _service_loki_app_candidates(object_state, target):
+        queries.append(f'{{namespace="{target.namespace}",app="{app_candidate}"}}')
+    return tuple(dict.fromkeys(queries))
+
+
 def _normalize_metric_value(raw: Any) -> float | None:
     if raw is None:
         return None
@@ -242,6 +333,16 @@ def _peer_prometheus_routing_unsupported(cluster, requested_cluster: str | None)
     if cluster.alias in local_aliases or requested_alias in local_aliases:
         return False
     if not cluster.prometheus_url or cluster.prometheus_url == get_prometheus_url():
+        return False
+    return True
+
+
+def _peer_loki_routing_unsupported(cluster, requested_cluster: str | None) -> bool:
+    requested_alias = (requested_cluster or "").strip().lower() or None
+    local_aliases = {
+        alias for alias in (get_default_cluster_alias(), get_cluster_name(), "local-kind", "current-context") if alias
+    }
+    if cluster.alias in local_aliases or requested_alias in local_aliases:
         return False
     return True
 
@@ -1027,6 +1128,217 @@ class PrometheusMcpClient:
 
         try:
             return anyio.run(self._collect_node_async, inputs)
+        except PeerMcpError:
+            raise
+        except Exception as exc:
+            raise PeerMcpError(_peer_error_message(exc)) from exc
+
+
+class LokiMcpClient:
+    def __init__(self, *, url: str | None = None, timeout_seconds: float | None = None):
+        self.url = url if url is not None else get_loki_mcp_url()
+        self.timeout_seconds = timeout_seconds or get_peer_mcp_timeout_seconds()
+
+    def is_configured(self) -> bool:
+        return bool(self.url)
+
+    async def _call_tool(self, session: ClientSession, tool_name: str, arguments: dict[str, Any]) -> Any:
+        result = await session.call_tool(tool_name, arguments)
+        if getattr(result, "isError", False):
+            raise PeerMcpError(f"{tool_name} returned MCP error")
+        return _extract_content(result)
+
+    async def _collect_workload_async(
+        self,
+        inputs: StepExecutionInputs,
+        *,
+        target: TargetRef,
+        runtime_pod_name: str | None,
+    ) -> LokiLogsSnapshot:
+        if not self.url:
+            raise PeerMcpError("loki peer transport is not configured")
+        cluster = resolve_cluster(inputs.cluster)
+        if _peer_loki_routing_unsupported(cluster, inputs.cluster):
+            raise PeerMcpError("peer Loki transport does not yet support multicluster loki routing")
+        if not target.namespace:
+            raise PeerMcpError("workload Loki transport requires namespace")
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout_seconds)) as http_client:
+            async with streamable_http_client(self.url, http_client=http_client) as (
+                read_stream,
+                write_stream,
+                _get_session_id,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    raw = await self._call_tool(
+                        session,
+                        "loki_query",
+                        {
+                            "query": _build_workload_loki_query(target, runtime_pod_name or target.name),
+                            "start": _format_loki_window(inputs.lookback_minutes),
+                            "end": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                            "limit": get_log_tail_lines(),
+                        },
+                    )
+                    return LokiLogsSnapshot(
+                        cluster_alias=cluster.alias,
+                        target=target,
+                        log_excerpt=_normalize_loki_logs(raw),
+                        tool_path=["loki-mcp-server", "loki_query"],
+                    )
+
+    async def _collect_service_async(
+        self,
+        inputs: StepExecutionInputs,
+        *,
+        target: TargetRef,
+        object_state: dict[str, Any] | None = None,
+    ) -> LokiLogsSnapshot:
+        if not self.url:
+            raise PeerMcpError("loki peer transport is not configured")
+        cluster = resolve_cluster(inputs.cluster)
+        if _peer_loki_routing_unsupported(cluster, inputs.cluster):
+            raise PeerMcpError("peer Loki transport does not yet support multicluster loki routing")
+        if not target.namespace or target.kind != "service":
+            raise PeerMcpError("service Loki transport requires a service target with namespace")
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout_seconds)) as http_client:
+            async with streamable_http_client(self.url, http_client=http_client) as (
+                read_stream,
+                write_stream,
+                _get_session_id,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    raw: Any = None
+                    for query in _build_service_loki_queries(target, object_state):
+                        raw = await self._call_tool(
+                            session,
+                            "loki_query",
+                            {
+                                "query": query,
+                                "start": _format_loki_window(inputs.lookback_minutes),
+                                "end": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                                "limit": get_log_tail_lines(),
+                            },
+                        )
+                        normalized = _normalize_loki_logs(raw)
+                        if normalized:
+                            return LokiLogsSnapshot(
+                                cluster_alias=cluster.alias,
+                                target=target,
+                                log_excerpt=normalized,
+                                tool_path=["loki-mcp-server", "loki_query"],
+                            )
+                    return LokiLogsSnapshot(
+                        cluster_alias=cluster.alias,
+                        target=target,
+                        log_excerpt=_normalize_loki_logs(raw),
+                        tool_path=["loki-mcp-server", "loki_query"],
+                    )
+
+    def collect_workload_logs(
+        self,
+        inputs: StepExecutionInputs,
+        *,
+        target: TargetRef,
+        runtime_pod_name: str | None,
+    ) -> LokiLogsSnapshot:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = False
+        else:
+            running_loop = True
+
+        if running_loop:
+            result: dict[str, LokiLogsSnapshot] = {}
+            error: dict[str, Exception] = {}
+
+            def _runner() -> None:
+                try:
+                    result["snapshot"] = anyio.run(
+                        lambda: self._collect_workload_async(
+                            inputs,
+                            target=target,
+                            runtime_pod_name=runtime_pod_name,
+                        )
+                    )
+                except Exception as exc:  # pragma: no cover
+                    error["exception"] = exc
+
+            thread = threading.Thread(target=_runner, daemon=True)
+            thread.start()
+            thread.join()
+            if "exception" in error:
+                exc = error["exception"]
+                if isinstance(exc, PeerMcpError):
+                    raise exc
+                raise PeerMcpError(_peer_error_message(exc)) from exc
+            return result["snapshot"]
+
+        try:
+            return anyio.run(
+                lambda: self._collect_workload_async(
+                    inputs,
+                    target=target,
+                    runtime_pod_name=runtime_pod_name,
+                )
+            )
+        except PeerMcpError:
+            raise
+        except Exception as exc:
+            raise PeerMcpError(_peer_error_message(exc)) from exc
+
+    def collect_service_logs(
+        self,
+        inputs: StepExecutionInputs,
+        *,
+        target: TargetRef,
+        object_state: dict[str, Any] | None = None,
+    ) -> LokiLogsSnapshot:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = False
+        else:
+            running_loop = True
+
+        if running_loop:
+            result: dict[str, LokiLogsSnapshot] = {}
+            error: dict[str, Exception] = {}
+
+            def _runner() -> None:
+                try:
+                    result["snapshot"] = anyio.run(
+                        lambda: self._collect_service_async(
+                            inputs,
+                            target=target,
+                            object_state=object_state,
+                        )
+                    )
+                except Exception as exc:  # pragma: no cover
+                    error["exception"] = exc
+
+            thread = threading.Thread(target=_runner, daemon=True)
+            thread.start()
+            thread.join()
+            if "exception" in error:
+                exc = error["exception"]
+                if isinstance(exc, PeerMcpError):
+                    raise exc
+                raise PeerMcpError(_peer_error_message(exc)) from exc
+            return result["snapshot"]
+
+        try:
+            return anyio.run(
+                lambda: self._collect_service_async(
+                    inputs,
+                    target=target,
+                    object_state=object_state,
+                )
+            )
         except PeerMcpError:
             raise
         except Exception as exc:

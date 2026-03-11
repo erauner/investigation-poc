@@ -11,3 +11,4 @@ desktop-extension-reference/node_modules/
 desktop-extension-reference/dist/
 desktop-extension-reference/*.mcpb
 .npm-cache
+.env.local

@@ -1,0 +1,12 @@
+FROM python:3.12-alpine
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+RUN python -m pip install --no-cache-dir .
+
+ENV PORT=8080
+
+CMD ["python", "-m", "loki_mcp_server.main"]

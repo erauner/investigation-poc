@@ -1,0 +1,11 @@
+- op: add
+  path: /spec/declarative/tools/2
+  value:
+    type: McpServer
+    mcpServer:
+      name: loki-mcp-server
+      kind: RemoteMCPServer
+      toolNames:
+        - loki_query
+        - loki_label_names
+        - loki_label_values

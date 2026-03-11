@@ -69,6 +69,7 @@ def materialize_service_metrics_snapshot(
         attempted_routes=attempted_routes,
         object_state=bundle.object_state,
         events=bundle.events,
+        log_excerpt=bundle.log_excerpt,
         cluster_alias=metrics_snapshot.cluster_alias,
         extra_limitations=[*retained_limitations, *metrics_snapshot.limitations, *(extra_limitations or [])],
     )

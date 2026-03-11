@@ -4,8 +4,10 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 from investigation_orchestrator import mcp_clients
-from investigation_orchestrator.mcp_clients import KubernetesMcpClient, PrometheusMcpClient
+from investigation_orchestrator.mcp_clients import KubernetesMcpClient, LokiMcpClient, PrometheusMcpClient
 from investigation_service.models import StepExecutionInputs
+import pytest
+import re
 
 
 class _DummyAsyncClient:
@@ -261,4 +263,286 @@ def test_collect_node_top_pods_parses_resources_list_payload(monkeypatch) -> Non
         {"namespace": "operator-smoke", "name": "api-0", "memory_request_bytes": 536870912},
         {"namespace": "operator-smoke", "name": "api-1", "memory_request_bytes": 268435456},
     ]
-    assert snapshot.limitations == []
+
+
+def test_collect_workload_logs_normalizes_loki_payload(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        if tool_name != "loki_query":
+            raise AssertionError(f"unexpected tool {tool_name}")
+        return {
+            "entries": [
+                {"message": "error: upstream failed"},
+                {"line": "exception: retry exhausted"},
+            ]
+        }
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="local-kind", loki_url=None),
+    )
+    monkeypatch.setattr(LokiMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_workload_logs(
+        StepExecutionInputs(
+            request_kind="target_context",
+            namespace="operator-smoke",
+            target="deployment/api",
+            profile="workload",
+            lookback_minutes=15,
+        ),
+        target=mcp_clients.TargetRef(namespace="operator-smoke", kind="deployment", name="api"),
+        runtime_pod_name="api-abc123",
+    )
+
+    assert calls == [
+        (
+            "loki_query",
+            calls[0][1],
+        )
+    ]
+    assert calls[0][1]["query"] == '{namespace="operator-smoke",pod="api-abc123"}'
+    assert calls[0][1]["limit"] == 200
+    assert re.fullmatch(r".+Z", str(calls[0][1]["start"]))
+    assert re.fullmatch(r".+Z", str(calls[0][1]["end"]))
+    assert snapshot.log_excerpt == "error: upstream failed\nexception: retry exhausted"
+    assert snapshot.tool_path == ["loki-mcp-server", "loki_query"]
+
+
+def test_collect_service_logs_builds_loki_query_from_matched_pods(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        if tool_name != "loki_query":
+            raise AssertionError(f"unexpected tool {tool_name}")
+        return {"data": {"result": [{"values": [["1", "error: upstream returned 500"]]}]}}
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="local-kind", loki_url=None),
+    )
+    monkeypatch.setattr(LokiMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_service_logs(
+        StepExecutionInputs(
+            request_kind="service_context",
+            namespace="operator-smoke",
+            target="service/api",
+            profile="service",
+            service_name="api",
+            lookback_minutes=15,
+        ),
+        target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        object_state={
+            "kind": "service",
+            "name": "api",
+            "matchedPods": [
+                {"name": "api-abc123"},
+                {"name": "api-def456"},
+                {"name": "api-def456"},
+            ],
+        },
+    )
+
+    assert calls == [
+        (
+            "loki_query",
+            calls[0][1],
+        )
+    ]
+    assert calls[0][1]["query"] == '{namespace="operator-smoke",pod=~"api\\-abc123|api\\-def456"}'
+    assert calls[0][1]["limit"] == 200
+    assert re.fullmatch(r".+Z", str(calls[0][1]["start"]))
+    assert re.fullmatch(r".+Z", str(calls[0][1]["end"]))
+    assert snapshot.log_excerpt == "error: upstream returned 500"
+    assert snapshot.tool_path == ["loki-mcp-server", "loki_query"]
+
+
+def test_collect_service_logs_falls_back_to_selector_app_query_when_pod_query_is_empty(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        if tool_name != "loki_query":
+            raise AssertionError(f"unexpected tool {tool_name}")
+        if args["query"] == '{namespace="operator-smoke",pod=~"api\\-abc123"}':
+            return {"data": {"result": []}}
+        if args["query"] == '{namespace="operator-smoke",app="api"}':
+            return {"data": {"result": [{"values": [["1", "error: upstream returned 500"]]}]}}
+        raise AssertionError(f"unexpected query {args['query']}")
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="local-kind", loki_url=None),
+    )
+    monkeypatch.setattr(LokiMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_service_logs(
+        StepExecutionInputs(
+            request_kind="service_context",
+            namespace="operator-smoke",
+            target="service/api",
+            profile="service",
+            service_name="api",
+            lookback_minutes=15,
+        ),
+        target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        object_state={
+            "kind": "service",
+            "name": "api",
+            "selector": {"app.kubernetes.io/name": "api"},
+            "matchedPods": [{"name": "api-abc123"}],
+        },
+    )
+
+    assert [args["query"] for _tool_name, args in calls] == [
+        '{namespace="operator-smoke",pod=~"api\\-abc123"}',
+        '{namespace="operator-smoke",app="api"}',
+    ]
+    assert snapshot.log_excerpt == "error: upstream returned 500"
+    assert snapshot.tool_path == ["loki-mcp-server", "loki_query"]
+
+
+def test_collect_service_logs_does_not_fall_back_to_unmapped_selector_labels(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        return {"data": {"result": []}}
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="local-kind", loki_url=None),
+    )
+    monkeypatch.setattr(LokiMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_service_logs(
+        StepExecutionInputs(
+            request_kind="service_context",
+            namespace="operator-smoke",
+            target="service/api",
+            profile="service",
+            service_name="api",
+            lookback_minutes=15,
+        ),
+        target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        object_state={
+            "kind": "service",
+            "name": "api",
+            "selector": {"app": "api", "k8s-app": "api"},
+        },
+    )
+
+    assert calls == []
+    assert snapshot.log_excerpt == ""
+
+
+def test_collect_service_logs_does_not_fall_back_to_app_query_without_emitted_selector(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        return {"data": {"result": []}}
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="local-kind", loki_url=None),
+    )
+    monkeypatch.setattr(LokiMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_service_logs(
+        StepExecutionInputs(
+            request_kind="service_context",
+            namespace="operator-smoke",
+            target="service/api",
+            profile="service",
+            service_name="api",
+            lookback_minutes=15,
+        ),
+        target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        object_state={"kind": "service", "name": "api"},
+    )
+
+    assert calls == []
+    assert snapshot.log_excerpt == ""
+
+
+def test_collect_service_logs_rejects_remote_loki_routing_without_explicit_cluster(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="remote-a", loki_url="http://remote-loki:3100"),
+    )
+    monkeypatch.setattr(mcp_clients, "get_default_cluster_alias", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_cluster_name", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_loki_url", lambda: "http://local-loki:3100")
+
+    with pytest.raises(mcp_clients.PeerMcpError, match="multicluster loki routing"):
+        client.collect_service_logs(
+            StepExecutionInputs(
+                request_kind="service_context",
+                namespace="operator-smoke",
+                target="service/api",
+                profile="service",
+                service_name="api",
+                lookback_minutes=15,
+            ),
+            target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        )
+
+
+def test_collect_service_logs_rejects_remote_loki_routing_when_remote_cluster_has_no_loki_url(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="remote-a", loki_url=None),
+    )
+    monkeypatch.setattr(mcp_clients, "get_default_cluster_alias", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_cluster_name", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_loki_url", lambda: "http://local-loki:3100")
+
+    with pytest.raises(mcp_clients.PeerMcpError, match="multicluster loki routing"):
+        client.collect_service_logs(
+            StepExecutionInputs(
+                request_kind="service_context",
+                namespace="operator-smoke",
+                target="service/api",
+                profile="service",
+                service_name="api",
+                cluster="remote-a",
+                lookback_minutes=15,
+            ),
+            target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        )

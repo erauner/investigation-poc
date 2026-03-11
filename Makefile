@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-enable-http-debug kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
+.PHONY: install test run run-mcp validate-loki-phase1 validate-loki-phase1-deterministic kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-build-loki-mcp-image kind-load-loki-mcp-image kind-enable-http-debug kind-enable-loki-debug kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-loki-complementary kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -11,6 +11,7 @@ HTTP_DEBUG_OVERLAY ?= k8s-overlays/local-kind-optional-http
 INVESTIGATION_IMAGE ?= investigation-poc:local
 SHADOW_IMAGE ?= investigation-shadow-runtime:local
 METRICS_SMOKE_IMAGE ?= metrics-smoke-app:local
+LOKI_MCP_IMAGE ?= loki-mcp-server:local
 HOMELAB_OPERATOR_DIR ?= ../homelab-operator
 OPERATOR_IMAGE ?= homelab-operator:local
 
@@ -28,6 +29,11 @@ test:
 	else \
 		$(PYTHON) -m pytest -q; \
 	fi
+
+validate-loki-phase1: validate-loki-phase1-deterministic
+
+validate-loki-phase1-deterministic:
+	@./scripts/validate-loki-phase1.sh
 
 run:
 	@if command -v uv >/dev/null 2>&1; then \
@@ -72,6 +78,12 @@ kind-build-metrics-smoke-image:
 
 kind-load-metrics-smoke-image:
 	@kind load docker-image "$(METRICS_SMOKE_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
+
+kind-build-loki-mcp-image:
+	@docker build -f Dockerfile.loki-mcp -t "$(LOKI_MCP_IMAGE)" .
+
+kind-load-loki-mcp-image:
+	@kind load docker-image "$(LOKI_MCP_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
 
 kagent-smoke-apply:
 	@./scripts/smoke-workload.sh apply
@@ -169,6 +181,17 @@ kind-enable-http-debug:
 	@kubectl apply -k "$(HTTP_DEBUG_OVERLAY)"
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-service --timeout=180s
 
+kind-enable-loki-debug:
+	@$(MAKE) kind-build-loki-mcp-image
+	@$(MAKE) kind-load-loki-mcp-image
+	@kubectl apply -k k8s-overlays/local-kind-optional-loki
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/loki --timeout=180s
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status daemonset/promtail --timeout=240s
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/loki-mcp-server >/dev/null 2>&1 || true
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/loki-mcp-server --timeout=240s
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/investigation-service >/dev/null 2>&1 || true
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-service --timeout=180s
+
 kind-preflight-clean:
 	@./scripts/kind-preflight-clean.sh
 
@@ -209,6 +232,9 @@ kind-validate-service-scout:
 
 kind-validate-service-scout-debug:
 	@KEEP_CLUSTER=1 KEEP_SMOKE=1 ./scripts/kind-validate-service-scout.sh
+
+kind-validate-loki-complementary:
+	@./scripts/kind-validate-loki-complementary.sh
 
 kind-validate-node:
 	@./scripts/kind-validate-node.sh

@@ -270,3 +270,48 @@ def test_service_findings_use_backend_topology_when_metrics_are_weak() -> None:
     titles = {item.title for item in findings}
     assert "Service Has No Ready Backends" in titles
     assert "Service Backends Restarting" in titles
+
+
+def test_service_findings_include_error_like_log_patterns_when_correlated_with_degradation() -> None:
+    findings = derive_findings(
+        "service",
+        {
+            "kind": "service",
+            "name": "api",
+            "selector": {"app": "api"},
+            "matchedPodCount": 1,
+            "readyPodCount": 1,
+            "matchedPods": [{"name": "api-abc123", "ready": True, "restartCount": 0}],
+        },
+        [],
+        "error: upstream returned 500\nexception: timeout",
+        {
+            "profile": "service",
+            "prometheus_available": True,
+            "service_error_rate": 0.5,
+            "service_latency_p95_seconds": 1.2,
+        },
+    )
+
+    titles = {item.title for item in findings}
+    assert "Error-like Log Patterns" in titles
+
+
+def test_service_findings_do_not_promote_error_like_logs_without_degradation() -> None:
+    findings = derive_findings(
+        "service",
+        {
+            "kind": "service",
+            "name": "api",
+            "selector": {"app": "api"},
+            "matchedPodCount": 1,
+            "readyPodCount": 1,
+            "matchedPods": [{"name": "api-abc123", "ready": True, "restartCount": 0}],
+        },
+        [],
+        "error: upstream returned 500\nexception: timeout",
+        {"profile": "service", "prometheus_available": False},
+    )
+
+    titles = {item.title for item in findings}
+    assert "Error-like Log Patterns" not in titles

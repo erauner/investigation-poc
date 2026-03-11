@@ -78,6 +78,7 @@ def materialize_service_submission(
     attempted_routes: list[ActualRoute] | None = None,
     object_state: dict | None = None,
     events: list[str] | None = None,
+    log_excerpt: str = "",
     cluster_alias: str | None = None,
     extra_limitations: list[str] | None = None,
 ) -> SubmittedStepArtifact:
@@ -94,6 +95,7 @@ def materialize_service_submission(
         metrics=metrics,
         object_state=object_state,
         events=events,
+        log_excerpt=log_excerpt,
         cluster_alias=cluster_alias,
         extra_limitations=extra_limitations,
     )
