@@ -6,7 +6,14 @@ from typing import Callable
 
 from investigation_service.event_fingerprints import parse_compact_event_text
 
-from .models import EvidenceItem, InvestigationReport, PresentationProfileType, ResolvedGuideline
+from .models import (
+    EvidenceItem,
+    InvestigationReport,
+    InvestigationSubjectRef,
+    PlannerSeedExecutionFocus,
+    PresentationProfileType,
+    ResolvedGuideline,
+)
 
 
 @dataclass(frozen=True)
@@ -76,6 +83,7 @@ def _render_debug_trace(report: InvestigationReport) -> list[PresentationSection
         f"Diagnosis: {report.diagnosis}",
         f"Confidence: {report.confidence}",
     ]
+    trace_lines.extend(_focus_debug_lines(report))
     if report.tool_path_trace is not None:
         trace_lines.extend(
             [
@@ -108,6 +116,47 @@ def _render_debug_trace(report: InvestigationReport) -> list[PresentationSection
             guideline_lines or ["No guidelines or normalization notes."],
         ),
     ]
+
+
+def _focus_debug_lines(report: InvestigationReport) -> list[str]:
+    focus = report.focus_provenance
+    if focus is None:
+        return []
+    lines: list[str] = []
+    if focus.requested_subject:
+        lines.append(f"Requested subject: {focus.requested_subject}")
+    if focus.soft_primary_focus is not None:
+        lines.append(f"Soft primary focus: {_format_subject_ref(focus.soft_primary_focus)}")
+    if focus.initial_bounded_execution_focus is not None:
+        lines.append(f"Initial bounded focus: {_format_execution_focus(focus.initial_bounded_execution_focus)}")
+    if focus.current_bounded_execution_focus is not None:
+        lines.append(f"Current bounded focus: {_format_execution_focus(focus.current_bounded_execution_focus)}")
+    if focus.initial_focus_reasons:
+        lines.append(f"Initial focus reasons: {'; '.join(focus.initial_focus_reasons)}")
+    if focus.latest_focus_change_reasons:
+        source = f" ({focus.latest_focus_change_source_step_id})" if focus.latest_focus_change_source_step_id else ""
+        lines.append(f"Latest focus change{source}: {'; '.join(focus.latest_focus_change_reasons)}")
+    if focus.related_subjects_considered:
+        lines.append(
+            "Related subjects considered: "
+            + ", ".join(_format_subject_ref(subject) for subject in focus.related_subjects_considered)
+        )
+    return lines
+
+
+def _format_subject_ref(subject: InvestigationSubjectRef) -> str:
+    namespace = f"{subject.namespace}/" if subject.namespace else ""
+    cluster = f" [{subject.cluster}]" if subject.cluster else ""
+    return f"{subject.kind}:{namespace}{subject.name}{cluster}"
+
+
+def _format_execution_focus(focus: PlannerSeedExecutionFocus) -> str:
+    extras: list[str] = [focus.profile]
+    if focus.service_name:
+        extras.append(f"service={focus.service_name}")
+    if focus.node_name:
+        extras.append(f"node={focus.node_name}")
+    return f"{focus.scope}:{focus.target} ({', '.join(extras)})"
 
 
 def _render_explain_more(report: InvestigationReport) -> list[PresentationSection]:

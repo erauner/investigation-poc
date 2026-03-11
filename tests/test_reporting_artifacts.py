@@ -14,6 +14,7 @@ from investigation_service.models import (
     Finding,
     Hypothesis,
     InvestigationAnalysis,
+    InvestigationFocusProvenance,
     InvestigationPlan,
     InvestigationReportingRequest,
     InvestigationReportRequest,
@@ -21,6 +22,7 @@ from investigation_service.models import (
     InvestigationSubjectRef,
     InvestigationTarget,
     PlanStep,
+    PlannerSeedExecutionFocus,
     ReportingExecutionContext,
     ResolvedIngressScope,
     StepRouteProvenance,
@@ -96,6 +98,41 @@ def _plan() -> InvestigationPlan:
         ],
         evidence_batches=[],
         active_batch_id="batch-1",
+        focus_provenance=InvestigationFocusProvenance(
+            requested_subject="service/api",
+            soft_primary_focus=InvestigationSubjectRef(
+                kind="service",
+                name="api",
+                cluster="artifact-cluster",
+                namespace="artifact-ns",
+                confidence="high",
+                sources=["explicit_target"],
+            ),
+            related_subjects_considered=[
+                InvestigationSubjectRef(
+                    kind="statefulset",
+                    name="api-db",
+                    cluster="artifact-cluster",
+                    namespace="artifact-ns",
+                    confidence="medium",
+                    sources=["express_enrichment"],
+                    relation="dependency",
+                )
+            ],
+            initial_bounded_execution_focus=PlannerSeedExecutionFocus(
+                scope="service",
+                target="service/api-resolved",
+                profile="service",
+                service_name="api-resolved",
+            ),
+            current_bounded_execution_focus=PlannerSeedExecutionFocus(
+                scope="service",
+                target="service/api-resolved",
+                profile="service",
+                service_name="api-resolved",
+            ),
+            initial_focus_reasons=["canonical focus selected: service/api"],
+        ),
         planning_notes=["artifact-note"],
     )
 
@@ -378,6 +415,12 @@ def test_render_investigation_report_uses_execution_artifacts_by_default(monkeyp
     assert report.tool_path_trace.step_provenance[0].provenance.requested_capability == "service_evidence_plane"
     assert report.tool_path_trace.step_provenance[0].provenance.route_satisfaction == "unmatched"
     assert report.tool_path_trace.step_provenance[0].provenance.actual_route.tool_name == "collect_service_evidence"
+    assert report.focus_provenance is not None
+    assert report.focus_provenance.requested_subject == "service/api"
+    assert report.focus_provenance.soft_primary_focus is not None
+    assert report.focus_provenance.soft_primary_focus.name == "api-resolved"
+    assert report.focus_provenance.current_bounded_execution_focus is not None
+    assert report.focus_provenance.current_bounded_execution_focus.target == "service/api-resolved"
 
 
 def test_render_investigation_report_reuses_executed_change_artifacts(monkeypatch) -> None:
@@ -1147,10 +1190,114 @@ def test_build_investigation_state_preserves_subject_context_when_target_aligns(
     assert state.target.subject_context is not None
     assert state.target.subject_context.primary_subject is not None
     assert state.target.subject_context.primary_subject.kind == "service"
-    assert state.target.subject_context.primary_subject.name == "api"
+    assert state.target.subject_context.primary_subject.name == "api-resolved"
     assert [(ref.kind, ref.name) for ref in state.target.subject_context.related_subjects] == [
         ("statefulset", "api-db")
     ]
+    assert state.focus_provenance is not None
+    assert state.focus_provenance.soft_primary_focus is not None
+    assert state.focus_provenance.soft_primary_focus.name == "api-resolved"
+    assert state.focus_provenance.latest_focus_change_reasons == []
+    assert state.focus_provenance.latest_focus_change_source_step_id is None
+
+
+def test_build_investigation_state_records_latest_focus_change_when_alignment_changes_target() -> None:
+    target = InvestigationTarget(
+        source="manual",
+        scope="workload",
+        cluster="artifact-cluster",
+        namespace="artifact-ns",
+        requested_target="pod/crashy",
+        target="pod/crashy",
+        profile="workload",
+        lookback_minutes=15,
+        normalization_notes=["artifact-note"],
+        subject_context=InvestigationSubjectContext(
+            resolution_status="resolved",
+            scope=ResolvedIngressScope(cluster="artifact-cluster", namespace="artifact-ns"),
+            primary_subject=InvestigationSubjectRef(
+                kind="pod",
+                name="crashy",
+                cluster="artifact-cluster",
+                namespace="artifact-ns",
+                confidence="high",
+                sources=["explicit_target"],
+            ),
+            related_subjects=[],
+            notes=["artifact-note"],
+        ),
+    )
+    plan = InvestigationPlan(
+        mode="targeted_rca",
+        objective="Investigate pod/crashy",
+        target=target,
+        steps=[],
+        evidence_batches=[],
+        active_batch_id=None,
+        focus_provenance=InvestigationFocusProvenance(
+            requested_subject="pod/crashy",
+            soft_primary_focus=target.subject_context.primary_subject,
+            related_subjects_considered=[],
+            initial_bounded_execution_focus=PlannerSeedExecutionFocus(
+                scope="workload",
+                target="pod/crashy",
+                profile="workload",
+            ),
+            current_bounded_execution_focus=PlannerSeedExecutionFocus(
+                scope="workload",
+                target="pod/crashy",
+                profile="workload",
+            ),
+            initial_focus_reasons=["artifact-note"],
+        ),
+        planning_notes=["artifact-note"],
+    )
+    execution = EvidenceBatchExecution(
+        batch_id="batch-1",
+        executed_step_ids=["collect-target-evidence"],
+        artifacts=[
+            StepArtifact(
+                step_id="collect-target-evidence",
+                plane="workload",
+                artifact_type="evidence_bundle",
+                summary=[],
+                limitations=[],
+                evidence_bundle=EvidenceBundle(
+                    cluster="artifact-cluster",
+                    target=TargetRef(namespace="artifact-ns", kind="pod", name="crashy-abc123"),
+                    object_state={"kind": "pod", "name": "crashy-abc123"},
+                    events=[],
+                    log_excerpt="",
+                    metrics={},
+                    findings=[],
+                    limitations=[],
+                    enrichment_hints=[],
+                ),
+            )
+        ],
+        execution_notes=["executed batch-1"],
+    )
+
+    state = reporting.build_investigation_state(
+        InvestigationReportingRequest(
+            target="pod/crashy",
+            profile="workload",
+            execution_context=ReportingExecutionContext(updated_plan=plan, executions=[execution]),
+        )
+    )
+
+    assert state.target is not None
+    assert state.target.target == "pod/crashy-abc123"
+    assert state.target.subject_context is not None
+    assert state.target.subject_context.primary_subject is not None
+    assert state.target.subject_context.primary_subject.name == "crashy-abc123"
+    assert state.focus_provenance is not None
+    assert state.focus_provenance.soft_primary_focus is not None
+    assert state.focus_provenance.soft_primary_focus.name == "crashy-abc123"
+    assert state.focus_provenance.current_bounded_execution_focus is not None
+    assert state.focus_provenance.current_bounded_execution_focus.target == "pod/crashy-abc123"
+    assert state.focus_provenance.latest_focus_change_reasons == ["resolved pod target to crashy-abc123"]
+    assert state.focus_provenance.latest_focus_change_source_step_id == "collect-target-evidence"
 
 
 def test_handoff_active_evidence_batch_rejects_mismatched_execution_context_incident(monkeypatch) -> None:

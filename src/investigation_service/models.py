@@ -194,6 +194,17 @@ class FocusNarrowingRecommendation(BaseModel):
     related_subjects: list[InvestigationSubjectRef] = Field(default_factory=list)
 
 
+class InvestigationFocusProvenance(BaseModel):
+    requested_subject: str | None = None
+    soft_primary_focus: InvestigationSubjectRef | None = None
+    related_subjects_considered: list[InvestigationSubjectRef] = Field(default_factory=list)
+    initial_bounded_execution_focus: PlannerSeedExecutionFocus | None = None
+    current_bounded_execution_focus: PlannerSeedExecutionFocus | None = None
+    initial_focus_reasons: list[str] = Field(default_factory=list)
+    latest_focus_change_reasons: list[str] = Field(default_factory=list)
+    latest_focus_change_source_step_id: str | None = None
+
+
 class ExplorationOutcome(BaseModel):
     step_id: str
     capability: str | None = None
@@ -272,6 +283,7 @@ class InvestigationPlan(BaseModel):
     steps: list[PlanStep] = Field(default_factory=list)
     evidence_batches: list[EvidenceBatch] = Field(default_factory=list)
     active_batch_id: str | None = None
+    focus_provenance: InvestigationFocusProvenance | None = None
     pending_exploration_outcomes: list[ExplorationOutcome] = Field(default_factory=list)
     planning_notes: list[str] = Field(default_factory=list)
 
@@ -722,6 +734,7 @@ class InvestigationState(BaseModel):
     artifacts: list[StepArtifact] = Field(default_factory=list)
     primary_evidence: EvidenceBundle | None = None
     change_candidates: CorrelatedChangesResponse | None = None
+    focus_provenance: InvestigationFocusProvenance | None = None
     tool_path_trace: ToolPathTrace | None = None
 
 
@@ -741,6 +754,7 @@ class InvestigationReport(BaseModel):
     suggested_follow_ups: list[str] = Field(default_factory=list)
     guidelines: list[ResolvedGuideline] = Field(default_factory=list)
     normalization_notes: list[str] = Field(default_factory=list)
+    focus_provenance: InvestigationFocusProvenance | None = None
     tool_path_trace: ToolPathTrace | None = None
 
 
