@@ -182,6 +182,7 @@ def normalized_request_from_subject_set(
                 f"{_subject_ref_string(ref)} ({ref.relation})" for ref in subject_set.related_refs
             )
         )
+    subject_context = subject_context.model_copy(update={"notes": list(notes)})
     return normalized.model_copy(update={"normalization_notes": notes, "subject_context": subject_context})
 
 
@@ -256,6 +257,9 @@ def _resolve_scope(
         scope.namespace_source = "explicit"
     elif field_values.get("namespace"):
         scope.namespace = field_values["namespace"]
+        scope.namespace_source = "question_text"
+    elif _match_group(_NAMESPACE_PATTERN, req.raw_text or req.question or "", "namespace"):
+        scope.namespace = _match_group(_NAMESPACE_PATTERN, req.raw_text or req.question or "", "namespace")
         scope.namespace_source = "question_text"
     elif _label_value(req.labels, "namespace", "kubernetes_namespace", "exported_namespace"):
         scope.namespace = _label_value(req.labels, "namespace", "kubernetes_namespace", "exported_namespace")

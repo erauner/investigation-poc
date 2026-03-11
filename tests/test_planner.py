@@ -309,6 +309,18 @@ def test_build_investigation_plan_reraises_question_scope_errors_for_target_like
         )
 
 
+def test_build_investigation_plan_resolves_namespace_from_namespace_phrase() -> None:
+    target = resolve_primary_target(
+        InvestigationReportRequest(
+            question="Investigate Backend/api in namespace tenant-a",
+        ),
+        _deps([]),
+    )
+
+    assert target.namespace == "tenant-a"
+    assert target.target == "deployment/api"
+
+
 def test_build_investigation_plan_rejects_unsupported_target_like_question_input() -> None:
     with pytest.raises(ValueError, match="unsupported investigation subject kind: job"):
         build_investigation_plan(

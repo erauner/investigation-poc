@@ -984,6 +984,22 @@ def test_handoff_active_evidence_batch_rejects_token_and_execution_context_toget
         )
 
 
+def test_build_investigation_state_rejects_mismatched_execution_context_incident(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+
+    with pytest.raises(ValueError, match="execution_context does not match the supplied incident"):
+        reporting.build_investigation_state(
+            InvestigationReportingRequest(
+                target="service/other",
+                profile="service",
+                execution_context=ReportingExecutionContext(
+                    updated_plan=_plan().model_copy(update={"active_batch_id": None}),
+                    executions=[],
+                ),
+            )
+        )
+
+
 def test_build_investigation_state_preserves_subject_context_when_target_aligns() -> None:
     state = reporting.build_investigation_state(
         InvestigationReportingRequest(
@@ -1005,6 +1021,18 @@ def test_build_investigation_state_preserves_subject_context_when_target_aligns(
     assert [(ref.kind, ref.name) for ref in state.target.subject_context.related_subjects] == [
         ("statefulset", "api-db")
     ]
+
+
+def test_handoff_active_evidence_batch_rejects_mismatched_execution_context_incident(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _runtime_plan())
+
+    with pytest.raises(ValueError, match="execution_context does not match the supplied incident"):
+        reporting.handoff_active_evidence_batch(
+            HandoffActiveEvidenceBatchRequest(
+                incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/other", profile="service"),
+                execution_context=ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[]),
+            )
+        )
 
 
 def test_render_investigation_report_uses_advanced_runtime_context_without_fallback(monkeypatch) -> None:

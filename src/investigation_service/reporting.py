@@ -170,6 +170,7 @@ def _reporting_execution_context(
         plan = build_investigation_plan(incident)
         return plan, plan, [], True
 
+    _validate_execution_context_matches_incident(context, incident)
     initial_plan = context.initial_plan or build_investigation_plan(incident)
     return (
         initial_plan,
@@ -241,9 +242,42 @@ def _handoff_runtime_context(req: HandoffActiveEvidenceBatchRequest) -> Reportin
             update={"allow_bounded_fallback_execution": False}
         )
     if req.execution_context is not None:
+        _validate_execution_context_matches_incident(req.execution_context, req.incident)
         return req.execution_context.model_copy(update={"allow_bounded_fallback_execution": False})
     plan = build_investigation_plan(req.incident)
     return _runtime_context(initial_plan=plan, updated_plan=plan, executions=[], allow_bounded_fallback_execution=False)
+
+
+def _validate_execution_context_matches_incident(
+    context: ReportingExecutionContext,
+    incident: BuildInvestigationPlanRequest,
+) -> None:
+    baseline_plan = context.initial_plan or context.updated_plan
+    if not _incident_matches_plan_identity(incident, baseline_plan):
+        raise ValueError("execution_context does not match the supplied incident")
+
+
+def _incident_matches_plan_identity(
+    incident: BuildInvestigationPlanRequest,
+    plan: InvestigationPlan,
+) -> bool:
+    target = plan.target
+    if incident.target:
+        if target is None:
+            return False
+        if incident.target not in {target.requested_target, target.target}:
+            return False
+    if incident.namespace is not None and (target is None or target.namespace != incident.namespace):
+        return False
+    if incident.cluster is not None and (target is None or target.cluster != incident.cluster):
+        return False
+    if incident.service_name is not None and (target is None or target.service_name != incident.service_name):
+        return False
+    if incident.node_name is not None and (target is None or target.node_name != incident.node_name):
+        return False
+    if incident.alertname and plan.mode != "alert_rca":
+        return False
+    return True
 
 
 def _active_batch_contract_or_none(
