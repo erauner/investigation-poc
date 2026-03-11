@@ -168,6 +168,7 @@ class EvidenceStepContract(BaseModel):
     fallback_mcp_server: str | None = None
     fallback_tool_names: list[str] = Field(default_factory=list)
     execution_mode: Literal["external_preferred", "control_plane_only"]
+    exploration_intent: Literal["follow_up"] | None = None
     execution_inputs: StepExecutionInputs
 
 
@@ -191,6 +192,7 @@ class StepRouteProvenance(BaseModel):
     requested_capability: str | None = None
     route_satisfaction: Literal["preferred", "fallback", "unmatched", "not_applicable"] = "not_applicable"
     actual_route: ActualRoute
+    contributing_routes: list[ActualRoute] = Field(default_factory=list)
     attempted_routes: list[ActualRoute] = Field(default_factory=list)
 
 
@@ -236,6 +238,7 @@ class SubmittedStepArtifact(BaseModel):
     evidence_bundle: "EvidenceBundle | None" = None
     change_candidates: "CorrelatedChangesResponse | None" = None
     actual_route: ActualRoute
+    contributing_routes: list[ActualRoute] = Field(default_factory=list)
     attempted_routes: list[ActualRoute] = Field(default_factory=list)
     summary: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)

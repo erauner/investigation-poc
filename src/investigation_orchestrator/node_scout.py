@@ -11,6 +11,24 @@ from investigation_service.submission_materialization import materialize_node_su
 from .mcp_clients import KubernetesMcpClient, NodePodSummarySnapshot, PeerMcpError
 
 
+def _merged_contributing_routes(*route_groups: list[ActualRoute]) -> list[ActualRoute]:
+    merged: list[ActualRoute] = []
+    seen: set[tuple[str, str | None, str | None, tuple[str, ...]]] = set()
+    for group in route_groups:
+        for route in group:
+            key = (
+                route.source_kind,
+                route.mcp_server,
+                route.tool_name,
+                tuple(route.tool_path),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(route)
+    return merged
+
+
 def _peer_route(tool_path: list[str]) -> ActualRoute:
     server = tool_path[0] if tool_path else "kubernetes-mcp-server"
     tool_name = next((item for item in tool_path[1:] if item), None)
@@ -40,6 +58,10 @@ def materialize_node_top_pods_snapshot(
         object_state={**bundle.object_state, "top_pods_by_memory_request": snapshot.top_pods_by_memory_request},
         events=bundle.events,
         actual_route=_peer_route(snapshot.tool_path),
+        contributing_routes=_merged_contributing_routes(
+            baseline_artifact.contributing_routes,
+            [_peer_route(snapshot.tool_path)],
+        ),
         attempted_routes=attempted_routes,
         cluster_alias=snapshot.cluster_alias,
         extra_limitations=[*bundle.limitations, *snapshot.limitations, *(extra_limitations or [])],

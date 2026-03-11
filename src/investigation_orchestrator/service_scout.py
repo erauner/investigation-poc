@@ -11,6 +11,24 @@ from investigation_service.submission_materialization import materialize_service
 from .mcp_clients import PeerMcpError, PrometheusMcpClient, ServiceMetricsSnapshot
 
 
+def _merged_contributing_routes(*route_groups: list[ActualRoute]) -> list[ActualRoute]:
+    merged: list[ActualRoute] = []
+    seen: set[tuple[str, str | None, str | None, tuple[str, ...]]] = set()
+    for group in route_groups:
+        for route in group:
+            key = (
+                route.source_kind,
+                route.mcp_server,
+                route.tool_name,
+                tuple(route.tool_path),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(route)
+    return merged
+
+
 def _peer_route(tool_path: list[str]) -> ActualRoute:
     server = tool_path[0] if tool_path else "prometheus-mcp-server"
     tool_name = next((item for item in tool_path[1:] if item), None)
@@ -39,6 +57,10 @@ def materialize_service_metrics_snapshot(
         target=metrics_snapshot.target,
         metrics=metrics_snapshot.metrics,
         actual_route=_peer_route(metrics_snapshot.tool_path),
+        contributing_routes=_merged_contributing_routes(
+            baseline_artifact.contributing_routes,
+            [_peer_route(metrics_snapshot.tool_path)],
+        ),
         attempted_routes=attempted_routes,
         object_state=bundle.object_state,
         events=bundle.events,
@@ -77,7 +99,7 @@ def maybe_run_bounded_service_follow_up_scout(
     baseline_artifact: SubmittedStepArtifact,
     prometheus_mcp_client: PrometheusMcpClient,
 ) -> SubmittedStepArtifact:
-    if step.step_id != "collect-service-follow-up-evidence":
+    if step.exploration_intent != "follow_up":
         return baseline_artifact
 
     if scout_context is None:
