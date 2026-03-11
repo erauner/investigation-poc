@@ -1012,7 +1012,7 @@ Status: Proposed
 
 Goal:
 
-- unify generic, alert, and mixed freeform investigation ingress around one subject-resolution pipeline without forcing full multi-target planning immediately
+- unify generic, alert, and mixed freeform ingress around one subject-resolution pipeline that produces one canonical primary subject plus related resources, without forcing full multi-target planning immediately
 
 Delivered in this slice should be:
 
@@ -1022,8 +1022,12 @@ Delivered in this slice should be:
   - a group of alerts
   - explicit resource references
   - mixed Slack-style text with several related references
+- one dominant execution scope in the first slice:
+  - one Kubernetes context / datacenter
+  - one tenant namespace
+  - with explicit ambiguity handling rather than silent cross-scope merging
 - normalization into a subject set rather than one flat target string
-- one canonical primary subject plus related resources
+- deterministic canonical primary-subject selection plus related resources
 - explicit environment scope modeling for:
   - Kubernetes context / datacenter
   - tenant namespace
@@ -1033,6 +1037,7 @@ Delivered in this slice should be:
   - DB workload
   - generic Deployment / StatefulSet / pod-backed workload
   - Kubernetes node
+- terminology cleanup that reserves `kubernetes_node` for actual cluster machines and avoids bare `node` for Express members in new internal model types
 - deterministic Express-aware grouping and dependency attachment without making Express assumptions mandatory for generic workload paths
 - planner seed derivation that still feeds the current planner/runtime mostly one canonical focus at first
 
@@ -1042,6 +1047,8 @@ Validation gate:
 - Express-cluster requests resolve Backend and Frontend resources as one logical application family without collapsing DB into the same semantic object
 - mixed requests preserve related resources and ambiguity notes rather than forcing fake certainty
 - the planner/runtime can still run mostly unchanged from one canonical focus while carrying related context forward
+
+Presentation profile work may continue in parallel where it is formatting-only, but unified ingress and subject resolution are the more foundational semantic dependency.
 
 ## Current Rollout Framing
 

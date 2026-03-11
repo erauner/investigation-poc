@@ -57,7 +57,7 @@ But that does not mean pod should become the only semantic subject type.
 
 The next ingress refactor should be:
 
-> unify ingress and subject resolution first, keep planning mostly single-focus internally for now, and defer true multi-target planning until it is clearly worth the added semantic complexity.
+> unify ingress around subject-set normalization and deterministic canonical-focus selection first; keep planning mostly single-focus internally for now; defer true multi-target planning until the value clearly exceeds the semantic and runtime complexity.
 
 This means:
 
@@ -73,6 +73,20 @@ This does not mean:
 - making the planner fully multi-target immediately
 - collapsing all semantic targets into pods
 - treating everything in one namespace as one application object
+
+## Initial Scope Constraint
+
+The first unified-ingress slice should prefer one dominant execution scope:
+
+- one Kubernetes context / datacenter
+- one tenant namespace
+
+If input references span multiple candidate scopes, the resolver should preserve ambiguity notes and either:
+
+- choose one dominant scope with explicit justification
+- or return a bounded scope-ambiguity outcome rather than silently merging unrelated resources
+
+Cross-context and cross-namespace grouped investigation is not the default problem for the first slice.
 
 ## Terminology
 
@@ -133,6 +147,8 @@ The exact type name is less important than the architectural rule:
 - many convenience wrappers may still exist temporarily
 - all of them should normalize through the same subject-resolution pipeline
 
+Existing generic and alert-specific wrappers may remain as thin compatibility aliases, but they should not own separate subject-resolution logic.
+
 ## Subject-Centric Normalization
 
 Ingress should normalize into a subject set rather than one single target string.
@@ -179,6 +195,31 @@ The key shift is:
 - then determine what should become the canonical operational focus
 - rather than forcing every request into one target string immediately
 
+Alert and alert-group inputs should first normalize into subject references and scope hints.
+They should not bypass subject resolution by directly becoming planner targets unless they already unambiguously identify the operational subject.
+
+## Canonical Focus Selection
+
+The resolver must deterministically choose one canonical primary subject from the normalized subject set.
+
+That selection should consider factors such as:
+
+- explicitness of the reference
+- specificity of the subject kind
+- alert directness and severity
+- namespace and context alignment
+- known dependency relationships
+- confidence score
+
+If no subject is clearly dominant, the resolver should preserve ambiguity explicitly.
+It should not fabricate certainty only to satisfy the current planner interface.
+
+The normalization stage should preserve:
+
+- competing candidates
+- ambiguity notes
+- why one focus won when a canonical focus is selected
+
 ## Primary Subject Versus Related Resources
 
 The correct near-term model is:
@@ -214,6 +255,9 @@ not:
 
 - everything in the namespace is one target
 - or DB is part of the Express cluster definition
+
+In the near term, related resources are contextual attachments to one primary subject.
+They should not yet imply a planner mode that treats the entire family as co-equal execution subjects.
 
 ## Generic Kubernetes Support Remains First-Class
 
@@ -296,6 +340,9 @@ That means:
 
 - evidence often converges on pod state, logs, events, and container facts
 
+Pods are the most common runtime evidence object, but they are not the only valid canonical subject.
+The resolver may derive pod execution targets from many subject kinds, but subject identity should remain at the most useful semantic level available.
+
 But the semantic subject may still be:
 
 - an Express cluster
@@ -314,6 +361,16 @@ So the internal model should distinguish:
 - runtime evidence
 
 rather than collapsing everything into pods.
+
+## Non-Goals For This Slice
+
+This ADR does not imply:
+
+- cross-context multi-subject investigation planning
+- cross-namespace family planning by default
+- making every related resource a co-equal execution subject
+- replacing all public wrappers immediately
+- redesigning all planner semantics at the same time as ingress
 
 ## Consequences
 
