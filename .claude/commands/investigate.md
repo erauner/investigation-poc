@@ -11,10 +11,10 @@ Use the `mcp__kagent__invoke_agent` tool.
 - Build `task` as this deterministic wrapper, then append the user's arguments verbatim under `Original user request:`.
 - Wrapper header:
   `[INVESTIGATION_ENTRYPOINT]=generic`
-  `Use the planner-led investigation flow.`
   `If the target is vague or operator-backed, resolve it first with resolve_primary_target.`
   `If the request only says the unhealthy pod in a namespace, use Kubernetes MCP to identify the concrete unhealthy pod first, then continue with the planner-led control-plane path using that target.`
-  `After resolving any vague target, prefer run_orchestrated_investigation as the default end-to-end runtime path.`
+  `Use the planner-led investigation flow.`
+  `Prefer run_orchestrated_investigation as the default end-to-end runtime path once parsing and target resolution are complete.`
   `run_orchestrated_investigation keeps batch selection, external-step materialization, advancement, and final rendering in product code.`
   `Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams for debugging or explicit adapter choreography.`
   `Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives.`

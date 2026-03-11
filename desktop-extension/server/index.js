@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const TOOLS = [
   {
@@ -72,6 +74,19 @@ let remoteInitialized = false;
 const ENTRYPOINT_PREFIX = "[INVESTIGATION_ENTRYPOINT]=";
 const OPERATOR_TARGET_PREFIXES = ["Backend/", "Frontend/", "Cluster/"];
 
+function isMainModule() {
+  if (!process.argv[1]) {
+    return false;
+  }
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+const IS_MAIN_MODULE = isMainModule();
+
 function normalizeMode(rawMode) {
   const mode = typeof rawMode === "string" ? rawMode.trim().toLowerCase() : "auto";
   if (!mode) {
@@ -126,7 +141,54 @@ function serializeKeyValueMap(value) {
   return JSON.stringify(Object.fromEntries(entries));
 }
 
-function buildInvestigationTask(args) {
+function commonRuntimeLines() {
+  return [
+    "Use the planner-led investigation flow.",
+    "Prefer run_orchestrated_investigation as the default end-to-end runtime path once parsing and target resolution are complete.",
+    "run_orchestrated_investigation keeps batch selection, external-step materialization, advancement, and final rendering in product code.",
+    "Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams for debugging or explicit adapter choreography.",
+    "Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives.",
+    "Use render_investigation_report only as a secondary low-level render seam when you are explicitly debugging the staged runtime path.",
+    "Use exactly these Markdown headings verbatim: ## Diagnosis, ## Evidence, ## Related Data, ## Limitations, ## Recommended next step."
+  ];
+}
+
+function genericParsingLines() {
+  return [
+    "If the target is vague or operator-backed, resolve it first with resolve_primary_target.",
+    "If the request only says the unhealthy pod in a namespace, use Kubernetes MCP to identify the concrete unhealthy pod first, then continue with the planner-led control-plane path using that target."
+  ];
+}
+
+function alertParsingLines(inferredAlertname, args) {
+  const lines = [
+    "Treat the pasted content below as alert text to extract, not as a workload target string.",
+    "Extract alertname, labels, annotations, namespace, pod, service, instance, severity, and status from the pasted alert text before using the planner-led investigation path.",
+    "If the pasted text includes Labels: or Annotations: sections, use those values as the authoritative alert fields.",
+    "Treat only identity fields such as namespace, pod, service, deployment, node, and container as workload identity.",
+    "Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.",
+    "Never derive a workload namespace from source or monitoring metadata.",
+    "If a service or pod label is present but namespace is missing, say the namespace is unknown instead of guessing.",
+    "Do not investigate the first freeform words of the pasted message as the target unless they are explicitly a Kubernetes object reference such as pod/<name> or service/<name>.",
+    "If live runtime evidence disagrees with the alert payload, call out the mismatch explicitly as possible stale alert metadata or drift between alert time and current state.",
+    "Preserve the original alert name and the resolved operational target name explicitly in the final five-section answer when they are present in the request or report evidence.",
+    "Also preserve the exact original alert-derived target string verbatim, such as pod/<name>, even if runtime resolution later points to a deployment or a specific replica pod.",
+    "Do not rewrite the original alert-derived target string by removing the slash or changing its formatting. Keep forms such as pod/crashy exactly as written.",
+    "Return exactly these five sections and no extra appendix sections: Diagnosis, Evidence, Related Data, Limitations, Recommended next step.",
+    `alertname: ${inferredAlertname}`
+  ];
+  const labels = serializeKeyValueMap(args.labels);
+  if (labels) {
+    lines.push(`labels: ${labels}`);
+  }
+  const annotations = serializeKeyValueMap(args.annotations);
+  if (annotations) {
+    lines.push(`annotations: ${annotations}`);
+  }
+  return lines;
+}
+
+export function buildInvestigationTask(args) {
   const originalTask = typeof args.task === "string" ? args.task.trim() : "";
   if (!originalTask) {
     throw new Error("investigate task is required");
@@ -147,45 +209,12 @@ function buildInvestigationTask(args) {
     );
   }
 
-  const lines = [
-    `${ENTRYPOINT_PREFIX}${selectedMode}`,
-    selectedMode === "alert"
-      ? "Use the planner-led investigation flow for alert handling."
-      : "Use the planner-led investigation flow.",
-  ];
+  const lines = [`${ENTRYPOINT_PREFIX}${selectedMode}`];
 
   if (selectedMode === "generic") {
-    lines.push(
-      "If the target is vague or operator-backed, resolve it first with resolve_primary_target.",
-      "If the request only says the unhealthy pod in a namespace, use Kubernetes MCP to identify the concrete unhealthy pod first, then continue with the planner-led control-plane path using that target.",
-      "After resolving any vague target, prefer run_orchestrated_investigation as the default end-to-end runtime path.",
-      "run_orchestrated_investigation keeps batch selection, external-step materialization, advancement, and final rendering in product code.",
-      "Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams for debugging or explicit adapter choreography.",
-      "Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives.",
-      "Use render_investigation_report only as a secondary low-level render seam when you are explicitly debugging the staged runtime path.",
-      "Use exactly these Markdown headings verbatim: ## Diagnosis, ## Evidence, ## Related Data, ## Limitations, ## Recommended next step."
-    );
+    lines.push(...genericParsingLines(), ...commonRuntimeLines());
   } else {
-    lines.push(
-      "After extracting alert facts, prefer run_orchestrated_investigation as the default end-to-end runtime path.",
-      "run_orchestrated_investigation keeps batch selection, external-step materialization, advancement, and final rendering in product code.",
-      "Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, and advance_investigation_runtime as lower-level fine-grained runtime seams for debugging or explicit adapter choreography.",
-      "Treat execute_investigation_step and update_investigation_plan as lower-level fallback/debug primitives.",
-      "Preserve the original alert name and the resolved operational target name explicitly in the final five-section answer when they are present in the request or report evidence.",
-      "Also preserve the exact original alert-derived target string verbatim, such as pod/<name>, even if runtime resolution later points to a deployment or a specific replica pod.",
-      "Do not rewrite the original alert-derived target string by removing the slash or changing its formatting. Keep forms such as pod/crashy exactly as written.",
-      "Use render_investigation_report only as a secondary low-level render seam when you are explicitly debugging the staged runtime path.",
-      "Use exactly these Markdown headings verbatim: ## Diagnosis, ## Evidence, ## Related Data, ## Limitations, ## Recommended next step."
-    );
-    lines.push(`alertname: ${inferredAlertname}`);
-    const labels = serializeKeyValueMap(args.labels);
-    if (labels) {
-      lines.push(`labels: ${labels}`);
-    }
-    const annotations = serializeKeyValueMap(args.annotations);
-    if (annotations) {
-      lines.push(`annotations: ${annotations}`);
-    }
+    lines.push(...alertParsingLines(inferredAlertname, args), ...commonRuntimeLines());
   }
 
   lines.push("", "Original user request:", originalTask);
@@ -459,17 +488,19 @@ async function handleMessage(message) {
   }
 }
 
-process.on("uncaughtException", (error) => {
-  console.error("[uncaughtException]", error);
-});
+if (IS_MAIN_MODULE) {
+  process.on("uncaughtException", (error) => {
+    console.error("[uncaughtException]", error);
+  });
 
-process.on("unhandledRejection", (error) => {
-  console.error("[unhandledRejection]", error);
-});
+  process.on("unhandledRejection", (error) => {
+    console.error("[unhandledRejection]", error);
+  });
 
-process.stdin.on("data", (chunk) => {
-  readBuffer += chunk.toString("utf8");
-  parseMessages();
-});
+  process.stdin.on("data", (chunk) => {
+    readBuffer += chunk.toString("utf8");
+    parseMessages();
+  });
 
-process.stdin.resume();
+  process.stdin.resume();
+}
