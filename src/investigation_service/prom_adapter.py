@@ -208,6 +208,24 @@ def service_metric_query_families(
                 ),
             },
         ),
+        (
+            "envoy_downstream_service",
+            {
+                "service_request_rate": (
+                    f'sum(rate(envoy_http_downstream_rq_completed{{namespace="{escaped_ns}",service="{effective_service}"}}'
+                    f"[{lookback}]))"
+                ),
+                "service_error_rate": (
+                    f'sum(rate(envoy_http_downstream_rq_xx{{namespace="{escaped_ns}",service="{effective_service}",envoy_response_code_class="5"}}'
+                    f"[{lookback}]))"
+                ),
+                "service_latency_p95_seconds": (
+                    "histogram_quantile(0.95, "
+                    "sum by (le) (rate(envoy_http_downstream_rq_time_bucket"
+                    f'{{namespace="{escaped_ns}",service="{effective_service}"}}[{lookback}])))'
+                ),
+            },
+        ),
     ]
 
 
@@ -222,11 +240,16 @@ def select_best_service_metric_family(
             "prometheus unavailable or returned no usable results",
         ]
 
+    family_preference = {
+        "http_server_service": 2,
+        "http_server_kubernetes_name": 1,
+        "envoy_downstream_service": 0,
+    }
     best_family_id, best_metrics = max(
         family_results,
         key=lambda item: (
             sum(value is not None for value in item[1].values()),
-            item[0] == "http_server_service",
+            family_preference.get(item[0], -1),
         ),
     )
     metrics: dict[str, float | None | str | bool] = {key: best_metrics.get(key) for key in _SERVICE_METRIC_KEYS}

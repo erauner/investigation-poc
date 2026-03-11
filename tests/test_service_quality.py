@@ -247,6 +247,36 @@ def test_collect_metrics_for_service_does_not_treat_metric_family_metadata_as_pr
     assert "prometheus unavailable or returned no usable results" in limitations
 
 
+def test_collect_metrics_for_service_uses_envoy_family_when_http_server_metrics_are_absent(monkeypatch) -> None:
+    def fake_query(query: str, prometheus_url: str | None = None) -> float | None:
+        if 'envoy_http_downstream_rq_completed{namespace="envoy-gateway-system",service="envoy-proxy-metrics"}' in query:
+            return 18.5
+        if (
+            'envoy_http_downstream_rq_xx{namespace="envoy-gateway-system",service="envoy-proxy-metrics",'
+            'envoy_response_code_class="5"}' in query
+        ):
+            return 0.33
+        if 'envoy_http_downstream_rq_time_bucket{namespace="envoy-gateway-system",service="envoy-proxy-metrics"}' in query:
+            return 22.9
+        return None
+
+    monkeypatch.setattr("investigation_service.prom_adapter.query_instant", fake_query)
+
+    metrics, limitations = collect_metrics_for_scope(
+        TargetRef(namespace="envoy-gateway-system", kind="service", name="envoy-proxy-metrics"),
+        profile="service",
+        service_name="envoy-proxy-metrics",
+        lookback_minutes=15,
+    )
+
+    assert metrics["prometheus_available"] is True
+    assert metrics["service_metric_family"] == "envoy_downstream_service"
+    assert metrics["service_request_rate"] == 18.5
+    assert metrics["service_error_rate"] == 0.33
+    assert metrics["service_latency_p95_seconds"] == 22.9
+    assert limitations == []
+
+
 def test_service_findings_use_backend_topology_when_metrics_are_weak() -> None:
     findings = derive_findings(
         "service",
