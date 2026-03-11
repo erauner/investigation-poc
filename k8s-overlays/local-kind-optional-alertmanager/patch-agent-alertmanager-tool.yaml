@@ -1,0 +1,9 @@
+- op: add
+  path: /spec/declarative/tools/3
+  value:
+    type: McpServer
+    mcpServer:
+      name: alertmanager-mcp-server
+      kind: RemoteMCPServer
+      toolNames:
+        - alertmanager_list_alerts

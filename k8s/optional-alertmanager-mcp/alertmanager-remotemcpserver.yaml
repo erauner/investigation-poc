@@ -1,0 +1,8 @@
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: alertmanager-mcp-server
+  namespace: kagent
+spec:
+  description: Alertmanager MCP server for deterministic alert-state corroboration.
+  url: http://alertmanager-mcp-server.kagent:8080/stream

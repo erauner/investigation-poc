@@ -308,6 +308,20 @@ def _alert_identity_filters(inputs: StepExecutionInputs) -> dict[str, str]:
             filters[key] = value
     if inputs.namespace and not any(key in filters for key in {"namespace", "kubernetes_namespace", "exported_namespace"}):
         filters["namespace"] = inputs.namespace
+    target_value = (inputs.target or "").strip()
+    if "/" in target_value:
+        target_kind, target_name = target_value.split("/", 1)
+        target_kind = target_kind.strip().lower()
+        target_name = target_name.strip()
+        fallback_key = {
+            "pod": "pod",
+            "deployment": "deployment",
+            "service": "service",
+            "node": "node",
+            "statefulset": "statefulset",
+        }.get(target_kind)
+        if fallback_key and target_name and fallback_key not in filters:
+            filters[fallback_key] = target_name
     return filters
 
 

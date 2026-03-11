@@ -266,6 +266,7 @@ need_cmd kagent
 need_cmd docker
 need_cmd go
 need_cmd python3
+need_cmd curl
 
 if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   echo "OPENAI_API_KEY is required" >&2

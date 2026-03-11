@@ -4,7 +4,15 @@ kind: Kustomization
 resources:
   - ../local-kind
   - ../../k8s/optional-alertmanager
+  - ../../k8s/optional-alertmanager-mcp
 
 patches:
   - path: patch-configmap.yaml
   - path: patch-cluster-registry-configmap.yaml
+  - target:
+      group: kagent.dev
+      version: v1alpha2
+      kind: Agent
+      name: incident-triage
+      namespace: kagent
+    path: patch-agent-alertmanager-tool.yaml
