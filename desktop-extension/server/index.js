@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const TOOLS = [
   {
@@ -71,6 +72,8 @@ let requestId = 0;
 let remoteInitialized = false;
 const ENTRYPOINT_PREFIX = "[INVESTIGATION_ENTRYPOINT]=";
 const OPERATOR_TARGET_PREFIXES = ["Backend/", "Frontend/", "Cluster/"];
+const IS_MAIN_MODULE =
+  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 
 function normalizeMode(rawMode) {
   const mode = typeof rawMode === "string" ? rawMode.trim().toLowerCase() : "auto";
@@ -153,10 +156,13 @@ function alertParsingLines(inferredAlertname, args) {
     "Treat only identity fields such as namespace, pod, service, deployment, node, and container as workload identity.",
     "Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.",
     "Never derive a workload namespace from source or monitoring metadata.",
+    "If a service or pod label is present but namespace is missing, say the namespace is unknown instead of guessing.",
+    "Do not investigate the first freeform words of the pasted message as the target unless they are explicitly a Kubernetes object reference such as pod/<name> or service/<name>.",
     "If live runtime evidence disagrees with the alert payload, call out the mismatch explicitly as possible stale alert metadata or drift between alert time and current state.",
     "Preserve the original alert name and the resolved operational target name explicitly in the final five-section answer when they are present in the request or report evidence.",
     "Also preserve the exact original alert-derived target string verbatim, such as pod/<name>, even if runtime resolution later points to a deployment or a specific replica pod.",
     "Do not rewrite the original alert-derived target string by removing the slash or changing its formatting. Keep forms such as pod/crashy exactly as written.",
+    "Return exactly these five sections and no extra appendix sections: Diagnosis, Evidence, Related Data, Limitations, Recommended next step.",
     `alertname: ${inferredAlertname}`
   ];
   const labels = serializeKeyValueMap(args.labels);
@@ -170,7 +176,7 @@ function alertParsingLines(inferredAlertname, args) {
   return lines;
 }
 
-function buildInvestigationTask(args) {
+export function buildInvestigationTask(args) {
   const originalTask = typeof args.task === "string" ? args.task.trim() : "";
   if (!originalTask) {
     throw new Error("investigate task is required");
@@ -470,17 +476,19 @@ async function handleMessage(message) {
   }
 }
 
-process.on("uncaughtException", (error) => {
-  console.error("[uncaughtException]", error);
-});
+if (IS_MAIN_MODULE) {
+  process.on("uncaughtException", (error) => {
+    console.error("[uncaughtException]", error);
+  });
 
-process.on("unhandledRejection", (error) => {
-  console.error("[unhandledRejection]", error);
-});
+  process.on("unhandledRejection", (error) => {
+    console.error("[unhandledRejection]", error);
+  });
 
-process.stdin.on("data", (chunk) => {
-  readBuffer += chunk.toString("utf8");
-  parseMessages();
-});
+  process.stdin.on("data", (chunk) => {
+    readBuffer += chunk.toString("utf8");
+    parseMessages();
+  });
 
-process.stdin.resume();
+  process.stdin.resume();
+}

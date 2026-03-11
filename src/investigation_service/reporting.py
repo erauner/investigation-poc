@@ -55,10 +55,13 @@ def _is_empty_correlation_limitation(value: str) -> bool:
     return "correlated changes" in normalized and "requested time window" in normalized
 
 
-def resolve_cluster(cluster):
+def resolve_cluster(cluster, labels=None):
     from .tools import resolve_cluster as resolve_cluster_tools_impl
 
-    return resolve_cluster_tools_impl(cluster)
+    try:
+        return resolve_cluster_tools_impl(cluster, labels)
+    except TypeError:
+        return resolve_cluster_tools_impl(cluster)
 
 
 def get_backend_cr(namespace, name, cluster=None):

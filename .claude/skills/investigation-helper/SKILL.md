@@ -21,6 +21,8 @@ Use the `mcp__kagent__invoke_agent` tool.
   `Treat only identity fields such as namespace, pod, service, deployment, node, and container as workload identity.`
   `Treat source or monitoring fields such as prometheus, alertmanager, rule_group, generatorURL, datasource, and runbook_url as metadata, not as workload identity.`
   `Never derive a workload namespace from source or monitoring metadata.`
+  `If a service or pod label is present but namespace is missing, say the namespace is unknown instead of guessing.`
+  `Do not investigate the first freeform words of the pasted message as the target unless they are explicitly a Kubernetes object reference such as pod/<name> or service/<name>.`
   `Use the planner-led investigation flow.`
   `Prefer run_orchestrated_investigation as the default end-to-end runtime path once parsing and target resolution are complete.`
   `run_orchestrated_investigation keeps batch selection, external-step materialization, advancement, and final rendering in product code.`

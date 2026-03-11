@@ -1,4 +1,6 @@
 from pathlib import Path
+import json
+import subprocess
 
 import yaml
 
@@ -97,6 +99,15 @@ ALERT_TARGET_VERBATIM_REQUIRED_PHRASE = (
 )
 ALERT_EXTRACTION_REQUIRED_PHRASE = (
     "extract alertname, labels, annotations, namespace, pod, service, instance, severity, and status"
+)
+ALERT_NAMESPACE_GUARDRAIL_REQUIRED_PHRASE = (
+    "if a service or pod label is present but namespace is missing, say the namespace is unknown instead of guessing."
+)
+ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE = (
+    "do not investigate the first freeform words of the pasted message as the target unless they are explicitly a kubernetes object reference such as pod/<name> or service/<name>."
+)
+ALERT_FIVE_SECTION_REQUIRED_PHRASE = (
+    "return exactly these five sections and no extra appendix sections: diagnosis, evidence, related data, limitations, recommended next step."
 )
 SHARED_RUNTIME_REQUIRED_PHRASES = (
     "Use the planner-led investigation flow.",
@@ -245,10 +256,16 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
             assert ALERT_CONTEXT_REQUIRED_PHRASE in text.lower(), path
             assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE in text.lower(), path
             assert ALERT_EXTRACTION_REQUIRED_PHRASE in text.lower(), path
+            assert ALERT_NAMESPACE_GUARDRAIL_REQUIRED_PHRASE in text.lower(), path
+            assert ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE in text.lower(), path
+            assert ALERT_FIVE_SECTION_REQUIRED_PHRASE in text.lower(), path
         else:
             assert ALERT_CONTEXT_REQUIRED_PHRASE not in text.lower(), path
             assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE not in text.lower(), path
             assert ALERT_EXTRACTION_REQUIRED_PHRASE not in text.lower(), path
+            assert ALERT_NAMESPACE_GUARDRAIL_REQUIRED_PHRASE not in text.lower(), path
+            assert ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE not in text.lower(), path
+            assert ALERT_FIVE_SECTION_REQUIRED_PHRASE not in text.lower(), path
         for phrase in banned_phrases:
             assert phrase not in text, path
 
@@ -266,4 +283,33 @@ def test_skill_and_desktop_extension_keep_shared_runtime_block_with_parse_only_a
         assert ALERT_CONTEXT_REQUIRED_PHRASE in text.lower(), path
         assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE in text.lower(), path
         assert ALERT_EXTRACTION_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_NAMESPACE_GUARDRAIL_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_FIVE_SECTION_REQUIRED_PHRASE in text.lower(), path
         assert "If the target is vague or operator-backed, resolve it first with resolve_primary_target." in text, path
+
+
+def test_desktop_extension_emits_mode_specific_wrapper_content() -> None:
+    script = f"""
+import {{ buildInvestigationTask }} from {str((ROOT / "desktop-extension/server/index.js").resolve().as_uri())!r};
+const genericTask = buildInvestigationTask({{task: "Investigate the unhealthy pod in namespace kagent-smoke."}});
+const inferredAlertTask = buildInvestigationTask({{task: "Investigate alert PodCrashLooping for pod crashy in namespace kagent-smoke."}});
+const explicitAlertTask = buildInvestigationTask({{task: "PodCrashLooping on crashy", mode: "alert", alertname: "PodCrashLooping"}});
+process.stdout.write(JSON.stringify({{ genericTask, inferredAlertTask, explicitAlertTask }}));
+"""
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert "[INVESTIGATION_ENTRYPOINT]=generic" in payload["genericTask"]
+    assert ALERT_EXTRACTION_REQUIRED_PHRASE not in payload["genericTask"].lower()
+    assert "[INVESTIGATION_ENTRYPOINT]=alert" in payload["inferredAlertTask"]
+    assert ALERT_EXTRACTION_REQUIRED_PHRASE in payload["inferredAlertTask"].lower()
+    assert ALERT_NAMESPACE_GUARDRAIL_REQUIRED_PHRASE in payload["inferredAlertTask"].lower()
+    assert ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE in payload["inferredAlertTask"].lower()
+    assert ALERT_FIVE_SECTION_REQUIRED_PHRASE in payload["inferredAlertTask"].lower()
+    assert "alertname: PodCrashLooping" in payload["explicitAlertTask"]
