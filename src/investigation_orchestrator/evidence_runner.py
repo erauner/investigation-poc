@@ -12,8 +12,9 @@ from investigation_service.submission_materialization import (
     materialize_attempt_only_submission,
     materialize_node_submission,
     materialize_service_submission,
+    materialize_workload_submission,
 )
-from .mcp_clients import KubernetesMcpClient, PeerMcpError, PrometheusMcpClient
+from .mcp_clients import KubernetesMcpClient, LokiMcpClient, PeerMcpError, PrometheusMcpClient
 from .node_scout import maybe_run_bounded_node_scout
 from .service_scout import maybe_run_bounded_service_evidence_expansion_scout
 from .state import PendingExplorationReview
@@ -76,6 +77,7 @@ def _merged_contributing_routes(*route_groups: list[ActualRoute]) -> list[Actual
 
 
 _kubernetes_mcp_client = KubernetesMcpClient()
+_loki_mcp_client = LokiMcpClient()
 _prometheus_mcp_client = PrometheusMcpClient()
 
 
@@ -91,6 +93,115 @@ class ExternalStepCollectionResult:
 class AppliedExplorationReviewResult:
     submitted_step: SubmittedStepArtifact
     exploration_outcome: ExplorationOutcome | None = None
+
+
+def _planned_loki_route() -> ActualRoute:
+    return ActualRoute(
+        source_kind="peer_mcp",
+        mcp_server="loki-mcp-server",
+        tool_name=None,
+        tool_path=["loki-mcp-server"],
+    )
+
+
+def _merge_log_excerpts(primary: str, loki: str) -> str:
+    primary = primary.strip()
+    loki = loki.strip()
+    if not primary:
+        return loki
+    if not loki:
+        return primary
+    if primary == loki:
+        return primary
+    if primary in loki:
+        return loki
+    if loki in primary:
+        return primary
+    return f"[Existing logs]\n{primary}\n\n[Loki logs]\n{loki}"
+
+
+def _workload_runtime_pod_name(artifact: SubmittedStepArtifact) -> str | None:
+    bundle = artifact.evidence_bundle
+    if bundle is None:
+        return None
+    if bundle.target.kind == "pod":
+        return bundle.target.name
+    runtime_pod = bundle.object_state.get("runtimePod") or {}
+    if isinstance(runtime_pod, dict):
+        name = runtime_pod.get("name")
+        if isinstance(name, str) and name:
+            return name
+    return None
+
+
+def _augment_submission_with_optional_loki_logs(
+    step: EvidenceStepContract,
+    artifact: SubmittedStepArtifact,
+) -> SubmittedStepArtifact:
+    if not _loki_mcp_client.is_configured():
+        return artifact
+    bundle = artifact.evidence_bundle
+    if bundle is None or step.requested_capability not in {"workload_evidence_plane", "service_evidence_plane"}:
+        return artifact
+
+    try:
+        if step.requested_capability == "workload_evidence_plane":
+            runtime_pod_name = _workload_runtime_pod_name(artifact)
+            if runtime_pod_name is None:
+                return artifact
+            loki_snapshot = _loki_mcp_client.collect_workload_logs(
+                step.execution_inputs,
+                target=bundle.target,
+                runtime_pod_name=runtime_pod_name,
+            )
+        else:
+            loki_snapshot = _loki_mcp_client.collect_service_logs(
+                step.execution_inputs,
+                target=bundle.target,
+            )
+    except PeerMcpError:
+        return artifact.model_copy(
+            update={
+                "attempted_routes": [*artifact.attempted_routes, _planned_loki_route()],
+            }
+        )
+
+    loki_route = _peer_route(loki_snapshot.tool_path)
+    if not loki_snapshot.log_excerpt.strip():
+        return artifact.model_copy(
+            update={
+                "attempted_routes": [*artifact.attempted_routes, loki_route],
+            }
+        )
+
+    merged_logs = _merge_log_excerpts(bundle.log_excerpt, loki_snapshot.log_excerpt)
+    if step.requested_capability == "workload_evidence_plane":
+        return materialize_workload_submission(
+            step,
+            target=bundle.target,
+            object_state=bundle.object_state,
+            events=bundle.events,
+            log_excerpt=merged_logs,
+            actual_route=artifact.actual_route,
+            contributing_routes=_merged_contributing_routes(artifact.contributing_routes, [loki_route]),
+            attempted_routes=artifact.attempted_routes,
+            cluster_alias=bundle.cluster,
+            extra_limitations=bundle.limitations,
+        )
+
+    return materialize_service_submission(
+        step,
+        target=bundle.target,
+        metrics=bundle.metrics,
+        actual_route=artifact.actual_route,
+        contributing_routes=_merged_contributing_routes(artifact.contributing_routes, [loki_route]),
+        attempted_routes=artifact.attempted_routes,
+        object_state=bundle.object_state,
+        events=bundle.events,
+        log_excerpt=merged_logs,
+        cluster_alias=bundle.cluster,
+        extra_limitations=bundle.limitations,
+    )
 
     def __getattr__(self, name: str):
         return getattr(self.submitted_step, name)
@@ -356,12 +467,16 @@ def _submitted_artifact_and_outcome(
             ), None
         if result.pending_exploration_review is not None:
             raise ValueError("workload review planning is only supported through collect_external_steps")
+        artifact = result.submitted_steps[0] if result.submitted_steps else None
+        if artifact is not None:
+            artifact = _augment_submission_with_optional_loki_logs(step, artifact)
         return (
-            result.submitted_steps[0] if result.submitted_steps else None,
+            artifact,
             result.exploration_outcomes[0] if result.exploration_outcomes else None,
         )
     if step.requested_capability == "service_evidence_plane":
-        return _service_submission_via_peer_mcp(step)
+        artifact, exploration_outcome = _service_submission_via_peer_mcp(step)
+        return _augment_submission_with_optional_loki_logs(step, artifact), exploration_outcome
     if step.requested_capability == "node_evidence_plane":
         return _node_submission_via_peer_mcp(step)
     raise ValueError(f"unsupported external step capability: {step.requested_capability}")
@@ -401,7 +516,9 @@ def collect_external_steps(
                     )
                 )
                 continue
-            submissions.extend(result.submitted_steps)
+            submissions.extend(
+                _augment_submission_with_optional_loki_logs(step, item) for item in result.submitted_steps
+            )
             exploration_outcomes.extend(result.exploration_outcomes)
             if result.pending_exploration_review is not None and pending_review is None:
                 pending_review = result.pending_exploration_review
@@ -440,13 +557,13 @@ def apply_pending_exploration_review(review: PendingExplorationReview) -> Applie
             kubernetes_mcp_client=_kubernetes_mcp_client,
         )
         return AppliedExplorationReviewResult(
-            submitted_step=artifact,
+            submitted_step=_augment_submission_with_optional_loki_logs(review.step, artifact),
             exploration_outcome=exploration_outcome,
         )
     if review.decision == "skip":
         artifact, exploration_outcome = skip_workload_exploration_review(review)
         return AppliedExplorationReviewResult(
-            submitted_step=artifact,
+            submitted_step=_augment_submission_with_optional_loki_logs(review.step, artifact),
             exploration_outcome=exploration_outcome,
         )
     raise ValueError("exploration review decision must be applied before execution")

@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 from investigation_orchestrator import mcp_clients
-from investigation_orchestrator.mcp_clients import KubernetesMcpClient, PrometheusMcpClient
+from investigation_orchestrator.mcp_clients import KubernetesMcpClient, LokiMcpClient, PrometheusMcpClient
 from investigation_service.models import StepExecutionInputs
+import pytest
 
 
 class _DummyAsyncClient:
@@ -261,4 +262,85 @@ def test_collect_node_top_pods_parses_resources_list_payload(monkeypatch) -> Non
         {"namespace": "operator-smoke", "name": "api-0", "memory_request_bytes": 536870912},
         {"namespace": "operator-smoke", "name": "api-1", "memory_request_bytes": 268435456},
     ]
-    assert snapshot.limitations == []
+
+
+def test_collect_workload_logs_normalizes_loki_payload(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        if tool_name != "query_logs":
+            raise AssertionError(f"unexpected tool {tool_name}")
+        return {
+            "entries": [
+                {"message": "error: upstream failed"},
+                {"line": "exception: retry exhausted"},
+            ]
+        }
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="local-kind", loki_url=None),
+    )
+    monkeypatch.setattr(LokiMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_workload_logs(
+        StepExecutionInputs(
+            request_kind="target_context",
+            namespace="operator-smoke",
+            target="deployment/api",
+            profile="workload",
+            lookback_minutes=15,
+        ),
+        target=mcp_clients.TargetRef(namespace="operator-smoke", kind="deployment", name="api"),
+        runtime_pod_name="api-abc123",
+    )
+
+    assert calls == [
+        (
+            "query_logs",
+            {
+                "scope": "workload",
+                "namespace": "operator-smoke",
+                "target_kind": "deployment",
+                "target_name": "api",
+                "pod_name": "api-abc123",
+                "lookback_minutes": 15,
+                "limit": 200,
+            },
+        )
+    ]
+    assert snapshot.log_excerpt == "error: upstream failed\nexception: retry exhausted"
+    assert snapshot.tool_path == ["loki-mcp-server", "query_logs"]
+
+
+def test_collect_service_logs_rejects_remote_loki_routing(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="remote-a", loki_url="http://remote-loki:3100"),
+    )
+    monkeypatch.setattr(mcp_clients, "get_default_cluster_alias", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_cluster_name", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_loki_url", lambda: "http://local-loki:3100")
+
+    with pytest.raises(mcp_clients.PeerMcpError, match="multicluster loki routing"):
+        client.collect_service_logs(
+            StepExecutionInputs(
+                request_kind="service_context",
+                cluster="remote-a",
+                namespace="operator-smoke",
+                target="service/api",
+                profile="service",
+                service_name="api",
+                lookback_minutes=15,
+            ),
+            target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        )

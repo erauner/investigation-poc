@@ -207,6 +207,7 @@ def materialize_service_evidence(
     metrics: dict,
     object_state: dict | None = None,
     events: list[str] | None = None,
+    log_excerpt: str = "",
     cluster_alias: str | None = None,
     extra_limitations: list[str] | None = None,
 ) -> EvidenceBundle:
@@ -220,7 +221,7 @@ def materialize_service_evidence(
         lookback_minutes=req.lookback_minutes,
     )
     effective_events = list(events or [])
-    findings = derive_findings("service", object_state or {}, effective_events, "", metrics)
+    findings = derive_findings("service", object_state or {}, effective_events, log_excerpt, metrics)
     limitations = [*(extra_limitations or [])]
     if (object_state or {}).get("error"):
         limitations.append("kubernetes object query failed")
@@ -232,7 +233,7 @@ def materialize_service_evidence(
         target=target,
         object_state=object_state or {},
         events=effective_events,
-        log_excerpt="",
+        log_excerpt=log_excerpt[:4000],
         metrics={**metrics, "profile": "service", "lookback_minutes": context_req.lookback_minutes},
         findings=findings,
         limitations=sorted(set(limitations)),

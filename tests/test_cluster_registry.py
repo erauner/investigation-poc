@@ -27,6 +27,7 @@ clusters:
     assert resolved.alias == "kind-b"
     assert resolved.kube_context == "kind-investigation-b"
     assert resolved.prometheus_url == "http://prom-b:9090"
+    assert resolved.loki_url is None
     assert resolved.kubeconfig_path == str(kubeconfig)
     assert resolved.use_in_cluster is False
     assert resolved.source == "explicit"
@@ -57,6 +58,29 @@ clusters:
 
     assert resolved.alias == "kind-b"
     assert resolved.source == "alert_label"
+
+
+def test_resolve_cluster_carries_optional_loki_url(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "clusters.yaml"
+    path.write_text(
+        """
+clusters:
+  kind-a:
+    kube_context: kind-investigation-a
+    prometheus_url: http://prom-a:9090
+    loki_url: http://loki-a:3100
+    default: true
+"""
+    )
+    monkeypatch.setenv("CLUSTER_REGISTRY_PATH", str(path))
+    kubeconfig = tmp_path / "multi-kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\nkind: Config\n")
+    monkeypatch.setenv("KUBECONFIG_PATH", str(kubeconfig))
+
+    resolved = resolve_cluster(None)
+
+    assert resolved.alias == "kind-a"
+    assert resolved.loki_url == "http://loki-a:3100"
 
 
 def test_resolve_cluster_requires_alias_when_registry_has_no_default(monkeypatch, tmp_path) -> None:

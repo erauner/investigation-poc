@@ -8,6 +8,7 @@ from .settings import (
     get_cluster_registry_path,
     get_default_cluster_alias,
     get_kubeconfig_path,
+    get_loki_url,
     get_prometheus_url,
 )
 
@@ -16,6 +17,7 @@ class ClusterConfig(BaseModel):
     alias: str
     kube_context: str | None = None
     prometheus_url: str | None = None
+    loki_url: str | None = None
     label_aliases: list[str] = Field(default_factory=list)
     default: bool = False
     allowed_namespaces: list[str] | None = None
@@ -27,6 +29,7 @@ class ResolvedCluster(BaseModel):
     kubeconfig_path: str | None = None
     use_in_cluster: bool = False
     prometheus_url: str | None = None
+    loki_url: str | None = None
     source: str
     allowed_namespaces: list[str] | None = None
 
@@ -111,6 +114,7 @@ def _resolve_registered_cluster(
         kubeconfig_path=kubeconfig_path,
         use_in_cluster=use_in_cluster,
         prometheus_url=config.prometheus_url or get_prometheus_url(),
+        loki_url=config.loki_url or get_loki_url(),
         source=source,
         allowed_namespaces=config.allowed_namespaces,
     )
@@ -124,6 +128,7 @@ def _legacy_cluster() -> ResolvedCluster:
         kubeconfig_path=kubeconfig_path,
         use_in_cluster=not kubeconfig_path,
         prometheus_url=get_prometheus_url(),
+        loki_url=get_loki_url(),
         source="legacy_current_context",
         allowed_namespaces=None,
     )

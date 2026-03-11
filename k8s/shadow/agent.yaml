@@ -16,6 +16,10 @@ spec:
           value: current-context
         - name: KUBERNETES_MCP_URL
           value: http://kubernetes-mcp-server.kagent:8080/mcp
+        - name: LOKI_URL
+          value: ""
+        - name: LOKI_MCP_URL
+          value: ""
         - name: PROMETHEUS_MCP_URL
           value: http://prometheus-mcp-server.kagent:8080/mcp
         - name: PROMETHEUS_URL

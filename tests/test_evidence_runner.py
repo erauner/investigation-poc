@@ -6,6 +6,7 @@ from investigation_orchestrator.mcp_clients import (
     NodePodSummarySnapshot,
     NodeMetricsSnapshot,
     NodeRuntimeSnapshot,
+    LokiLogsSnapshot,
     PeerMcpError,
     ServiceMetricsSnapshot,
     ServiceRuntimeSnapshot,
@@ -633,9 +634,10 @@ def test_apply_pending_exploration_review_skip_keeps_baseline_with_review_note(
         allow_exploration_review=True,
     )
 
-    artifact = evidence_runner.apply_pending_exploration_review(
+    review_result = evidence_runner.apply_pending_exploration_review(
         result.pending_exploration_review.model_copy(update={"decision": "skip"})
     )
+    artifact = review_result.submitted_step
 
     assert artifact.evidence_bundle is not None
     assert "bounded workload scout skipped by review decision" in artifact.evidence_bundle.limitations
@@ -778,6 +780,191 @@ def test_service_external_step_prefers_prometheus_peer(monkeypatch) -> None:
     assert artifact.evidence_bundle.object_state["kind"] == "service"
     assert artifact.evidence_bundle.events == ["Warning Unhealthy service/api"]
     assert any(item.title == "High Service Latency" for item in artifact.evidence_bundle.findings)
+
+
+def test_workload_external_step_augments_logs_with_loki_without_changing_actual_route(monkeypatch) -> None:
+    step = _workload_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "ClientStub",
+            (),
+            {
+                "collect_workload_runtime": lambda _self, _inputs: WorkloadRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="pod", name="crashy-abc123"),
+                    object_state={"kind": "pod", "name": "crashy-abc123"},
+                    events=["Warning BackOff pod/crashy-abc123"],
+                    log_excerpt="panic: startup failed",
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_log"],
+                    runtime_pod_name="crashy-abc123",
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_loki_mcp_client",
+        type(
+            "LokiStub",
+            (),
+            {
+                "is_configured": lambda _self: True,
+                "collect_workload_logs": lambda _self, _inputs, target, runtime_pod_name: LokiLogsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=target,
+                    log_excerpt="exception: dependency unavailable",
+                    tool_path=["loki-mcp-server", "query_logs"],
+                ),
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
+    assert artifact.evidence_bundle is not None
+    assert "[Loki logs]" in artifact.evidence_bundle.log_excerpt
+    assert any(route.mcp_server == "loki-mcp-server" for route in artifact.contributing_routes)
+    assert artifact.attempted_routes == []
+
+
+def test_service_external_step_augments_with_loki_logs_without_changing_metrics_first_route(monkeypatch) -> None:
+    step = _service_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": 12.5,
+                        "service_error_rate": 0.5,
+                        "service_latency_p95_seconds": 1.2,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_loki_mcp_client",
+        type(
+            "LokiStub",
+            (),
+            {
+                "is_configured": lambda _self: True,
+                "collect_service_logs": lambda _self, _inputs, target: LokiLogsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=target,
+                    log_excerpt="error: upstream returned 500",
+                    tool_path=["loki-mcp-server", "query_logs"],
+                ),
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route.mcp_server == "prometheus-mcp-server"
+    assert artifact.actual_route.tool_name == "execute_query"
+    assert artifact.evidence_bundle is not None
+    assert artifact.evidence_bundle.log_excerpt == "error: upstream returned 500"
+    assert any(item.title == "Error-like Log Patterns" for item in artifact.evidence_bundle.findings)
+    assert any(route.mcp_server == "loki-mcp-server" for route in artifact.contributing_routes)
+
+
+def test_service_external_step_records_loki_failure_as_attempt_only(monkeypatch) -> None:
+    step = _service_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": 12.5,
+                        "service_error_rate": 0.5,
+                        "service_latency_p95_seconds": 1.2,
+                        "prometheus_available": True,
+                    },
+                    limitations=[],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_loki_mcp_client",
+        type(
+            "LokiStub",
+            (),
+            {
+                "is_configured": lambda _self: True,
+                "collect_service_logs": lambda _self, _inputs, target: (_ for _ in ()).throw(
+                    PeerMcpError("loki down")
+                ),
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route.mcp_server == "prometheus-mcp-server"
+    assert artifact.evidence_bundle is not None
+    assert artifact.evidence_bundle.log_excerpt == ""
+    assert artifact.attempted_routes[-1].mcp_server == "loki-mcp-server"
+    assert artifact.attempted_routes[-1].tool_path == ["loki-mcp-server"]
 
 
 def test_collect_external_steps_replays_only_deferred_external_steps(monkeypatch) -> None:
