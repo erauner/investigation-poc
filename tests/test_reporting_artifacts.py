@@ -858,7 +858,7 @@ def test_handoff_active_evidence_batch_forwards_exploration_outcomes(monkeypatch
     assert response.execution is not None
 
 
-def test_handoff_active_evidence_batch_auto_advances_planner_owned_batch(monkeypatch) -> None:
+def test_handoff_active_evidence_batch_waits_for_external_alert_submission(monkeypatch) -> None:
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
     monkeypatch.setattr(
         reporting,
@@ -955,12 +955,12 @@ def test_handoff_active_evidence_batch_auto_advances_planner_owned_batch(monkeyp
         )
     )
 
-    assert response.execution is not None
-    assert response.execution.executed_step_ids == ["collect-alert-evidence"]
-    assert response.active_batch is None
-    assert response.handoff_status == "complete"
-    assert response.next_action == "render_report"
-    assert response.required_external_step_ids == []
+    assert response.execution is None
+    assert response.active_batch is not None
+    assert response.active_batch.steps[0].step_id == "collect-alert-evidence"
+    assert response.handoff_status == "awaiting_external_submission"
+    assert response.next_action == "submit_external_steps"
+    assert response.required_external_step_ids == ["collect-alert-evidence"]
     assert response.handoff_token
 
 
