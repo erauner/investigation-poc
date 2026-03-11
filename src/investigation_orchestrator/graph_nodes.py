@@ -5,6 +5,7 @@ from investigation_service.models import (
     ActiveEvidenceBatchContract,
     AdvanceInvestigationRuntimeResponse,
     EvidenceStepContract,
+    ExplorationOutcome,
     InvestigationPlan,
     InvestigationReport,
     InvestigationReportRequest,
@@ -12,7 +13,7 @@ from investigation_service.models import (
     SubmittedStepArtifact,
 )
 
-from .evidence_runner import ExternalStepCollectionResult
+from .evidence_runner import AppliedExplorationReviewResult, ExternalStepCollectionResult
 from .state import OrchestrationState, PendingExplorationReview
 
 
@@ -23,7 +24,7 @@ class OrchestratorRuntimeDeps:
     advance_batch: Callable[..., AdvanceInvestigationRuntimeResponse]
     render_report: Callable[[InvestigationReportRequest, ReportingExecutionContext], InvestigationReport]
     collect_external_steps: Callable[..., ExternalStepCollectionResult]
-    apply_pending_exploration_review: Callable[[PendingExplorationReview], SubmittedStepArtifact]
+    apply_pending_exploration_review: Callable[[PendingExplorationReview], AppliedExplorationReviewResult]
     active_batch_is_render_only: Callable[[InvestigationPlan], bool]
 
 
@@ -61,7 +62,7 @@ def load_active_batch_node(
 def collect_external_steps_node(
     state: OrchestrationState,
     deps: OrchestratorRuntimeDeps,
-) -> dict[str, list[SubmittedStepArtifact] | PendingExplorationReview | list[EvidenceStepContract] | None]:
+) -> dict[str, list[SubmittedStepArtifact] | list[ExplorationOutcome] | PendingExplorationReview | list[EvidenceStepContract] | None]:
     active_batch = state["active_batch"]
     if active_batch is None:
         raise ValueError("active batch must be present before collecting external steps")
@@ -74,6 +75,7 @@ def collect_external_steps_node(
     else:
         collection_result = deps.collect_external_steps(active_batch)
     submitted_steps = [*state["submitted_steps"], *collection_result.submitted_steps]
+    exploration_outcomes = [*state.get("exploration_outcomes", []), *collection_result.exploration_outcomes]
     # Workload/service/node transport may record peer-attempt metadata and let
     # planner-owned bounded fallback execute for the same external-preferred step.
     if (
@@ -85,6 +87,7 @@ def collect_external_steps_node(
 
     return {
         "submitted_steps": submitted_steps,
+        "exploration_outcomes": exploration_outcomes,
         "pending_exploration_review": collection_result.pending_exploration_review,
         "deferred_external_steps": list(collection_result.deferred_external_steps),
     }
@@ -103,15 +106,19 @@ def prepare_exploration_review_node(
 def apply_exploration_review_node(
     state: OrchestrationState,
     deps: OrchestratorRuntimeDeps,
-) -> dict[str, list[SubmittedStepArtifact] | PendingExplorationReview | list[EvidenceStepContract] | None]:
+) -> dict[str, list[SubmittedStepArtifact] | list[ExplorationOutcome] | PendingExplorationReview | list[EvidenceStepContract] | None]:
     pending_review = state["pending_exploration_review"]
     if pending_review is None:
         raise ValueError("pending exploration review must be present before applying review decision")
     if pending_review.decision is None:
         raise ValueError("pending exploration review is still awaiting decision")
-    artifact = deps.apply_pending_exploration_review(pending_review)
+    review_result = deps.apply_pending_exploration_review(pending_review)
+    exploration_outcomes = list(state.get("exploration_outcomes", []))
+    if review_result.exploration_outcome is not None:
+        exploration_outcomes.append(review_result.exploration_outcome)
     return {
-        "submitted_steps": [*state["submitted_steps"], artifact],
+        "submitted_steps": [*state["submitted_steps"], review_result.submitted_step],
+        "exploration_outcomes": exploration_outcomes,
         "pending_exploration_review": None,
     }
 
@@ -124,6 +131,7 @@ def advance_batch_node(
     ReportingExecutionContext
     | ActiveEvidenceBatchContract
     | list[SubmittedStepArtifact]
+    | list[ExplorationOutcome]
     | list[EvidenceStepContract]
     | PendingExplorationReview
     | int
@@ -134,16 +142,22 @@ def advance_batch_node(
     if execution_context is None or active_batch is None:
         raise ValueError("execution context and active batch must be present before advancing")
 
+    advance_kwargs = {
+        "submitted_steps": state["submitted_steps"],
+        "batch_id": active_batch.batch_id,
+    }
+    if state.get("exploration_outcomes"):
+        advance_kwargs["exploration_outcomes"] = state.get("exploration_outcomes", [])
     advance_response = deps.advance_batch(
         state["incident"],
         execution_context,
-        submitted_steps=state["submitted_steps"],
-        batch_id=active_batch.batch_id,
+        **advance_kwargs,
     )
     return {
         "execution_context": advance_response.execution_context,
         "active_batch": None,
         "submitted_steps": [],
+        "exploration_outcomes": [],
         "pending_exploration_review": None,
         "deferred_external_steps": [],
         "remaining_batch_budget": state["remaining_batch_budget"] - 1,

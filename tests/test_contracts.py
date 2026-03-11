@@ -22,6 +22,7 @@ from investigation_service.models import (
     CorrelatedChangesResponse,
     EvidenceBatchExecution,
     EvidenceItem,
+    ExplorationOutcome,
     GetActiveEvidenceBatchRequest,
     HandoffActiveEvidenceBatchRequest,
     HandoffActiveEvidenceBatchResponse,
@@ -523,6 +524,69 @@ def test_submit_evidence_step_artifacts_route_returns_execution_and_updated_plan
     assert body["execution"]["batch_id"] == "batch-1"
     assert body["execution"]["executed_step_ids"] == ["collect-target-evidence"]
     assert body["updated_plan"]["active_batch_id"] == "batch-1"
+
+
+def test_submit_evidence_step_artifacts_route_accepts_exploration_outcomes(monkeypatch) -> None:
+    def fake_submit(_req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
+        assert _req.exploration_outcomes == [
+            ExplorationOutcome(
+                step_id="collect-target-evidence",
+                capability="service_evidence_plane",
+                intent="evidence_expansion",
+                outcome="evidence_delta",
+                probe_kind="service_range_metrics",
+                notes=["probe_improved_artifact"],
+            )
+        ]
+        return SubmittedEvidenceReconciliationResult(
+            execution=EvidenceBatchExecution(
+                batch_id="batch-1",
+                executed_step_ids=["collect-target-evidence"],
+                artifacts=[],
+                execution_notes=["reconciled externally submitted evidence for batch-1"],
+            ),
+            updated_plan=InvestigationPlan(
+                mode="targeted_rca",
+                objective="Investigate service/api",
+                target=None,
+                steps=[],
+                evidence_batches=[],
+                active_batch_id=None,
+                planning_notes=[],
+            ),
+        )
+
+    monkeypatch.setattr("investigation_service.main.submit_evidence_step_artifacts_from_request", fake_submit)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/submit_evidence_step_artifacts",
+        json={
+            "plan": {
+                "mode": "targeted_rca",
+                "objective": "Investigate service/api",
+                "target": None,
+                "steps": [],
+                "evidence_batches": [],
+                "active_batch_id": "batch-1",
+                "planning_notes": [],
+            },
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service"},
+            "submitted_steps": [],
+            "exploration_outcomes": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "capability": "service_evidence_plane",
+                    "intent": "evidence_expansion",
+                    "outcome": "evidence_delta",
+                    "probe_kind": "service_range_metrics",
+                    "notes": ["probe_improved_artifact"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
 
 
 def test_submit_evidence_step_artifacts_route_rejects_metadata_only_service_submission(monkeypatch) -> None:
@@ -1530,6 +1594,72 @@ def test_advance_investigation_runtime_route_returns_execution_context(monkeypat
     assert response.json()["execution_context"]["allow_bounded_fallback_execution"] is False
 
 
+def test_advance_investigation_runtime_route_accepts_exploration_outcomes(monkeypatch) -> None:
+    captured = {}
+
+    def fake_advance(req: AdvanceInvestigationRuntimeRequest) -> AdvanceInvestigationRuntimeResponse:
+        captured["request"] = req
+        return AdvanceInvestigationRuntimeResponse(
+            execution_context={
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": None,
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": False,
+            },
+            next_active_batch=None,
+        )
+
+    monkeypatch.setattr("investigation_service.main.advance_investigation_runtime_from_request", fake_advance)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/advance_investigation_runtime",
+        json={
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service"},
+            "execution_context": {
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": None,
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": True,
+            },
+            "exploration_outcomes": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "capability": "service_evidence_plane",
+                    "intent": "evidence_expansion",
+                    "outcome": "evidence_delta",
+                    "probe_kind": "service_range_metrics",
+                    "notes": ["probe_improved_artifact"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["request"].exploration_outcomes == [
+        ExplorationOutcome(
+            step_id="collect-target-evidence",
+            capability="service_evidence_plane",
+            intent="evidence_expansion",
+            outcome="evidence_delta",
+            probe_kind="service_range_metrics",
+            notes=["probe_improved_artifact"],
+        )
+    ]
+
+
 def test_advance_investigation_runtime_route_accepts_metadata_only_service_submission(monkeypatch) -> None:
     captured = {}
 
@@ -1833,6 +1963,65 @@ def test_handoff_active_evidence_batch_route_returns_actionable_batch_and_contex
     assert response.json()["handoff_status"] == "awaiting_external_submission"
     assert response.json()["next_action"] == "submit_external_steps"
     assert response.json()["required_external_step_ids"] == ["collect-target-evidence"]
+
+
+def test_handoff_active_evidence_batch_route_accepts_exploration_outcomes(monkeypatch) -> None:
+    captured = {}
+
+    def fake_handoff(req: HandoffActiveEvidenceBatchRequest) -> HandoffActiveEvidenceBatchResponse:
+        captured["request"] = req
+        return HandoffActiveEvidenceBatchResponse(
+            execution_context={
+                "updated_plan": {
+                    "mode": "targeted_rca",
+                    "objective": "Investigate service/api",
+                    "target": None,
+                    "steps": [],
+                    "evidence_batches": [],
+                    "planning_notes": [],
+                },
+                "executions": [],
+                "allow_bounded_fallback_execution": False,
+            },
+            handoff_token="opaque-handoff-token",
+            active_batch=None,
+            execution=None,
+            handoff_status="ready_for_next_handoff",
+            next_action="call_handoff_again",
+            required_external_step_ids=[],
+        )
+
+    monkeypatch.setattr("investigation_service.main.handoff_active_evidence_batch_from_request", fake_handoff)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/handoff_active_evidence_batch",
+        json={
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service"},
+            "exploration_outcomes": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "capability": "service_evidence_plane",
+                    "intent": "evidence_expansion",
+                    "outcome": "no_useful_change",
+                    "probe_kind": "service_range_metrics",
+                    "notes": ["probe_not_improving"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["request"].exploration_outcomes == [
+        ExplorationOutcome(
+            step_id="collect-target-evidence",
+            capability="service_evidence_plane",
+            intent="evidence_expansion",
+            outcome="no_useful_change",
+            probe_kind="service_range_metrics",
+            notes=["probe_not_improving"],
+        )
+    ]
 
 
 def test_handoff_active_evidence_batch_route_accepts_service_attempted_routes(monkeypatch) -> None:

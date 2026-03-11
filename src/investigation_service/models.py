@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ProfileType = Literal["workload", "service", "otel-pipeline"]
 PresentationProfileType = Literal["operator_summary", "incident_report", "debug_trace", "explain_more"]
@@ -19,6 +19,12 @@ PlannerSeedOutcome = Literal[
     "deterministic_narrowing_required",
     "scout_narrowing_eligible",
 ]
+ProbeKind = Literal[
+    "alternate_runtime_pod",
+    "service_range_metrics",
+    "node_top_pods",
+]
+ScoutIntent = Literal["evidence_expansion", "focus_narrowing"]
 
 
 class TargetRef(BaseModel):
@@ -181,6 +187,31 @@ class InvestigationPlannerSeed(BaseModel):
     seed_notes: list[str] = Field(default_factory=list)
 
 
+class FocusNarrowingRecommendation(BaseModel):
+    execution_focus: PlannerSeedExecutionFocus
+    reasons: list[str] = Field(default_factory=list)
+    primary_subject: InvestigationSubjectRef | None = None
+    related_subjects: list[InvestigationSubjectRef] = Field(default_factory=list)
+
+
+class ExplorationOutcome(BaseModel):
+    step_id: str
+    capability: str | None = None
+    intent: ScoutIntent
+    outcome: Literal["evidence_delta", "focus_recommendation", "no_useful_change"]
+    probe_kind: ProbeKind | None = None
+    recommendation: FocusNarrowingRecommendation | None = None
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_recommendation_consistency(self) -> "ExplorationOutcome":
+        if self.outcome == "focus_recommendation" and self.recommendation is None:
+            raise ValueError("focus_recommendation outcome requires recommendation payload")
+        if self.outcome != "focus_recommendation" and self.recommendation is not None:
+            raise ValueError("recommendation payload is only valid for focus_recommendation outcome")
+        return self
+
+
 class EvidenceBundle(BaseModel):
     cluster: str = "current-context"
     target: TargetRef
@@ -241,6 +272,7 @@ class InvestigationPlan(BaseModel):
     steps: list[PlanStep] = Field(default_factory=list)
     evidence_batches: list[EvidenceBatch] = Field(default_factory=list)
     active_batch_id: str | None = None
+    pending_exploration_outcomes: list[ExplorationOutcome] = Field(default_factory=list)
     planning_notes: list[str] = Field(default_factory=list)
 
 
@@ -281,8 +313,15 @@ class EvidenceStepContract(BaseModel):
     fallback_mcp_server: str | None = None
     fallback_tool_names: list[str] = Field(default_factory=list)
     execution_mode: Literal["external_preferred", "control_plane_only"]
-    exploration_intent: Literal["follow_up"] | None = None
+    exploration_intent: ScoutIntent | None = None
     execution_inputs: StepExecutionInputs
+
+    @field_validator("exploration_intent", mode="before")
+    @classmethod
+    def _normalize_legacy_exploration_intent(cls, value: str | None) -> ScoutIntent | None:
+        if value == "follow_up":
+            return "evidence_expansion"
+        return value
 
 
 class ActiveEvidenceBatchContract(BaseModel):
@@ -368,6 +407,7 @@ class SubmitEvidenceArtifactsRequest(BaseModel):
     incident: BuildInvestigationPlanRequest
     batch_id: str | None = None
     submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
+    exploration_outcomes: list[ExplorationOutcome] = Field(default_factory=list)
 
 
 class SubmittedEvidenceReconciliationResult(BaseModel):
@@ -380,6 +420,7 @@ class AdvanceInvestigationRuntimeRequest(BaseModel):
     execution_context: "ReportingExecutionContext | None" = None
     batch_id: str | None = None
     submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
+    exploration_outcomes: list[ExplorationOutcome] = Field(default_factory=list)
 
 
 class AdvanceInvestigationRuntimeResponse(BaseModel):
@@ -393,6 +434,7 @@ class HandoffActiveEvidenceBatchRequest(BaseModel):
     handoff_token: str | None = None
     batch_id: str | None = None
     submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
+    exploration_outcomes: list[ExplorationOutcome] = Field(default_factory=list)
 
 
 class HandoffActiveEvidenceBatchResponse(BaseModel):

@@ -7,12 +7,14 @@ from investigation_service.models import (
     ActiveEvidenceBatchContract,
     BuildInvestigationPlanRequest,
     EvidenceStepContract,
+    ExplorationOutcome,
     InvestigationReport,
     InvestigationReportRequest,
+    ScoutIntent,
     ReportingExecutionContext,
     SubmittedStepArtifact,
 )
-from investigation_service.execution_policy import ProbeKind
+from investigation_service.models import ProbeKind
 
 
 class PendingExplorationReview(BaseModel):
@@ -24,6 +26,7 @@ class PendingExplorationReview(BaseModel):
     adequacy_outcome: Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"]
     adequacy_reasons: list[str] = Field(default_factory=list)
     proposed_probe: str
+    intent: ScoutIntent = "evidence_expansion"
     probe_kind: ProbeKind | None = None
     decision: Literal["approve", "skip"] | None = None
 
@@ -34,6 +37,7 @@ class OrchestrationState(TypedDict):
     execution_context: ReportingExecutionContext | None
     active_batch: ActiveEvidenceBatchContract | None
     submitted_steps: list[SubmittedStepArtifact]
+    exploration_outcomes: list[ExplorationOutcome]
     pending_exploration_review: PendingExplorationReview | None
     deferred_external_steps: list[EvidenceStepContract]
     remaining_batch_budget: int
@@ -52,6 +56,7 @@ def build_initial_state(
         execution_context=None,
         active_batch=None,
         submitted_steps=[],
+        exploration_outcomes=[],
         pending_exploration_review=None,
         deferred_external_steps=[],
         remaining_batch_budget=remaining_batch_budget,

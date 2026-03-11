@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from .adequacy import assess_target_evidence_adequacy
 from .execution_policy import policy_fields
@@ -23,6 +23,7 @@ from .models import (
     EvidenceBatch,
     EvidenceBatchExecution,
     EvidenceBundle,
+    ExplorationOutcome,
     EvidenceStepContract,
     ExecuteInvestigationStepRequest,
     FindUnhealthyPodRequest,
@@ -85,6 +86,14 @@ class StepRuntimeSpec:
     artifact_type: str
     execution_mode: str
     external_submission_allowed: bool
+
+
+@dataclass(frozen=True)
+class PlanExplorationRecommendation:
+    kind: Literal["insert_follow_up_batch", "narrow_execution_focus"]
+    source: Literal["adequacy_gate", "scout_outcome"]
+    source_step_id: str
+    rationale: tuple[str, ...] = ()
 
 
 def _ingress_deps(deps: PlannerDeps) -> IngressDeps:
@@ -565,7 +574,7 @@ def get_active_evidence_batch_contract(req: GetActiveEvidenceBatchRequest) -> Ac
                 fallback_mcp_server=step.fallback_mcp_server,
                 fallback_tool_names=list(step.fallback_tool_names),
                 execution_mode=_execution_mode_for_step(step),
-                exploration_intent="follow_up" if step.id == "collect-service-follow-up-evidence" else None,
+                exploration_intent="evidence_expansion" if step.id == "collect-service-follow-up-evidence" else None,
                 execution_inputs=_step_execution_inputs(step, target=target, incident=req.incident),
             )
             for step in pending_steps
@@ -743,7 +752,10 @@ def submit_evidence_step_artifacts(req: SubmitEvidenceArtifactsRequest) -> Submi
         artifacts,
         note=f"reconciled externally submitted evidence for {batch.id}",
     )
-    updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=req.plan, execution=execution))
+    updated_plan = _update_investigation_plan(
+        UpdateInvestigationPlanRequest(plan=req.plan, execution=execution),
+        exploration_outcomes=req.exploration_outcomes,
+    )
     return SubmittedEvidenceReconciliationResult(execution=execution, updated_plan=updated_plan)
 
 
@@ -754,6 +766,7 @@ def advance_active_evidence_batch(
     submitted_steps: list[SubmittedStepArtifact],
     batch_id: str | None,
     deps: PlannerDeps,
+    exploration_outcomes: list[ExplorationOutcome] | None = None,
 ) -> SubmittedEvidenceReconciliationResult:
     if plan.mode == "factual_analysis":
         raise ValueError("advance_active_evidence_batch is not supported for factual_analysis plans")
@@ -823,7 +836,10 @@ def advance_active_evidence_batch(
             for submission in attempted_peer_submissions.values()
             for limitation in submission.limitations
         )
-    updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=plan, execution=execution))
+    updated_plan = _update_investigation_plan(
+        UpdateInvestigationPlanRequest(plan=plan, execution=execution),
+        exploration_outcomes=exploration_outcomes,
+    )
     return SubmittedEvidenceReconciliationResult(execution=execution, updated_plan=updated_plan)
 
 
@@ -1208,18 +1224,28 @@ def execute_investigation_step(
     )
 
 
-def _should_insert_service_follow_up(plan: InvestigationPlan, execution: EvidenceBatchExecution) -> bool:
+def _service_follow_up_recommendation_if_needed(
+    plan: InvestigationPlan,
+    execution: EvidenceBatchExecution,
+) -> PlanExplorationRecommendation | None:
     target = plan.target
     if target is None or target.scope != "workload" or not target.namespace or not target.service_name:
-        return False
+        return None
     if any(step.id == "collect-service-follow-up-evidence" for step in plan.steps):
-        return False
+        return None
 
     assessment = assess_target_evidence_adequacy(target=target, artifacts=execution.artifacts)
-    return assessment.outcome in {"weak", "contradictory", "blocked"}
+    if assessment.outcome not in {"weak", "contradictory", "blocked"}:
+        return None
+    return PlanExplorationRecommendation(
+        kind="insert_follow_up_batch",
+        source="adequacy_gate",
+        source_step_id="collect-target-evidence",
+        rationale=tuple(assessment.reasons),
+    )
 
 
-def _insert_service_follow_up(plan: InvestigationPlan) -> InvestigationPlan:
+def _apply_service_follow_up_recommendation(plan: InvestigationPlan) -> InvestigationPlan:
     target = plan.target
     if target is None or not target.service_name:
         return plan
@@ -1276,10 +1302,63 @@ def _insert_service_follow_up(plan: InvestigationPlan) -> InvestigationPlan:
     )
 
 
+def _build_plan_exploration_recommendations(
+    plan: InvestigationPlan,
+    execution: EvidenceBatchExecution,
+    exploration_outcomes: list[ExplorationOutcome] | None,
+) -> list[PlanExplorationRecommendation]:
+    recommendations: list[PlanExplorationRecommendation] = []
+    follow_up = _service_follow_up_recommendation_if_needed(plan, execution)
+    if follow_up is not None:
+        recommendations.append(follow_up)
+    if exploration_outcomes:
+        for outcome in exploration_outcomes:
+            if outcome.intent == "focus_narrowing" or outcome.outcome == "focus_recommendation":
+                raise ValueError("focus recommendation promotion is not enabled in this phase")
+    return recommendations
+
+
+def _apply_plan_exploration_recommendations(
+    plan: InvestigationPlan,
+    recommendations: list[PlanExplorationRecommendation],
+) -> InvestigationPlan:
+    updated = plan
+    for recommendation in recommendations:
+        if recommendation.kind == "insert_follow_up_batch":
+            updated = _apply_service_follow_up_recommendation(updated)
+            continue
+        raise ValueError(f"unsupported plan exploration recommendation kind: {recommendation.kind}")
+    return updated
+
+
+def _merged_exploration_outcomes(
+    plan: InvestigationPlan,
+    exploration_outcomes: list[ExplorationOutcome] | None,
+) -> list[ExplorationOutcome]:
+    merged: list[ExplorationOutcome] = []
+    seen: set[str] = set()
+    for outcome in [*plan.pending_exploration_outcomes, *(exploration_outcomes or [])]:
+        key = outcome.model_dump_json()
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(outcome)
+    return merged
+
+
 def update_investigation_plan(req: UpdateInvestigationPlanRequest) -> InvestigationPlan:
+    return _update_investigation_plan(req, exploration_outcomes=None)
+
+
+def _update_investigation_plan(
+    req: UpdateInvestigationPlanRequest,
+    *,
+    exploration_outcomes: list[ExplorationOutcome] | None,
+) -> InvestigationPlan:
     plan = req.plan
     step_ids = set(req.execution.executed_step_ids)
     batch_id = req.execution.batch_id
+    merged_exploration_outcomes = _merged_exploration_outcomes(plan, exploration_outcomes)
 
     updated_steps: list[PlanStep] = []
     for step in plan.steps:
@@ -1315,10 +1394,19 @@ def update_investigation_plan(req: UpdateInvestigationPlanRequest) -> Investigat
             continue
         refreshed_batches.append(batch.model_copy(update={"status": "deferred"}))
 
-    plan = plan.model_copy(update={"steps": refreshed_steps, "evidence_batches": refreshed_batches, "active_batch_id": next_active_batch_id})
     batch_status = next((batch.status for batch in refreshed_batches if batch.id == batch_id), None)
-    if batch_status == "completed" and _should_insert_service_follow_up(plan, req.execution):
-        return _insert_service_follow_up(plan)
+    plan = plan.model_copy(
+        update={
+            "steps": refreshed_steps,
+            "evidence_batches": refreshed_batches,
+            "active_batch_id": next_active_batch_id,
+            "pending_exploration_outcomes": [] if batch_status == "completed" else merged_exploration_outcomes,
+        }
+    )
+    if batch_status == "completed":
+        recommendations = _build_plan_exploration_recommendations(plan, req.execution, merged_exploration_outcomes)
+        if recommendations:
+            return _apply_plan_exploration_recommendations(plan, recommendations)
 
     notes = list(plan.planning_notes)
     notes.append(f"updated plan after executing {batch_id}")

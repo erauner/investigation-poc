@@ -9,7 +9,7 @@ from investigation_service.exploration import (
     ScoutBudgetUsage,
     build_bounded_scout_observation,
 )
-from investigation_service.models import ActualRoute, EvidenceStepContract, SubmittedStepArtifact
+from investigation_service.models import ActualRoute, EvidenceStepContract, ExplorationOutcome, SubmittedStepArtifact
 from investigation_service.submission_materialization import materialize_node_submission
 
 from .mcp_clients import KubernetesMcpClient, NodePodSummarySnapshot, PeerMcpError
@@ -83,16 +83,16 @@ def maybe_run_bounded_node_scout(
     scout_context: ExploratoryScoutContext | None,
     baseline_artifact: SubmittedStepArtifact,
     kubernetes_mcp_client: KubernetesMcpClient,
-) -> SubmittedStepArtifact:
+) -> tuple[SubmittedStepArtifact, ExplorationOutcome | None]:
     if scout_context is None:
-        return baseline_artifact
+        return baseline_artifact, None
     policy = scout_context.policy
     if policy.max_additional_probe_runs < 1 or policy.max_related_pods < 1:
-        return baseline_artifact
+        return baseline_artifact, None
     if "node_top_pods" not in policy.probe_kinds:
-        return baseline_artifact
+        return baseline_artifact, None
     if baseline_artifact.evidence_bundle is None:
-        return baseline_artifact
+        return baseline_artifact, None
 
     baseline_assessment = scout_context.baseline_assessment
     budget_usage = ScoutBudgetUsage(
@@ -114,7 +114,7 @@ def maybe_run_bounded_node_scout(
                 budget_usage=budget_usage,
             )
         )
-        return baseline_artifact.model_copy(
+        artifact = baseline_artifact.model_copy(
             update={
                 "attempted_routes": [
                     *baseline_artifact.attempted_routes,
@@ -134,6 +134,7 @@ def maybe_run_bounded_node_scout(
                 ),
             }
         )
+        return artifact, _no_useful_change_outcome(step, scout_context, note="probe_failed")
 
     scout_artifact = materialize_node_top_pods_snapshot(
         step,
@@ -155,7 +156,7 @@ def maybe_run_bounded_node_scout(
                 budget_usage=budget_usage,
             )
         )
-        return scout_artifact
+        return scout_artifact, _evidence_delta_outcome(step, scout_context, note="probe_improved_artifact")
 
     log_bounded_scout(
         build_bounded_scout_observation(
@@ -165,6 +166,39 @@ def maybe_run_bounded_node_scout(
             budget_usage=budget_usage,
         )
     )
-    return baseline_artifact.model_copy(
+    artifact = baseline_artifact.model_copy(
         update={"attempted_routes": [*baseline_artifact.attempted_routes, scout_artifact.actual_route]}
+    )
+    return artifact, _no_useful_change_outcome(step, scout_context, note="probe_not_improving")
+
+
+def _evidence_delta_outcome(
+    step: EvidenceStepContract,
+    scout_context: ExploratoryScoutContext,
+    *,
+    note: str,
+) -> ExplorationOutcome:
+    return ExplorationOutcome(
+        step_id=step.step_id,
+        capability=step.requested_capability,
+        intent=scout_context.intent,
+        outcome="evidence_delta",
+        probe_kind="node_top_pods",
+        notes=[note],
+    )
+
+
+def _no_useful_change_outcome(
+    step: EvidenceStepContract,
+    scout_context: ExploratoryScoutContext,
+    *,
+    note: str,
+) -> ExplorationOutcome:
+    return ExplorationOutcome(
+        step_id=step.step_id,
+        capability=step.requested_capability,
+        intent=scout_context.intent,
+        outcome="no_useful_change",
+        probe_kind="node_top_pods",
+        notes=[note],
     )

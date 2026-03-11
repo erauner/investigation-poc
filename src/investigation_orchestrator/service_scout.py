@@ -9,7 +9,7 @@ from investigation_service.exploration import (
     ScoutBudgetUsage,
     build_bounded_scout_observation,
 )
-from investigation_service.models import ActualRoute, EvidenceStepContract, SubmittedStepArtifact
+from investigation_service.models import ActualRoute, EvidenceStepContract, ExplorationOutcome, SubmittedStepArtifact
 from investigation_service.submission_materialization import materialize_service_submission
 
 from .mcp_clients import PeerMcpError, PrometheusMcpClient, ServiceMetricsSnapshot
@@ -97,25 +97,26 @@ def assess_materialized_service_submission(artifact: SubmittedStepArtifact) -> E
     return assess_bundle_for_capability("service_evidence_plane", bundle=artifact.evidence_bundle)
 
 
-def maybe_run_bounded_service_follow_up_scout(
+def maybe_run_bounded_service_evidence_expansion_scout(
     step: EvidenceStepContract,
     *,
     scout_context: ExploratoryScoutContext | None,
     baseline_artifact: SubmittedStepArtifact,
     prometheus_mcp_client: PrometheusMcpClient,
-) -> SubmittedStepArtifact:
-    if step.exploration_intent != "follow_up":
-        return baseline_artifact
-
+) -> tuple[SubmittedStepArtifact, ExplorationOutcome | None]:
     if scout_context is None:
-        return baseline_artifact
+        return baseline_artifact, None
+    if scout_context.intent != "evidence_expansion":
+        return baseline_artifact, None
+    if not hasattr(prometheus_mcp_client, "collect_service_range_metrics"):
+        return baseline_artifact, None
     policy = scout_context.policy
     if policy.max_additional_probe_runs < 1 or policy.max_metric_families < 1:
-        return baseline_artifact
+        return baseline_artifact, None
     if "service_range_metrics" not in policy.probe_kinds:
-        return baseline_artifact
+        return baseline_artifact, None
     if baseline_artifact.evidence_bundle is None:
-        return baseline_artifact
+        return baseline_artifact, None
 
     baseline_assessment = scout_context.baseline_assessment
     budget_usage = ScoutBudgetUsage(
@@ -137,7 +138,7 @@ def maybe_run_bounded_service_follow_up_scout(
                 budget_usage=budget_usage,
             )
         )
-        return baseline_artifact.model_copy(
+        artifact = baseline_artifact.model_copy(
             update={
                 "attempted_routes": [
                     *baseline_artifact.attempted_routes,
@@ -157,6 +158,7 @@ def maybe_run_bounded_service_follow_up_scout(
                 ),
             }
         )
+        return artifact, _no_useful_change_outcome(step, scout_context, note="probe_failed")
 
     scout_artifact = materialize_service_metrics_snapshot(
         step,
@@ -178,7 +180,7 @@ def maybe_run_bounded_service_follow_up_scout(
                 budget_usage=budget_usage,
             )
         )
-        return scout_artifact
+        return scout_artifact, _evidence_delta_outcome(step, scout_context, note="probe_improved_artifact")
 
     log_bounded_scout(
         build_bounded_scout_observation(
@@ -188,6 +190,39 @@ def maybe_run_bounded_service_follow_up_scout(
             budget_usage=budget_usage,
         )
     )
-    return baseline_artifact.model_copy(
+    artifact = baseline_artifact.model_copy(
         update={"attempted_routes": [*baseline_artifact.attempted_routes, scout_artifact.actual_route]}
+    )
+    return artifact, _no_useful_change_outcome(step, scout_context, note="probe_not_improving")
+
+
+def _evidence_delta_outcome(
+    step: EvidenceStepContract,
+    scout_context: ExploratoryScoutContext,
+    *,
+    note: str,
+) -> ExplorationOutcome:
+    return ExplorationOutcome(
+        step_id=step.step_id,
+        capability=step.requested_capability,
+        intent=scout_context.intent,
+        outcome="evidence_delta",
+        probe_kind="service_range_metrics",
+        notes=[note],
+    )
+
+
+def _no_useful_change_outcome(
+    step: EvidenceStepContract,
+    scout_context: ExploratoryScoutContext,
+    *,
+    note: str,
+) -> ExplorationOutcome:
+    return ExplorationOutcome(
+        step_id=step.step_id,
+        capability=step.requested_capability,
+        intent=scout_context.intent,
+        outcome="no_useful_change",
+        probe_kind="service_range_metrics",
+        notes=[note],
     )

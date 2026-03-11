@@ -4,6 +4,7 @@ from investigation_service.models import (
     ActualRoute,
     ActiveEvidenceBatchContract,
     EvidenceStepContract,
+    ExplorationOutcome,
     SubmittedStepArtifact,
 )
 from investigation_service.exploration import build_exploratory_scout_context
@@ -14,7 +15,7 @@ from investigation_service.submission_materialization import (
 )
 from .mcp_clients import KubernetesMcpClient, PeerMcpError, PrometheusMcpClient
 from .node_scout import maybe_run_bounded_node_scout
-from .service_scout import maybe_run_bounded_service_follow_up_scout
+from .service_scout import maybe_run_bounded_service_evidence_expansion_scout
 from .state import PendingExplorationReview
 from .workload_scout import (
     execute_workload_exploration_review,
@@ -81,8 +82,18 @@ _prometheus_mcp_client = PrometheusMcpClient()
 @dataclass(frozen=True)
 class ExternalStepCollectionResult:
     submitted_steps: list[SubmittedStepArtifact]
+    exploration_outcomes: tuple[ExplorationOutcome, ...] = field(default_factory=tuple)
     pending_exploration_review: PendingExplorationReview | None = None
     deferred_external_steps: tuple[EvidenceStepContract, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class AppliedExplorationReviewResult:
+    submitted_step: SubmittedStepArtifact
+    exploration_outcome: ExplorationOutcome | None = None
+
+    def __getattr__(self, name: str):
+        return getattr(self.submitted_step, name)
 
 
 def _workload_submission_via_peer_mcp(
@@ -110,20 +121,22 @@ def _workload_submission_via_peer_mcp(
                 submitted_steps=[],
                 pending_exploration_review=pending_review,
             )
+    artifact, exploration_outcome = maybe_run_bounded_workload_scout(
+        step,
+        scout_context=scout_context,
+        baseline_snapshot=snapshot,
+        baseline_artifact=baseline_artifact,
+        kubernetes_mcp_client=_kubernetes_mcp_client,
+    )
     return ExternalStepCollectionResult(
-        submitted_steps=[
-            maybe_run_bounded_workload_scout(
-                step,
-                scout_context=scout_context,
-                baseline_snapshot=snapshot,
-                baseline_artifact=baseline_artifact,
-                kubernetes_mcp_client=_kubernetes_mcp_client,
-            )
-        ]
+        submitted_steps=[artifact],
+        exploration_outcomes=((exploration_outcome,) if exploration_outcome is not None else ()),
     )
 
 
-def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepArtifact:
+def _service_submission_via_peer_mcp(
+    step: EvidenceStepContract,
+) -> tuple[SubmittedStepArtifact, ExplorationOutcome | None]:
     try:
         metrics_snapshot = _prometheus_mcp_client.collect_service_metrics(step.execution_inputs)
     except PeerMcpError as prom_exc:
@@ -138,7 +151,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
                     f"prometheus peer failed: {prom_exc}",
                     f"kubernetes peer fallback failed: {kube_exc}",
                 ],
-            )
+            ), None
         baseline_artifact = materialize_service_submission(
             step,
             target=runtime_snapshot.target,
@@ -152,7 +165,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
         )
         scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
-        return maybe_run_bounded_service_follow_up_scout(
+        return maybe_run_bounded_service_evidence_expansion_scout(
             step,
             scout_context=scout_context,
             baseline_artifact=baseline_artifact,
@@ -183,7 +196,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
                 extra_limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
             )
             scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
-            return maybe_run_bounded_service_follow_up_scout(
+            return maybe_run_bounded_service_evidence_expansion_scout(
                 step,
                 scout_context=scout_context,
                 baseline_artifact=baseline_artifact,
@@ -205,7 +218,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             extra_limitations=limitations,
         )
         scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
-        return maybe_run_bounded_service_follow_up_scout(
+        return maybe_run_bounded_service_evidence_expansion_scout(
             step,
             scout_context=scout_context,
             baseline_artifact=baseline_artifact,
@@ -223,7 +236,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
                 _planned_fallback_peer_route(step),
             ],
             limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
-        )
+        ), None
     limitations = [*metrics_snapshot.limitations, *runtime_snapshot.limitations]
     baseline_artifact = materialize_service_submission(
         step,
@@ -241,7 +254,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
         extra_limitations=limitations,
     )
     scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
-    return maybe_run_bounded_service_follow_up_scout(
+    return maybe_run_bounded_service_evidence_expansion_scout(
         step,
         scout_context=scout_context,
         baseline_artifact=baseline_artifact,
@@ -249,7 +262,9 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
     )
 
 
-def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepArtifact:
+def _node_submission_via_peer_mcp(
+    step: EvidenceStepContract,
+) -> tuple[SubmittedStepArtifact, ExplorationOutcome | None]:
     try:
         metrics_snapshot = _prometheus_mcp_client.collect_node_metrics(step.execution_inputs)
     except PeerMcpError as prom_exc:
@@ -264,7 +279,7 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
                     f"prometheus peer failed: {prom_exc}",
                     f"kubernetes peer fallback failed: {kube_exc}",
                 ],
-            )
+            ), None
         baseline_artifact = materialize_node_submission(
             step,
             target=runtime_snapshot.target,
@@ -296,7 +311,7 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
                 _planned_fallback_peer_route(step),
             ],
             limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
-        )
+        ), None
     limitations = [*metrics_snapshot.limitations, *runtime_snapshot.limitations]
     actual_route = (
         _peer_route(runtime_snapshot.tool_path)
@@ -327,7 +342,9 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
     )
 
 
-def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact | None:
+def _submitted_artifact_and_outcome(
+    step: EvidenceStepContract,
+) -> tuple[SubmittedStepArtifact | None, ExplorationOutcome | None]:
     if step.requested_capability == "workload_evidence_plane":
         try:
             result = _workload_submission_via_peer_mcp(step)
@@ -336,15 +353,23 @@ def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact | N
                 step,
                 actual_route=_planned_peer_route(step),
                 limitations=[f"peer workload MCP attempt failed: {exc}"],
-            )
+            ), None
         if result.pending_exploration_review is not None:
             raise ValueError("workload review planning is only supported through collect_external_steps")
-        return result.submitted_steps[0] if result.submitted_steps else None
+        return (
+            result.submitted_steps[0] if result.submitted_steps else None,
+            result.exploration_outcomes[0] if result.exploration_outcomes else None,
+        )
     if step.requested_capability == "service_evidence_plane":
         return _service_submission_via_peer_mcp(step)
     if step.requested_capability == "node_evidence_plane":
         return _node_submission_via_peer_mcp(step)
     raise ValueError(f"unsupported external step capability: {step.requested_capability}")
+
+
+def _submitted_artifact(step: EvidenceStepContract) -> SubmittedStepArtifact | None:
+    artifact, _ = _submitted_artifact_and_outcome(step)
+    return artifact
 
 
 def collect_external_steps(
@@ -354,6 +379,7 @@ def collect_external_steps(
     steps: list[EvidenceStepContract] | None = None,
 ) -> ExternalStepCollectionResult:
     submissions: list[SubmittedStepArtifact] = []
+    exploration_outcomes: list[ExplorationOutcome] = []
     pending_review: PendingExplorationReview | None = None
     external_steps = steps or [step for step in active_batch.steps if step.execution_mode == "external_preferred"]
     skipped_workload_steps = 0
@@ -376,10 +402,12 @@ def collect_external_steps(
                 )
                 continue
             submissions.extend(result.submitted_steps)
+            exploration_outcomes.extend(result.exploration_outcomes)
             if result.pending_exploration_review is not None and pending_review is None:
                 pending_review = result.pending_exploration_review
                 return ExternalStepCollectionResult(
                     submitted_steps=submissions,
+                    exploration_outcomes=tuple(exploration_outcomes),
                     pending_exploration_review=pending_review,
                     deferred_external_steps=tuple(external_steps[index + 1 :]),
                 )
@@ -387,34 +415,45 @@ def collect_external_steps(
                 skipped_workload_steps += 1
             continue
 
-        artifact = _submitted_artifact(step)
+        artifact, exploration_outcome = _submitted_artifact_and_outcome(step)
         if artifact is None:
             raise ValueError(f"external step {step.step_id} did not materialize an artifact")
         submissions.append(artifact)
+        if exploration_outcome is not None:
+            exploration_outcomes.append(exploration_outcome)
 
     if external_steps and not submissions and pending_review is None and skipped_workload_steps != len(external_steps):
         raise ValueError("active batch requires external steps but none were materialized")
     return ExternalStepCollectionResult(
         submitted_steps=submissions,
+        exploration_outcomes=tuple(exploration_outcomes),
         pending_exploration_review=pending_review,
     )
 
 
-def apply_pending_exploration_review(review: PendingExplorationReview) -> SubmittedStepArtifact:
+def apply_pending_exploration_review(review: PendingExplorationReview) -> AppliedExplorationReviewResult:
     if review.capability != "workload_evidence_plane":
         raise ValueError(f"unsupported exploration review capability: {review.capability}")
     if review.decision == "approve":
-        return execute_workload_exploration_review(
+        artifact, exploration_outcome = execute_workload_exploration_review(
             review,
             kubernetes_mcp_client=_kubernetes_mcp_client,
         )
+        return AppliedExplorationReviewResult(
+            submitted_step=artifact,
+            exploration_outcome=exploration_outcome,
+        )
     if review.decision == "skip":
-        return skip_workload_exploration_review(review)
+        artifact, exploration_outcome = skip_workload_exploration_review(review)
+        return AppliedExplorationReviewResult(
+            submitted_step=artifact,
+            exploration_outcome=exploration_outcome,
+        )
     raise ValueError("exploration review decision must be applied before execution")
 
 
-def run_required_external_steps(active_batch: ActiveEvidenceBatchContract) -> list[SubmittedStepArtifact]:
+def run_required_external_steps(active_batch: ActiveEvidenceBatchContract) -> ExternalStepCollectionResult:
     result = collect_external_steps(active_batch, allow_exploration_review=False)
     if result.pending_exploration_review is not None:
         raise ValueError("unexpected pending exploration review without review-enabled collection")
-    return result.submitted_steps
+    return result

@@ -31,6 +31,7 @@ from investigation_service.k8s_adapter import pick_runtime_pod_for_workload
 from investigation_service.models import (
     ActiveEvidenceBatchContract,
     EvidenceStepContract,
+    ExplorationOutcome,
     InvestigationSubject,
     InvestigationTarget,
     StepExecutionInputs,
@@ -90,7 +91,7 @@ def _service_follow_up_step() -> EvidenceStepContract:
         update={
             "step_id": "collect-service-follow-up-evidence",
             "title": "Collect service follow-up evidence",
-            "exploration_intent": "follow_up",
+            "exploration_intent": "evidence_expansion",
         }
     )
 
@@ -1377,6 +1378,73 @@ def test_primary_service_step_never_invokes_bounded_range_scout(monkeypatch) -> 
     ]
 
 
+def test_primary_service_step_uses_evidence_expansion_scout_when_baseline_is_weak(monkeypatch) -> None:
+    step = _service_step()
+    range_calls: list[int] = []
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": None,
+                        "service_error_rate": None,
+                        "service_latency_p95_seconds": None,
+                        "prometheus_available": False,
+                    },
+                    limitations=["prometheus unavailable or returned no usable results"],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                ),
+                "collect_service_range_metrics": lambda _self, _inputs, max_metric_families=0: (
+                    range_calls.append(max_metric_families)
+                    or ServiceMetricsSnapshot(
+                        cluster_alias="erauner-home",
+                        target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                        metrics={
+                            "service_request_rate": 25.0,
+                            "service_error_rate": 0.4,
+                            "service_latency_p95_seconds": 1.1,
+                            "prometheus_available": True,
+                        },
+                        limitations=[],
+                        tool_path=["prometheus-mcp-server", "execute_range_query", "execute_range_query"],
+                    )
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert range_calls == [2]
+    assert artifact.actual_route.tool_path == ["prometheus-mcp-server", "execute_range_query", "execute_range_query"]
+    assert artifact.evidence_bundle is not None
+    assert artifact.evidence_bundle.metrics["service_error_rate"] == 0.4
+
+
 def test_service_follow_up_step_uses_exploration_intent_not_step_id(monkeypatch) -> None:
     step = _service_follow_up_step().model_copy(
         update={
@@ -1939,8 +2007,8 @@ def test_external_steps_still_require_non_workload_submission(monkeypatch) -> No
 
     monkeypatch.setattr(
         evidence_runner,
-        "_submitted_artifact",
-        lambda _step: None,
+        "_submitted_artifact_and_outcome",
+        lambda _step: (None, None),
     )
 
     try:
@@ -1949,6 +2017,37 @@ def test_external_steps_still_require_non_workload_submission(monkeypatch) -> No
         assert "did not materialize an artifact" in str(exc)
     else:
         raise AssertionError("expected non-workload external steps to still require a submission")
+
+
+def test_run_required_external_steps_preserves_exploration_outcomes(monkeypatch) -> None:
+    step = _service_step()
+    active_batch = type("ActiveBatchStub", (), {"steps": [step]})()
+    outcome = ExplorationOutcome(
+        step_id=step.step_id,
+        capability=step.requested_capability,
+        intent="evidence_expansion",
+        outcome="no_useful_change",
+        probe_kind="service_range_metrics",
+        notes=["probe_not_improving"],
+    )
+    artifact = evidence_runner.materialize_attempt_only_submission(
+        step,
+        actual_route=evidence_runner._planned_peer_route(step),
+        limitations=["prometheus peer failed: prom down"],
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "collect_external_steps",
+        lambda _active_batch, allow_exploration_review=False: evidence_runner.ExternalStepCollectionResult(
+            submitted_steps=[artifact],
+            exploration_outcomes=(outcome,),
+        ),
+    )
+
+    result = evidence_runner.run_required_external_steps(active_batch)
+
+    assert result.submitted_steps == [artifact]
+    assert result.exploration_outcomes == (outcome,)
 
 
 def test_node_peer_prometheus_routing_allows_default_cluster_with_prometheus_url() -> None:
