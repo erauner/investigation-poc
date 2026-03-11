@@ -157,6 +157,14 @@ The downstream contracts still remain:
 - `EvidenceBundle`
 - planner-owned reconciliation into `StepArtifact` and `EvidenceBatchExecution`
 
+If multiple bounded probes or peer evidence sources materially contribute to the same final bundle, provenance should model that explicitly rather than collapsing multiple sources into one synthetic route.
+
+The intended shape is:
+
+- one primary route for route-satisfaction and "winning probe" semantics
+- an explicit contributing-route set for materially contributing sources
+- optional attempted-route and probe-ledger detail for bounded scout observability
+
 This ADR does not require that bounded exploration be implemented by an LLM-driven scout immediately.
 
 Bounded exploratory evidence should prefer simpler mechanisms first, and may later be implemented by:
@@ -248,6 +256,9 @@ That intermediate seam may capture things such as:
 The important invariant is that exploratory nodes do not directly redefine planner or report semantics.
 They still terminate in the same deterministic materialization path into canonical typed step artifacts.
 
+Bounded scout activation should also key off contract semantics rather than step-name literals alone.
+Equivalent follow-up or scout-intent steps should remain eligible for the same bounded behavior even if planner-owned step ids later change.
+
 ## Preferred Pattern
 
 The preferred near-term pattern is:
@@ -257,6 +268,12 @@ The preferred near-term pattern is:
 3. optional bounded evidence-scout subgraph for approved evidence planes
 4. deterministic artifact materialization
 5. deterministic batch progression and rendering
+
+Within that pattern, route semantics should stay layered:
+
+- exploratory probe selection is local to the evidence step
+- bounded graph follow-up routing is graph-owned branching across pre-approved paths
+- final route provenance should preserve both the primary route and any materially contributing routes
 
 This is intentionally narrower than making the whole investigation graph agentic.
 

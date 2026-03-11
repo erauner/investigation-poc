@@ -73,6 +73,12 @@ What is now true:
 - a bounded service follow-up scout landed earlier than originally sequenced because it addressed a real product-quality gap
 - bounded node scout work is now in progress
 - the first orchestrator-side exploration review interrupt now exists for the workload scout path
+- the next shared bounded-scout contract is now clear enough to formalize directly:
+  - shared exploratory scout context
+  - compact baseline evidence summary
+  - adequacy-derived scout hints
+  - explicit primary-route versus contributing-route provenance
+  - contract-semantic scout intent instead of literal step-id gating
 
 What this means:
 
@@ -930,6 +936,8 @@ Delivered in this slice should be:
 - approved review/interrupt seams stay runtime-local and do not alter `ReportingExecutionContext`
 - deterministic materialization still returns `SubmittedStepArtifact`
 - earlier bounded service follow-up behavior is treated as a precursor pattern that should converge under the same bounded-exploration policy model
+- primary-route and contributing-route provenance are preserved explicitly when mixed-source evidence contributes to the same final bundle
+- scout eligibility keys off shared contract semantics rather than planner step-name literals alone
 
 Validation gate:
 
@@ -939,7 +947,7 @@ Validation gate:
 
 ### Slice 13: Scout Policy And Leading-Context Configuration
 
-Status: Proposed
+Status: In Progress
 
 Goal:
 
@@ -955,6 +963,10 @@ Delivered in this slice should be:
 - small runtime-derived scout hints from baseline evidence and adequacy
 - a compact baseline evidence summary for scout nodes rather than ad hoc prompt reconstruction
 - a shared scout input seam across workload/service/node bounded scouts
+- an explicit scout-intent seam so bounded follow-up behavior does not depend on hard-coded planner step ids
+- an explicit provenance seam separating:
+  - the primary route used for route-satisfaction semantics
+  - materially contributing routes preserved on the final artifact
 - clear boundaries on what remains fixed:
   - artifact contracts
   - reconciliation semantics
@@ -964,6 +976,7 @@ Validation gate:
 
 - scout behavior remains configurable through product-owned structured policy rather than free-form prompt tuning
 - workload/service/node scout paths can consume the same style of bounded input context
+- mixed-source bounded scout results preserve route provenance without inventing synthetic single-route encodings
 - observability remains sufficient to explain why a scout entered, what it tried, and why it stopped
 
 ### Slice 14: Presentation Profiles
