@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import shutil
 import subprocess
 
 import yaml
@@ -292,6 +293,8 @@ def test_skill_and_desktop_extension_keep_shared_runtime_block_with_parse_only_a
 
 
 def test_desktop_extension_emits_mode_specific_wrapper_content() -> None:
+    if shutil.which("node") is None:
+        return
     script = f"""
 import {{ buildInvestigationTask }} from {str((ROOT / "desktop-extension/server/index.js").resolve().as_uri())!r};
 const genericTask = buildInvestigationTask({{task: "Investigate the unhealthy pod in namespace kagent-smoke."}});
