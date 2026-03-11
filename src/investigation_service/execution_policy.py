@@ -1,6 +1,14 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from .models import AdequacyOutcome
+
+ProbeKind = Literal[
+    "alternate_runtime_pod",
+    "service_range_metrics",
+    "node_top_pods",
+]
+
 
 @dataclass(frozen=True)
 class CapabilityPolicy:
@@ -21,7 +29,8 @@ class BoundedExplorationPolicy:
     max_metric_families: int = 0
     max_related_pods: int = 0
     human_review_enabled: bool = False
-    human_review_outcomes: tuple[Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"], ...] = ()
+    human_review_outcomes: tuple[AdequacyOutcome, ...] = ()
+    probe_kinds: tuple[ProbeKind, ...] = ()
 
 
 _POLICIES: dict[str, CapabilityPolicy] = {
@@ -80,18 +89,21 @@ _BOUNDED_EXPLORATION_POLICIES: dict[str, BoundedExplorationPolicy] = {
         max_additional_probe_runs=1,
         human_review_enabled=True,
         human_review_outcomes=("weak", "contradictory", "blocked"),
+        probe_kinds=("alternate_runtime_pod",),
     ),
     "service_evidence_plane": BoundedExplorationPolicy(
         capability="service_evidence_plane",
         enabled=True,
         max_additional_probe_runs=1,
         max_metric_families=2,
+        probe_kinds=("service_range_metrics",),
     ),
     "node_evidence_plane": BoundedExplorationPolicy(
         capability="node_evidence_plane",
         enabled=True,
         max_additional_probe_runs=1,
         max_related_pods=5,
+        probe_kinds=("node_top_pods",),
     ),
 }
 

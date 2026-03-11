@@ -1,11 +1,10 @@
 from investigation_service.adequacy import (
     EvidenceAdequacyAssessment,
-    assess_node_evidence_bundle,
+    assess_bundle_for_capability,
     assessment_improves,
-    is_scout_candidate,
-    node_bundle_improves,
+    bundle_improves_for_capability,
 )
-from investigation_service.execution_policy import bounded_exploration_policy_for_capability
+from investigation_service.exploration import ExploratoryScoutContext
 from investigation_service.models import ActualRoute, EvidenceStepContract, SubmittedStepArtifact
 from investigation_service.submission_materialization import materialize_node_submission
 
@@ -48,24 +47,27 @@ def materialize_node_top_pods_snapshot(
 
 
 def assess_materialized_node_submission(artifact: SubmittedStepArtifact) -> EvidenceAdequacyAssessment:
-    return assess_node_evidence_bundle(bundle=artifact.evidence_bundle)
+    return assess_bundle_for_capability("node_evidence_plane", bundle=artifact.evidence_bundle)
 
 
 def maybe_run_bounded_node_scout(
     step: EvidenceStepContract,
     *,
+    scout_context: ExploratoryScoutContext | None,
     baseline_artifact: SubmittedStepArtifact,
     kubernetes_mcp_client: KubernetesMcpClient,
 ) -> SubmittedStepArtifact:
-    policy = bounded_exploration_policy_for_capability(step.requested_capability)
-    if policy is None or not policy.enabled or policy.max_additional_probe_runs < 1 or policy.max_related_pods < 1:
+    if scout_context is None:
+        return baseline_artifact
+    policy = scout_context.policy
+    if policy.max_additional_probe_runs < 1 or policy.max_related_pods < 1:
+        return baseline_artifact
+    if "node_top_pods" not in policy.probe_kinds:
         return baseline_artifact
     if baseline_artifact.evidence_bundle is None:
         return baseline_artifact
 
-    baseline_assessment = assess_materialized_node_submission(baseline_artifact)
-    if not is_scout_candidate(baseline_assessment):
-        return baseline_artifact
+    baseline_assessment = scout_context.baseline_assessment
 
     try:
         scout_snapshot = kubernetes_mcp_client.collect_node_top_pods(
@@ -101,7 +103,8 @@ def maybe_run_bounded_node_scout(
         attempted_routes=[baseline_artifact.actual_route, *baseline_artifact.attempted_routes],
     )
     scout_assessment = assess_materialized_node_submission(scout_artifact)
-    if assessment_improves(baseline_assessment, scout_assessment) or node_bundle_improves(
+    if assessment_improves(baseline_assessment, scout_assessment) or bundle_improves_for_capability(
+        "node_evidence_plane",
         baseline_artifact.evidence_bundle,
         scout_artifact.evidence_bundle,
     ):

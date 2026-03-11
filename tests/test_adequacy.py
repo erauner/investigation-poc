@@ -1,10 +1,12 @@
 from investigation_service.adequacy import (
+    assess_bundle_for_capability,
     assess_node_evidence_bundle,
     assess_service_evidence_bundle,
     assess_target_evidence_adequacy,
     assess_workload_evidence_bundle,
     adequacy_rank,
     assessment_improves,
+    bundle_improves_for_capability,
     is_scout_candidate,
     node_bundle_improves,
     service_bundle_improves,
@@ -164,6 +166,61 @@ def test_assess_target_evidence_adequacy_returns_not_applicable_for_irrelevant_i
             )
         ],
     ).outcome == "not_applicable"
+
+
+def test_assess_bundle_for_capability_dispatches_by_plane() -> None:
+    workload_bundle = _artifact(
+        findings=[
+            Finding(
+                severity="critical",
+                source="k8s",
+                title="CrashLoopBackOff",
+                evidence="pod is crash looping",
+            )
+        ]
+    ).evidence_bundle
+    service_bundle = _artifact(limitations=["prometheus unavailable or returned no usable results"]).evidence_bundle.model_copy(
+        update={
+            "metrics": {
+                "service_request_rate": None,
+                "service_error_rate": None,
+                "service_latency_p95_seconds": None,
+                "prometheus_available": False,
+            }
+        }
+    )
+
+    assert assess_bundle_for_capability("workload_evidence_plane", bundle=workload_bundle).outcome == "adequate"
+    assert assess_bundle_for_capability("service_evidence_plane", bundle=service_bundle).outcome == "blocked"
+    assert assess_bundle_for_capability("unsupported", bundle=workload_bundle).outcome == "not_applicable"
+
+
+def test_bundle_improves_for_capability_dispatches_by_plane() -> None:
+    baseline = _artifact(
+        findings=[
+            Finding(
+                severity="info",
+                source="heuristic",
+                title="No Critical Signals Found",
+                evidence="nothing decisive",
+            )
+        ],
+        limitations=["logs unavailable"],
+    ).evidence_bundle
+    candidate = _artifact(
+        findings=[
+            Finding(
+                severity="warning",
+                source="events",
+                title="Crash Loop Detected",
+                evidence="backoff seen in events",
+            )
+        ],
+        limitations=["logs unavailable"],
+    ).evidence_bundle
+
+    assert bundle_improves_for_capability("workload_evidence_plane", baseline, candidate) is True
+    assert bundle_improves_for_capability("unsupported", baseline, candidate) is False
 
 
 def test_adequacy_helpers_define_ordering_and_scout_trigger_rules() -> None:

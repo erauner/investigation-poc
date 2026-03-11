@@ -12,6 +12,7 @@ ConfidenceType = Literal["low", "medium", "high"]
 GuidelineCategory = Literal["interpretation", "data_source", "next_step", "delegation", "safety"]
 HandoffStatus = Literal["awaiting_external_submission", "ready_for_next_handoff", "complete"]
 HandoffNextAction = Literal["submit_external_steps", "call_handoff_again", "render_report"]
+AdequacyOutcome = Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"]
 
 
 class TargetRef(BaseModel):

@@ -6,6 +6,7 @@ from investigation_service.models import (
     EvidenceStepContract,
     SubmittedStepArtifact,
 )
+from investigation_service.exploration import build_exploratory_scout_context
 from investigation_service.submission_materialization import (
     materialize_attempt_only_submission,
     materialize_node_submission,
@@ -77,10 +78,12 @@ def _workload_submission_via_peer_mcp(
         step,
         snapshot,
     )
+    scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
     if allow_exploration_review and batch_id is not None:
         pending_review = maybe_plan_workload_exploration_review(
             step,
             batch_id=batch_id,
+            scout_context=scout_context,
             baseline_snapshot=snapshot,
             baseline_artifact=baseline_artifact,
         )
@@ -93,6 +96,7 @@ def _workload_submission_via_peer_mcp(
         submitted_steps=[
             maybe_run_bounded_workload_scout(
                 step,
+                scout_context=scout_context,
                 baseline_snapshot=snapshot,
                 baseline_artifact=baseline_artifact,
                 kubernetes_mcp_client=_kubernetes_mcp_client,
@@ -128,8 +132,10 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
         )
+        scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
         return maybe_run_bounded_service_follow_up_scout(
             step,
+            scout_context=scout_context,
             baseline_artifact=baseline_artifact,
             prometheus_mcp_client=_prometheus_mcp_client,
         )
@@ -156,8 +162,10 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
                 cluster_alias=metrics_snapshot.cluster_alias,
                 extra_limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
             )
+            scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
             return maybe_run_bounded_service_follow_up_scout(
                 step,
+                scout_context=scout_context,
                 baseline_artifact=baseline_artifact,
                 prometheus_mcp_client=_prometheus_mcp_client,
             )
@@ -172,8 +180,10 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=limitations,
         )
+        scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
         return maybe_run_bounded_service_follow_up_scout(
             step,
+            scout_context=scout_context,
             baseline_artifact=baseline_artifact,
             prometheus_mcp_client=_prometheus_mcp_client,
         )
@@ -202,8 +212,10 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
         cluster_alias=runtime_snapshot.cluster_alias,
         extra_limitations=limitations,
     )
+    scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
     return maybe_run_bounded_service_follow_up_scout(
         step,
+        scout_context=scout_context,
         baseline_artifact=baseline_artifact,
         prometheus_mcp_client=_prometheus_mcp_client,
     )
@@ -236,8 +248,10 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
         )
+        scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
         return maybe_run_bounded_node_scout(
             step,
+            scout_context=scout_context,
             baseline_artifact=baseline_artifact,
             kubernetes_mcp_client=_kubernetes_mcp_client,
         )
@@ -271,8 +285,10 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
         cluster_alias=runtime_snapshot.cluster_alias,
         extra_limitations=limitations,
     )
+    scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
     return maybe_run_bounded_node_scout(
         step,
+        scout_context=scout_context,
         baseline_artifact=baseline_artifact,
         kubernetes_mcp_client=_kubernetes_mcp_client,
     )

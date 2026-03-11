@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from .models import EvidenceBundle, InvestigationTarget, StepArtifact
+from .models import AdequacyOutcome, EvidenceBundle, InvestigationTarget, StepArtifact
 
 TARGET_EVIDENCE_STEP_ID = "collect-target-evidence"
 NO_CRITICAL_SIGNALS_TITLE = "No Critical Signals Found"
@@ -23,12 +23,12 @@ _ADEQUACY_RANKS = {
 
 @dataclass(frozen=True)
 class EvidenceAdequacyAssessment:
-    outcome: Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"]
+    outcome: AdequacyOutcome
     reasons: tuple[str, ...] = ()
     evaluated_step_id: str | None = None
 
 
-def adequacy_rank(outcome: Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"]) -> int:
+def adequacy_rank(outcome: AdequacyOutcome) -> int:
     return _ADEQUACY_RANKS[outcome]
 
 
@@ -299,3 +299,31 @@ def assess_target_evidence_adequacy(
         reasons=assessment.reasons,
         evaluated_step_id=artifact.step_id,
     )
+
+
+def assess_bundle_for_capability(
+    capability: str | None,
+    *,
+    bundle: EvidenceBundle | None,
+) -> EvidenceAdequacyAssessment:
+    if capability == "workload_evidence_plane":
+        return assess_workload_evidence_bundle(bundle=bundle)
+    if capability == "service_evidence_plane":
+        return assess_service_evidence_bundle(bundle=bundle)
+    if capability == "node_evidence_plane":
+        return assess_node_evidence_bundle(bundle=bundle)
+    return EvidenceAdequacyAssessment(outcome="not_applicable")
+
+
+def bundle_improves_for_capability(
+    capability: str | None,
+    baseline: EvidenceBundle | None,
+    candidate: EvidenceBundle | None,
+) -> bool:
+    if capability == "workload_evidence_plane":
+        return workload_bundle_improves(baseline, candidate)
+    if capability == "service_evidence_plane":
+        return service_bundle_improves(baseline, candidate)
+    if capability == "node_evidence_plane":
+        return node_bundle_improves(baseline, candidate)
+    return False

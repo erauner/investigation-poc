@@ -1,11 +1,10 @@
 from investigation_service.adequacy import (
     EvidenceAdequacyAssessment,
-    assess_workload_evidence_bundle,
+    assess_bundle_for_capability,
     assessment_improves,
-    is_scout_candidate,
-    workload_bundle_improves,
+    bundle_improves_for_capability,
 )
-from investigation_service.execution_policy import bounded_exploration_policy_for_capability
+from investigation_service.exploration import ExploratoryScoutContext, build_exploratory_scout_context
 from investigation_service.models import ActualRoute, EvidenceStepContract, SubmittedStepArtifact
 from investigation_service.submission_materialization import materialize_workload_submission
 
@@ -45,46 +44,46 @@ def materialize_workload_snapshot(
 
 
 def assess_materialized_workload_submission(artifact: SubmittedStepArtifact) -> EvidenceAdequacyAssessment:
-    return assess_workload_evidence_bundle(bundle=artifact.evidence_bundle)
+    return assess_bundle_for_capability("workload_evidence_plane", bundle=artifact.evidence_bundle)
 
 
 def _scout_context(
-    step: EvidenceStepContract,
+    scout_context: ExploratoryScoutContext | None,
     *,
     baseline_snapshot: WorkloadRuntimeSnapshot,
-    baseline_artifact: SubmittedStepArtifact,
 ) -> tuple[EvidenceAdequacyAssessment, str] | None:
-    policy = bounded_exploration_policy_for_capability(step.requested_capability)
-    if policy is None or not policy.enabled or policy.max_additional_pods < 1 or policy.max_additional_probe_runs < 1:
+    if scout_context is None:
+        return None
+    policy = scout_context.policy
+    if policy.max_additional_pods < 1 or policy.max_additional_probe_runs < 1:
+        return None
+    if "alternate_runtime_pod" not in policy.probe_kinds:
         return None
     if baseline_snapshot.target.kind not in {"deployment", "statefulset"}:
         return None
     if not baseline_snapshot.runtime_pod_name:
         return None
-    baseline_assessment = assess_materialized_workload_submission(baseline_artifact)
-    if not is_scout_candidate(baseline_assessment):
-        return None
-    return baseline_assessment, baseline_snapshot.runtime_pod_name
+    return scout_context.baseline_assessment, baseline_snapshot.runtime_pod_name
 
 
 def maybe_plan_workload_exploration_review(
     step: EvidenceStepContract,
     *,
     batch_id: str,
+    scout_context: ExploratoryScoutContext | None,
     baseline_snapshot: WorkloadRuntimeSnapshot,
     baseline_artifact: SubmittedStepArtifact,
 ) -> PendingExplorationReview | None:
-    scout_context = _scout_context(
-        step,
+    review_context = _scout_context(
+        scout_context,
         baseline_snapshot=baseline_snapshot,
-        baseline_artifact=baseline_artifact,
     )
-    if scout_context is None:
+    if review_context is None or scout_context is None:
         return None
-    policy = bounded_exploration_policy_for_capability(step.requested_capability)
-    if policy is None or not policy.human_review_enabled:
+    policy = scout_context.policy
+    if not policy.human_review_enabled:
         return None
-    baseline_assessment, runtime_pod_name = scout_context
+    baseline_assessment, runtime_pod_name = review_context
     if baseline_assessment.outcome not in policy.human_review_outcomes:
         return None
     target = step.execution_inputs.target or baseline_snapshot.target.name
@@ -139,6 +138,26 @@ def execute_workload_exploration_review(
         raise ValueError("approved workload exploration review is required before executing scout")
 
     baseline_artifact = review.baseline_artifact
+    scout_context = build_exploratory_scout_context(step=review.step, artifact=baseline_artifact)
+    if scout_context is None:
+        if baseline_artifact.evidence_bundle is None:
+            return baseline_artifact
+        return baseline_artifact.model_copy(
+            update={
+                "evidence_bundle": baseline_artifact.evidence_bundle.model_copy(
+                    update={
+                        "limitations": sorted(
+                            set(
+                                [
+                                    *baseline_artifact.evidence_bundle.limitations,
+                                    "approved workload scout was skipped because the review context was no longer applicable",
+                                ]
+                            )
+                        )
+                    }
+                )
+            }
+        )
     try:
         scout_snapshot = kubernetes_mcp_client.collect_workload_runtime(
             review.step.execution_inputs,
@@ -156,9 +175,10 @@ def execute_workload_exploration_review(
         scout_snapshot,
         attempted_routes=[baseline_artifact.actual_route, *baseline_artifact.attempted_routes],
     )
-    baseline_assessment = assess_materialized_workload_submission(baseline_artifact)
+    baseline_assessment = scout_context.baseline_assessment
     scout_assessment = assess_materialized_workload_submission(scout_artifact)
-    if assessment_improves(baseline_assessment, scout_assessment) or workload_bundle_improves(
+    if assessment_improves(baseline_assessment, scout_assessment) or bundle_improves_for_capability(
+        "workload_evidence_plane",
         baseline_artifact.evidence_bundle,
         scout_artifact.evidence_bundle,
     ):
@@ -195,18 +215,18 @@ def skip_workload_exploration_review(review: PendingExplorationReview) -> Submit
 def maybe_run_bounded_workload_scout(
     step: EvidenceStepContract,
     *,
+    scout_context: ExploratoryScoutContext | None,
     baseline_snapshot: WorkloadRuntimeSnapshot,
     baseline_artifact: SubmittedStepArtifact,
     kubernetes_mcp_client: KubernetesMcpClient,
 ) -> SubmittedStepArtifact:
-    scout_context = _scout_context(
-        step,
+    review_context = _scout_context(
+        scout_context,
         baseline_snapshot=baseline_snapshot,
-        baseline_artifact=baseline_artifact,
     )
-    if scout_context is None:
+    if review_context is None:
         return baseline_artifact
-    baseline_assessment, runtime_pod_name = scout_context
+    baseline_assessment, runtime_pod_name = review_context
     return execute_workload_exploration_review(
         PendingExplorationReview(
             batch_id="auto",
