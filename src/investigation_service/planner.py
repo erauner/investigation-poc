@@ -752,7 +752,10 @@ def submit_evidence_step_artifacts(req: SubmitEvidenceArtifactsRequest) -> Submi
         artifacts,
         note=f"reconciled externally submitted evidence for {batch.id}",
     )
-    updated_plan = update_investigation_plan(UpdateInvestigationPlanRequest(plan=req.plan, execution=execution))
+    updated_plan = _update_investigation_plan(
+        UpdateInvestigationPlanRequest(plan=req.plan, execution=execution),
+        exploration_outcomes=req.exploration_outcomes,
+    )
     return SubmittedEvidenceReconciliationResult(execution=execution, updated_plan=updated_plan)
 
 

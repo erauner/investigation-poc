@@ -452,8 +452,8 @@ def apply_pending_exploration_review(review: PendingExplorationReview) -> Applie
     raise ValueError("exploration review decision must be applied before execution")
 
 
-def run_required_external_steps(active_batch: ActiveEvidenceBatchContract) -> list[SubmittedStepArtifact]:
+def run_required_external_steps(active_batch: ActiveEvidenceBatchContract) -> ExternalStepCollectionResult:
     result = collect_external_steps(active_batch, allow_exploration_review=False)
     if result.pending_exploration_review is not None:
         raise ValueError("unexpected pending exploration review without review-enabled collection")
-    return result.submitted_steps
+    return result

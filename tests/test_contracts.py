@@ -526,6 +526,69 @@ def test_submit_evidence_step_artifacts_route_returns_execution_and_updated_plan
     assert body["updated_plan"]["active_batch_id"] == "batch-1"
 
 
+def test_submit_evidence_step_artifacts_route_accepts_exploration_outcomes(monkeypatch) -> None:
+    def fake_submit(_req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
+        assert _req.exploration_outcomes == [
+            ExplorationOutcome(
+                step_id="collect-target-evidence",
+                capability="service_evidence_plane",
+                intent="evidence_expansion",
+                outcome="evidence_delta",
+                probe_kind="service_range_metrics",
+                notes=["probe_improved_artifact"],
+            )
+        ]
+        return SubmittedEvidenceReconciliationResult(
+            execution=EvidenceBatchExecution(
+                batch_id="batch-1",
+                executed_step_ids=["collect-target-evidence"],
+                artifacts=[],
+                execution_notes=["reconciled externally submitted evidence for batch-1"],
+            ),
+            updated_plan=InvestigationPlan(
+                mode="targeted_rca",
+                objective="Investigate service/api",
+                target=None,
+                steps=[],
+                evidence_batches=[],
+                active_batch_id=None,
+                planning_notes=[],
+            ),
+        )
+
+    monkeypatch.setattr("investigation_service.main.submit_evidence_step_artifacts_from_request", fake_submit)
+    client = TestClient(app)
+
+    response = client.post(
+        "/tools/submit_evidence_step_artifacts",
+        json={
+            "plan": {
+                "mode": "targeted_rca",
+                "objective": "Investigate service/api",
+                "target": None,
+                "steps": [],
+                "evidence_batches": [],
+                "active_batch_id": "batch-1",
+                "planning_notes": [],
+            },
+            "incident": {"namespace": "default", "target": "service/api", "profile": "service"},
+            "submitted_steps": [],
+            "exploration_outcomes": [
+                {
+                    "step_id": "collect-target-evidence",
+                    "capability": "service_evidence_plane",
+                    "intent": "evidence_expansion",
+                    "outcome": "evidence_delta",
+                    "probe_kind": "service_range_metrics",
+                    "notes": ["probe_improved_artifact"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+
+
 def test_submit_evidence_step_artifacts_route_rejects_metadata_only_service_submission(monkeypatch) -> None:
     def fake_submit(_req: SubmitEvidenceArtifactsRequest) -> SubmittedEvidenceReconciliationResult:
         assert isinstance(_req.submitted_steps[0], SubmittedStepArtifact)

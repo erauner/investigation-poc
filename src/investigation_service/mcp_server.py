@@ -191,6 +191,7 @@ def submit_evidence_step_artifacts(
     plan: dict,
     incident: dict,
     submitted_steps: list[dict],
+    exploration_outcomes: list[dict] | None = None,
     batch_id: str | None = None,
 ) -> dict:
     """Submit externally gathered artifacts for externally satisfiable pending steps and reconcile them into the planner-owned control plane.
@@ -199,6 +200,7 @@ def submit_evidence_step_artifacts(
     - plan=<the full build_investigation_plan result or updated plan>
     - incident=<the same request shape used to build the plan>
     - submitted_steps=<typed artifacts for externally satisfiable pending steps from get_active_evidence_batch>
+    - exploration_outcomes=<optional scout outcomes paired with this reconciliation>
     - batch_id=<optional explicit batch id>
 
     Constraints:
@@ -214,6 +216,7 @@ def submit_evidence_step_artifacts(
             "plan": plan,
             "incident": incident,
             "submitted_steps": submitted_steps,
+            "exploration_outcomes": exploration_outcomes or [],
             "batch_id": batch_id,
         },
         lambda: submit_evidence_step_artifacts_impl(
@@ -222,6 +225,7 @@ def submit_evidence_step_artifacts(
                 incident=incident,
                 batch_id=batch_id,
                 submitted_steps=submitted_steps,
+                exploration_outcomes=exploration_outcomes or [],
             )
         ).model_dump(mode="json")
     )

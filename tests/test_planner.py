@@ -1,5 +1,6 @@
 import pytest
 
+import investigation_service.planner as planner_module
 from investigation_service.models import (
     ActualRoute,
     BuildInvestigationPlanRequest,
@@ -9,6 +10,7 @@ from investigation_service.models import (
     EvidenceBatchExecution,
     EvidenceBundle,
     ExecuteInvestigationStepRequest,
+    ExplorationOutcome,
     Finding,
     InvestigationPlan,
     InvestigationReportRequest,
@@ -986,6 +988,72 @@ def test_submit_evidence_step_artifacts_rejects_control_plane_only_steps() -> No
                 ],
             )
         )
+
+
+def test_submit_evidence_step_artifacts_forwards_exploration_outcomes_into_plan_update(monkeypatch) -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api", service_name="api"),
+        _deps([]),
+    )
+    captured: dict[str, object] = {}
+    original_update = planner_module._update_investigation_plan
+
+    def fake_update(req, *, exploration_outcomes):
+        captured["request"] = req
+        captured["exploration_outcomes"] = exploration_outcomes
+        return original_update(req, exploration_outcomes=exploration_outcomes)
+
+    monkeypatch.setattr(planner_module, "_update_investigation_plan", fake_update)
+
+    submit_evidence_step_artifacts(
+        SubmitEvidenceArtifactsRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api", service_name="api"),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(
+                        findings=[
+                            Finding(
+                                severity="info",
+                                source="heuristic",
+                                title="No Critical Signals Found",
+                                evidence="nothing decisive",
+                            )
+                        ]
+                    ),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="kubernetes-mcp-server",
+                        tool_name="resources_get",
+                        tool_path=["kubernetes-mcp-server", "resources_get"],
+                    ),
+                )
+            ],
+            exploration_outcomes=[
+                ExplorationOutcome(
+                    step_id="collect-target-evidence",
+                    capability="service_evidence_plane",
+                    intent="evidence_expansion",
+                    outcome="evidence_delta",
+                    probe_kind="service_range_metrics",
+                    notes=["probe_improved_artifact"],
+                )
+            ],
+        )
+    )
+
+    assert captured["request"].execution.batch_id == "batch-1"
+    assert captured["exploration_outcomes"] == [
+        ExplorationOutcome(
+            step_id="collect-target-evidence",
+            capability="service_evidence_plane",
+            intent="evidence_expansion",
+            outcome="evidence_delta",
+            probe_kind="service_range_metrics",
+            notes=["probe_improved_artifact"],
+        )
+    ]
 
 
 def test_advance_active_evidence_batch_preserves_service_follow_up_insertion() -> None:

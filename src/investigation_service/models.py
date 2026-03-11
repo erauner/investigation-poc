@@ -406,6 +406,7 @@ class SubmitEvidenceArtifactsRequest(BaseModel):
     incident: BuildInvestigationPlanRequest
     batch_id: str | None = None
     submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
+    exploration_outcomes: list[ExplorationOutcome] = Field(default_factory=list)
 
 
 class SubmittedEvidenceReconciliationResult(BaseModel):

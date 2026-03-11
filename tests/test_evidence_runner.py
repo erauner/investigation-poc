@@ -31,6 +31,7 @@ from investigation_service.k8s_adapter import pick_runtime_pod_for_workload
 from investigation_service.models import (
     ActiveEvidenceBatchContract,
     EvidenceStepContract,
+    ExplorationOutcome,
     InvestigationSubject,
     InvestigationTarget,
     StepExecutionInputs,
@@ -2016,6 +2017,37 @@ def test_external_steps_still_require_non_workload_submission(monkeypatch) -> No
         assert "did not materialize an artifact" in str(exc)
     else:
         raise AssertionError("expected non-workload external steps to still require a submission")
+
+
+def test_run_required_external_steps_preserves_exploration_outcomes(monkeypatch) -> None:
+    step = _service_step()
+    active_batch = type("ActiveBatchStub", (), {"steps": [step]})()
+    outcome = ExplorationOutcome(
+        step_id=step.step_id,
+        capability=step.requested_capability,
+        intent="evidence_expansion",
+        outcome="no_useful_change",
+        probe_kind="service_range_metrics",
+        notes=["probe_not_improving"],
+    )
+    artifact = evidence_runner.materialize_attempt_only_submission(
+        step,
+        actual_route=evidence_runner._planned_peer_route(step),
+        limitations=["prometheus peer failed: prom down"],
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "collect_external_steps",
+        lambda _active_batch, allow_exploration_review=False: evidence_runner.ExternalStepCollectionResult(
+            submitted_steps=[artifact],
+            exploration_outcomes=(outcome,),
+        ),
+    )
+
+    result = evidence_runner.run_required_external_steps(active_batch)
+
+    assert result.submitted_steps == [artifact]
+    assert result.exploration_outcomes == (outcome,)
 
 
 def test_node_peer_prometheus_routing_allows_default_cluster_with_prometheus_url() -> None:
