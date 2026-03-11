@@ -292,6 +292,7 @@ Candidates:
 Important rule:
 - preserve public surfaces where useful
 - do not preserve internal helper lineage for its own sake
+- when a helper exists only to preserve eager exact-target collapse or duplicate pre-planner-seed behavior, the default action is to remove it or fold it behind the new seam rather than retain it as legacy structure
 
 ### Phase 7: Reevaluate Multi-Target Planning Later
 
@@ -465,3 +466,8 @@ Keep this document updated whenever one of these becomes true:
 - a scout path starts influencing execution focus
 
 If code and ADRs appear to disagree, reconcile toward the ADRs unless there is a deliberate new decision recorded in docs.
+
+Migration hygiene rule:
+
+- in every implementation plan and follow-up PR, treat obsolete eager-collapse helpers as removal-or-repurpose candidates by default
+- do not preserve duplicate internal paths as legacy compatibility unless they still protect a public contract that is intentionally being kept stable
