@@ -184,10 +184,14 @@ def _normalize_loki_logs(raw: Any) -> str:
             value = raw.get(key)
             if isinstance(value, str):
                 return value.strip()
+        if "values" in raw and isinstance(raw["values"], list):
+            return _normalize_loki_logs(raw["values"])
         for key in ("lines", "entries", "items", "result"):
             value = raw.get(key)
             if value is not None:
                 return _normalize_loki_logs(value)
+        if "streams" in raw:
+            return _normalize_loki_logs(raw["streams"])
         if "data" in raw:
             return _normalize_loki_logs(raw["data"])
         for key in ("message", "line"):
@@ -195,6 +199,8 @@ def _normalize_loki_logs(raw: Any) -> str:
             if isinstance(value, str):
                 return value.strip()
     if isinstance(raw, list):
+        if len(raw) == 2 and not isinstance(raw[0], (list, dict)) and isinstance(raw[1], str):
+            return raw[1].strip()
         lines: list[str] = []
         for item in raw:
             normalized = _normalize_loki_logs(item)
@@ -202,6 +208,35 @@ def _normalize_loki_logs(raw: Any) -> str:
                 lines.append(normalized)
         return "\n".join(lines).strip()
     return str(raw).strip()
+
+
+def _format_loki_window(minutes: int | None) -> str:
+    lookback_minutes = max(minutes or 15, 1)
+    return f"{lookback_minutes}m"
+
+
+def _build_workload_loki_query(target: TargetRef, runtime_pod_name: str) -> str:
+    return f'{{namespace="{target.namespace}",pod="{runtime_pod_name}"}}'
+
+
+def _service_loki_pod_candidates(object_state: dict[str, Any] | None, *, max_pods: int = 5) -> tuple[str, ...]:
+    matched_pods = (object_state or {}).get("matchedPods") or []
+    names = sorted(
+        {
+            str(item.get("name")).strip()
+            for item in matched_pods
+            if isinstance(item, dict) and isinstance(item.get("name"), str) and item.get("name").strip()
+        }
+    )
+    return tuple(names[:max_pods])
+
+
+def _build_service_loki_query(target: TargetRef, object_state: dict[str, Any] | None = None) -> str:
+    pod_candidates = _service_loki_pod_candidates(object_state)
+    if pod_candidates:
+        escaped = "|".join(re.escape(name) for name in pod_candidates)
+        return f'{{namespace="{target.namespace}",pod=~"{escaped}"}}'
+    return f'{{namespace="{target.namespace}"}} |= "{target.name}"'
 
 
 def _normalize_metric_value(raw: Any) -> float | None:
@@ -1128,14 +1163,10 @@ class LokiMcpClient:
                     await session.initialize()
                     raw = await self._call_tool(
                         session,
-                        "query_logs",
+                        "loki_query",
                         {
-                            "scope": "workload",
-                            "namespace": target.namespace,
-                            "target_kind": target.kind,
-                            "target_name": target.name,
-                            "pod_name": runtime_pod_name,
-                            "lookback_minutes": inputs.lookback_minutes or 15,
+                            "query": _build_workload_loki_query(target, runtime_pod_name or target.name),
+                            "start": _format_loki_window(inputs.lookback_minutes),
                             "limit": get_log_tail_lines(),
                         },
                     )
@@ -1143,7 +1174,7 @@ class LokiMcpClient:
                         cluster_alias=cluster.alias,
                         target=target,
                         log_excerpt=_normalize_loki_logs(raw),
-                        tool_path=["loki-mcp-server", "query_logs"],
+                        tool_path=["loki-mcp-server", "loki_query"],
                     )
 
     async def _collect_service_async(
@@ -1151,6 +1182,7 @@ class LokiMcpClient:
         inputs: StepExecutionInputs,
         *,
         target: TargetRef,
+        object_state: dict[str, Any] | None = None,
     ) -> LokiLogsSnapshot:
         if not self.url:
             raise PeerMcpError("loki peer transport is not configured")
@@ -1170,12 +1202,10 @@ class LokiMcpClient:
                     await session.initialize()
                     raw = await self._call_tool(
                         session,
-                        "query_logs",
+                        "loki_query",
                         {
-                            "scope": "service",
-                            "namespace": target.namespace,
-                            "service_name": target.name,
-                            "lookback_minutes": inputs.lookback_minutes or 15,
+                            "query": _build_service_loki_query(target, object_state),
+                            "start": _format_loki_window(inputs.lookback_minutes),
                             "limit": get_log_tail_lines(),
                         },
                     )
@@ -1183,7 +1213,7 @@ class LokiMcpClient:
                         cluster_alias=cluster.alias,
                         target=target,
                         log_excerpt=_normalize_loki_logs(raw),
-                        tool_path=["loki-mcp-server", "query_logs"],
+                        tool_path=["loki-mcp-server", "loki_query"],
                     )
 
     def collect_workload_logs(
@@ -1244,6 +1274,7 @@ class LokiMcpClient:
         inputs: StepExecutionInputs,
         *,
         target: TargetRef,
+        object_state: dict[str, Any] | None = None,
     ) -> LokiLogsSnapshot:
         try:
             asyncio.get_running_loop()
@@ -1262,6 +1293,7 @@ class LokiMcpClient:
                         lambda: self._collect_service_async(
                             inputs,
                             target=target,
+                            object_state=object_state,
                         )
                     )
                 except Exception as exc:  # pragma: no cover
@@ -1282,6 +1314,7 @@ class LokiMcpClient:
                 lambda: self._collect_service_async(
                     inputs,
                     target=target,
+                    object_state=object_state,
                 )
             )
         except PeerMcpError:

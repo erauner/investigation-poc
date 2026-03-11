@@ -158,6 +158,7 @@ def _augment_submission_with_optional_loki_logs(
             loki_snapshot = _loki_mcp_client.collect_service_logs(
                 step.execution_inputs,
                 target=bundle.target,
+                object_state=bundle.object_state,
             )
     except PeerMcpError:
         return artifact.model_copy(

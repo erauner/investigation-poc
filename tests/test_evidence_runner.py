@@ -816,7 +816,7 @@ def test_workload_external_step_augments_logs_with_loki_without_changing_actual_
                     cluster_alias="erauner-home",
                     target=target,
                     log_excerpt="exception: dependency unavailable",
-                    tool_path=["loki-mcp-server", "query_logs"],
+                    tool_path=["loki-mcp-server", "loki_query"],
                 ),
             },
         )(),
@@ -881,11 +881,11 @@ def test_service_external_step_augments_with_loki_logs_without_changing_metrics_
             (),
             {
                 "is_configured": lambda _self: True,
-                "collect_service_logs": lambda _self, _inputs, target: LokiLogsSnapshot(
+                "collect_service_logs": lambda _self, _inputs, target, object_state=None: LokiLogsSnapshot(
                     cluster_alias="erauner-home",
                     target=target,
                     log_excerpt="error: upstream returned 500",
-                    tool_path=["loki-mcp-server", "query_logs"],
+                    tool_path=["loki-mcp-server", "loki_query"],
                 ),
             },
         )(),
@@ -951,7 +951,7 @@ def test_service_external_step_records_loki_failure_as_attempt_only(monkeypatch)
             (),
             {
                 "is_configured": lambda _self: True,
-                "collect_service_logs": lambda _self, _inputs, target: (_ for _ in ()).throw(
+                "collect_service_logs": lambda _self, _inputs, target, object_state=None: (_ for _ in ()).throw(
                     PeerMcpError("loki down")
                 ),
             },
