@@ -335,6 +335,72 @@ The system should remain able to say, plainly:
 - bounded execution focus
 - why the narrowing changed
 
+## Clarification As A Bounded Ambiguity Outcome
+
+Some requests will remain too vague even after subject normalization and one planner-seed narrowing attempt.
+In those cases, requesting clarification from the user is an allowed bounded outcome.
+
+Clarification should be treated as:
+
+- a last-resort ambiguity outcome
+- downstream of deterministic ingress normalization
+- downstream of planner-seed derivation
+- a guard rail against fake certainty
+
+Clarification should not be the default response when the system could still:
+
+- deterministically narrow safely
+- proceed with bounded ambiguity
+- or use an already-approved bounded narrowing seam
+
+The intended rule is:
+
+- narrow automatically when the system can do so safely
+- ask only when the ambiguity is decision-relevant, not cheaply resolvable, and still blocks safe bounded commitment
+
+Illustratively, planner-seed derivation may end in:
+
+- `ready`
+  - a bounded execution focus is justified
+- `needs_deterministic_narrowing`
+  - one small planner-owned narrowing step may still resolve the focus
+- `bounded_ambiguity`
+  - the system should preserve uncertainty honestly
+- `needs_clarification`
+  - proceeding would likely investigate the wrong subject or scope
+
+This ADR does not require clarification to be implemented as a resumable in-graph interrupt.
+The highest-value first step is a terminal clarification outcome that returns:
+
+- one short clarification question
+- the ambiguity class
+- the already-understood scope or candidate subjects when helpful
+
+Later, if real usage justifies it, clarification may evolve into:
+
+- resumable user-input checkpoints
+- explicit pending-user-input runtime state
+- or richer multi-turn clarification workflows
+
+Those are separate implementation decisions, not part of the current ingress/planner-seed boundary change.
+
+Small practical examples:
+
+- input
+  - `newmetrics is broken in jed1`
+- likely result
+  - deterministic narrowing first, because cluster is known and namespace/resource matching may still be cheap
+
+- input
+  - `prod is broken after a deploy`
+- likely result
+  - bounded ambiguity or clarification, because scope and subject are too vague for safe commitment
+
+- input
+  - `newmetrics or stc1-stceei may be failing in tenant-120330-prod`
+- likely result
+  - clarification if deterministic narrowing cannot justify which bounded execution focus should be chosen first
+
 ## Primary Subject Versus Related Resources
 
 The correct near-term model is:
@@ -513,12 +579,107 @@ The recommended sequence is:
 
 - planner and bounded scouts may consume related-resource context as hints
 - exact execution-target collapse may move from ingress into planner-seed derivation or bounded evidence kickoff where needed
+- clarification may appear as a bounded terminal ambiguity outcome when deterministic narrowing still cannot safely choose a bounded execution focus
 
 ### Stage 3
 
 - only later, if it clearly pays off, add true family-scoped or grouped-target planning modes
 
 This keeps the semantic blast radius small while simplifying the public surface early.
+
+## End-State Walkthroughs
+
+These examples are illustrative, not strict wire formats.
+They show the intended stage boundaries and what each stage should own.
+
+### Example 1: Clean direct target
+
+Input:
+
+- `Investigate statefulset/newmetrics-db in namespace tenant-120330-prod on cluster jed1`
+
+Expected flow:
+
+1. ingress
+   - resolves scope: `jed1`, `tenant-120330-prod`
+   - extracts one subject candidate: `statefulset/newmetrics-db`
+   - sets the same subject as the soft primary focus
+2. planner-seed derivation
+   - trivially preserves that subject as the bounded execution focus
+   - produces execution target `statefulset/newmetrics-db`
+3. planner/runtime
+   - builds the normal single-focus workload investigation
+4. reporting
+   - requested subject, soft primary focus, and bounded execution focus all remain the same
+
+### Example 2: Mixed alert/freeform request
+
+Input:
+
+- `EnvoyHighErrorRate is firing for stc1-stceei in tenant-120330-prod on jed1, maybe backend issue, maybe service issue`
+
+Expected flow:
+
+1. ingress
+   - resolves scope: `jed1`, `tenant-120330-prod`
+   - preserves an alert-like signal plus candidate subjects such as:
+     - `express_cluster/stc1-stceei`
+     - `service/stc1-stceei`
+   - chooses a soft primary focus if justified, but does not force an exact workload target yet
+2. planner-seed derivation
+   - decides whether a bounded execution focus is already obvious
+   - if not, performs one deterministic narrowing step first
+   - only later falls back to a bounded scout if deterministic narrowing is insufficient
+3. planner/runtime
+   - may begin from `service/stc1-stceei`
+   - later preserve divergence if evidence justifies narrowing to `backend/stc1-stceei-be`
+4. reporting
+   - must preserve:
+     - requested semantic focus
+     - soft primary focus
+     - bounded execution focus
+     - why the focus changed
+
+### Example 3: Mixed request with dependency context
+
+Input:
+
+- `newmetrics is failing in tenant-120330-prod on jed1, maybe db too, and shared-cache in platform-services might be involved`
+
+Expected flow:
+
+1. ingress
+   - resolves dominant scope: `jed1`, `tenant-120330-prod`
+   - sets soft primary focus to something like `express_cluster/newmetrics`
+   - preserves related subjects such as:
+     - `statefulset/newmetrics-db` with relation `dependency`
+     - `service/shared-cache` in namespace `platform-services` with relation `dependency`
+2. planner-seed derivation
+   - chooses one bounded execution focus for now, such as `backend/newmetrics-be`
+   - keeps DB and cross-namespace cache context as related subjects, not co-equal execution seeds
+3. runtime
+   - starts from the tenant-scoped execution focus
+   - only inspects the external dependency if policy and later evidence justify it
+4. reporting
+   - states clearly which related subjects were merely preserved as context versus which ones materially contributed evidence
+
+### Example 4: Vague input
+
+Input:
+
+- `something is wrong with newmetrics in jed1`
+
+Expected flow:
+
+1. ingress
+   - resolves cluster `jed1`
+   - may still leave namespace unresolved
+   - preserves low-confidence candidate subjects rather than pretending the exact target is known
+2. planner-seed derivation
+   - tries one deterministic narrowing step first, such as namespace/resource matching
+3. outcome
+   - if one bounded execution focus becomes justified, proceed normally
+   - if ambiguity remains material, return bounded ambiguity or clarification instead of fabricating certainty
 
 ## Namespace And Express Semantics
 
@@ -656,6 +817,7 @@ This ADR does not decide:
 - whether multi-target planning should be added soon
 - exact family/group planning modes
 - exact UI or report rendering for related-resource context
+- the exact future resume/checkpoint protocol for clarification turns
 
 The narrower decision is:
 
