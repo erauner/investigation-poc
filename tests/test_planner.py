@@ -272,6 +272,49 @@ def test_build_investigation_plan_uses_question_ingress_to_resolve_target() -> N
     assert calls == []
 
 
+def test_build_investigation_plan_reraises_question_scope_errors_for_target_like_input() -> None:
+    deps = _deps([])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "resolve_cluster": lambda cluster: (_ for _ in ()).throw(ValueError(f"unknown cluster alias: {cluster}")),
+        }
+    )
+
+    with pytest.raises(ValueError, match="unknown cluster alias: typoed-cluster"):
+        build_investigation_plan(
+            BuildInvestigationPlanRequest(
+                question="Investigate pod/api in namespace default in cluster typoed-cluster",
+            ),
+            deps,
+        )
+
+
+def test_resolve_primary_target_normalizes_question_cluster_text_via_cluster_registry() -> None:
+    deps = _deps([])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "resolve_cluster": lambda cluster: type(
+                "ResolvedCluster",
+                (),
+                {"alias": "current-context", "source": "legacy_current_context"},
+            )(),
+        }
+    )
+
+    target = resolve_primary_target(
+        InvestigationReportRequest(
+            namespace="default",
+            question="Investigate pod/api in namespace default in cluster current-context",
+        ),
+        deps,
+    )
+
+    assert target.cluster is None
+    assert target.target == "pod/api"
+
+
 def test_execute_investigation_step_runs_single_targeted_evidence_batch() -> None:
     calls: list[str] = []
     plan = build_investigation_plan(

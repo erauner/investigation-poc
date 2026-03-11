@@ -9,7 +9,7 @@ from investigation_service.reporting import resolve_primary_target
 from investigation_service.settings import get_default_lookback_minutes
 
 _RESOURCE_PATTERN = re.compile(
-    r"(?P<kind>pod|deployment|statefulset|daemonset|job|service|backend|frontend|cluster|node)/(?P<name>[a-z0-9][a-z0-9-]*)",
+    r"(?P<kind>pod|deployment|statefulset|service|backend|frontend|cluster|node)/(?P<name>[a-z0-9][a-z0-9-]*)",
     re.IGNORECASE,
 )
 _NAMESPACE_PATTERN = re.compile(r"\bnamespace\s+(?P<namespace>[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)

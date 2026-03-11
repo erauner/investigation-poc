@@ -229,7 +229,8 @@ def _resolve_scope(
         notes.append(f"cluster resolved from explicit: {scope.cluster}")
     elif field_values.get("cluster") or _match_group(_IN_CLUSTER_PATTERN, req.raw_text or req.question or "", "cluster"):
         cluster_value = field_values.get("cluster") or _match_group(_IN_CLUSTER_PATTERN, req.raw_text or req.question or "", "cluster")
-        scope.cluster = cluster_value
+        resolved_cluster = _resolve_cluster(deps, cluster_value, req.labels)
+        scope.cluster = _resolved_cluster_value(resolved_cluster)
         scope.cluster_source = "question_text"
         notes.append(f"cluster resolved from text: {scope.cluster}")
     elif req.alertname:

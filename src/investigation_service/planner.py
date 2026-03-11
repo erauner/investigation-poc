@@ -141,8 +141,7 @@ def normalized_request(
     req: InvestigationReportRequest,
     deps: PlannerDeps,
 ) -> NormalizedInvestigationRequest:
-    ingress_req = ingress_request_from_report_request(req)
-    subject_set = normalize_ingress_request(ingress_req, _ingress_deps(deps))
+    subject_set = _normalized_subject_set(req, deps)
     return normalized_request_from_subject_set(subject_set, _ingress_deps(deps))
 
 
@@ -150,10 +149,18 @@ def resolve_primary_target(
     req: InvestigationReportRequest,
     deps: PlannerDeps,
 ) -> InvestigationTarget:
-    normalized = normalized_request(req, deps)
-    subject_set = normalize_ingress_request(ingress_request_from_report_request(req), _ingress_deps(deps))
+    subject_set = _normalized_subject_set(req, deps)
+    normalized = normalized_request_from_subject_set(subject_set, _ingress_deps(deps))
     requested_target = canonical_focus_ref(subject_set, req.target) or normalized.target
     return investigation_target_from_normalized(normalized, requested_target=requested_target)
+
+
+def _normalized_subject_set(
+    req: InvestigationReportRequest,
+    deps: PlannerDeps,
+):
+    ingress_req = ingress_request_from_report_request(req)
+    return normalize_ingress_request(ingress_req, _ingress_deps(deps))
 
 
 def resolve_vague_workload_target(
@@ -1456,8 +1463,9 @@ def build_investigation_plan(
     resolved_target: InvestigationTarget | None = None
     try:
         resolved_target = resolve_primary_target(report_req, deps)
-    except ValueError:
-        resolved_target = None
+    except ValueError as exc:
+        if str(exc) != "no canonical investigation subject could be resolved from ingress input":
+            raise
     mode = classify_investigation_mode(req, has_resolved_target=resolved_target is not None)
 
     if mode == "alert_rca":

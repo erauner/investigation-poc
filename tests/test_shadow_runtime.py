@@ -86,6 +86,20 @@ def test_parse_shadow_task_supports_direct_node_target(monkeypatch) -> None:
     assert request.profile == "workload"
 
 
+def test_parse_shadow_task_does_not_accept_unsupported_job_or_daemonset_targets(monkeypatch) -> None:
+    captured = {}
+
+    def _resolve(req):
+        captured["request"] = req
+        return _resolved_target(req=req, target="pod/fallback")
+
+    monkeypatch.setattr("investigation_shadow_runtime.host_adapter.resolve_primary_target", _resolve)
+
+    parse_shadow_task("Investigate job/backup-runner and daemonset/node-agent in namespace ops.")
+
+    assert captured["request"].target is None
+
+
 def test_format_shadow_report_uses_fixed_sections() -> None:
     report = InvestigationReport(
         cluster="erauner-home",
