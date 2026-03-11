@@ -4,6 +4,13 @@ from typing import Any
 
 from .adequacy import assess_target_evidence_adequacy
 from .execution_policy import policy_fields
+from .ingress import (
+    IngressDeps,
+    canonical_focus_ref,
+    ingress_request_from_report_request,
+    normalized_request_from_subject_set,
+    normalize_ingress_request,
+)
 from .models import (
     ActiveEvidenceBatchContract,
     ActualRoute,
@@ -82,13 +89,29 @@ class StepRuntimeSpec:
     external_submission_allowed: bool
 
 
+def _ingress_deps(deps: PlannerDeps) -> IngressDeps:
+    return IngressDeps(
+        canonical_target=deps.canonical_target,
+        scope_from_target=deps.scope_from_target,
+        resolve_cluster=deps.resolve_cluster,
+        get_backend_cr=deps.get_backend_cr,
+        get_frontend_cr=deps.get_frontend_cr,
+        get_cluster_cr=deps.get_cluster_cr,
+        find_unhealthy_pod=deps.find_unhealthy_pod,
+    )
+
+
 def classify_investigation_mode(
     req: BuildInvestigationPlanRequest | InvestigationReportRequest,
+    *,
+    has_resolved_target: bool = False,
 ) -> InvestigationMode:
     if req.alertname:
         return "alert_rca"
     if getattr(req, "objective", "auto") == "factual":
         return "factual_analysis"
+    if has_resolved_target:
+        return "targeted_rca"
     if getattr(req, "question", None) and not req.target:
         return "factual_analysis"
     return "targeted_rca"
@@ -118,47 +141,9 @@ def normalized_request(
     req: InvestigationReportRequest,
     deps: PlannerDeps,
 ) -> NormalizedInvestigationRequest:
-    if req.alertname:
-        return deps.normalize_alert_input(
-            CollectAlertContextRequest(
-                alertname=req.alertname,
-                labels=req.labels,
-                annotations=req.annotations,
-                cluster=req.cluster,
-                namespace=req.namespace,
-                node_name=req.node_name,
-                target=req.target,
-                profile=req.profile,
-                service_name=req.service_name,
-                lookback_minutes=req.lookback_minutes,
-            )
-        )
-
-    if not req.target:
-        raise ValueError("target is required when alertname is not supplied")
-
-    target = deps.canonical_target(req.target, req.profile, req.service_name)
-    scope = deps.scope_from_target(target, req.profile)
-    profile = req.profile
-    notes = ["target normalized from manual request"]
-    if scope == "service" and profile == "workload":
-        profile = "service"
-        notes.append("profile promoted to service based on target")
-    if req.cluster:
-        notes.append(f"cluster resolved from explicit: {req.cluster}")
-
-    return NormalizedInvestigationRequest(
-        source="manual",
-        scope=scope,
-        cluster=req.cluster,
-        namespace=req.namespace,
-        target=target,
-        node_name=target.split("/", 1)[1] if scope == "node" and "/" in target else None,
-        service_name=(req.service_name or target.split("/", 1)[1]) if scope == "service" and "/" in target else req.service_name,
-        profile=profile,
-        lookback_minutes=req.lookback_minutes,
-        normalization_notes=notes,
-    )
+    ingress_req = ingress_request_from_report_request(req)
+    subject_set = normalize_ingress_request(ingress_req, _ingress_deps(deps))
+    return normalized_request_from_subject_set(subject_set, _ingress_deps(deps))
 
 
 def resolve_primary_target(
@@ -166,11 +151,8 @@ def resolve_primary_target(
     deps: PlannerDeps,
 ) -> InvestigationTarget:
     normalized = normalized_request(req, deps)
-    requested_target = normalized.target
-    normalized = resolve_backend_convenience_target(normalized, deps)
-    normalized = resolve_frontend_convenience_target(normalized, deps)
-    normalized = resolve_cluster_convenience_target(normalized, deps)
-    normalized = resolve_vague_workload_target(normalized, deps)
+    subject_set = normalize_ingress_request(ingress_request_from_report_request(req), _ingress_deps(deps))
+    requested_target = canonical_focus_ref(subject_set, req.target) or normalized.target
     return investigation_target_from_normalized(normalized, requested_target=requested_target)
 
 
@@ -372,6 +354,7 @@ def _report_request_from_plan_request(req: BuildInvestigationPlanRequest) -> Inv
         cluster=req.cluster,
         namespace=req.namespace,
         target=req.target,
+        question=req.question,
         profile=req.profile,
         service_name=req.service_name,
         lookback_minutes=req.lookback_minutes,
@@ -1469,13 +1452,21 @@ def build_investigation_plan(
     req: BuildInvestigationPlanRequest,
     deps: PlannerDeps,
 ) -> InvestigationPlan:
-    mode = classify_investigation_mode(req)
     report_req = _report_request_from_plan_request(req)
+    resolved_target: InvestigationTarget | None = None
+    try:
+        resolved_target = resolve_primary_target(report_req, deps)
+    except ValueError:
+        resolved_target = None
+    mode = classify_investigation_mode(req, has_resolved_target=resolved_target is not None)
 
     if mode == "alert_rca":
-        return _alert_plan(req, resolve_primary_target(report_req, deps))
+        if resolved_target is None:
+            resolved_target = resolve_primary_target(report_req, deps)
+        return _alert_plan(req, resolved_target)
     if mode == "targeted_rca":
-        return _targeted_plan(req, resolve_primary_target(report_req, deps))
+        if resolved_target is None:
+            resolved_target = resolve_primary_target(report_req, deps)
+        return _targeted_plan(req, resolved_target)
 
-    factual_target = resolve_primary_target(report_req, deps) if req.target else None
-    return _factual_plan(req, factual_target)
+    return _factual_plan(req, resolved_target)

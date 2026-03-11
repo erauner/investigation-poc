@@ -2,6 +2,12 @@ import re
 
 from .analysis import derive_findings
 from .cluster_registry import resolve_cluster
+from .ingress import (
+    IngressDeps,
+    ingress_request_from_alert_request,
+    normalized_request_from_subject_set,
+    normalize_ingress_request,
+)
 from .k8s_adapter import (
     find_unhealthy_workloads as find_unhealthy_workloads_impl,
     get_k8s_object,
@@ -348,91 +354,26 @@ def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextReques
 
 
 def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestigationRequest:
-    labels = req.labels
-    annotations = req.annotations
-    cluster = resolve_cluster(req.cluster, labels)
-    notes: list[str] = [f"alertname={req.alertname}", f"cluster resolved from {cluster.source}: {cluster.alias}"]
-
-    target = req.target or (f"node/{req.node_name}" if req.node_name else None)
-    if target:
-        notes.append("target derived from explicit input")
-    if not target and req.service_name:
-        target = f"service/{req.service_name}"
-        notes.append("target derived from explicit service_name")
-    if not target:
-        text_target = _infer_target_from_text(
-            _first_non_empty(
-                _annotation_value(annotations, "summary", "description", "message"),
-                labels.get("summary"),
-            )
-        )
-        if text_target:
-            target = text_target
-            notes.append("target inferred from alert text")
-
-    namespace = _first_non_empty(
-        req.namespace,
-        _label_value(labels, "namespace", "kubernetes_namespace", "exported_namespace"),
+    ingress_req = ingress_request_from_alert_request(req)
+    deps = IngressDeps(
+        canonical_target=_canonical_target,
+        scope_from_target=_scope_from_target,
+        resolve_cluster=resolve_cluster,
+        get_backend_cr=lambda *args, **kwargs: {},
+        get_frontend_cr=lambda *args, **kwargs: {},
+        get_cluster_cr=lambda *args, **kwargs: {},
+        find_unhealthy_pod=find_unhealthy_pod,
     )
-    if namespace:
-        notes.append("namespace derived from explicit input or labels")
-
-    if not target:
-        pod_name = _label_value(labels, "pod", "pod_name", "kubernetes_pod_name")
-        deployment_name = _label_value(labels, "deployment", "deployment_name", "kubernetes_deployment_name")
-        statefulset_name = _label_value(labels, "statefulset", "statefulset_name", "kubernetes_statefulset_name")
-        daemonset_name = _label_value(labels, "daemonset", "daemonset_name", "kubernetes_daemonset_name")
-        service_name = _label_value(labels, "service", "service_name")
-        node_name = req.node_name or _label_value(labels, "node", "node_name", "kubernetes_node", "instance")
-        if pod_name:
-            target = f"pod/{pod_name}"
-            notes.append("target inferred from pod labels")
-        elif deployment_name:
-            target = f"deployment/{deployment_name}"
-            notes.append("target inferred from deployment labels")
-        elif statefulset_name:
-            target = f"statefulset/{statefulset_name}"
-            notes.append("target inferred from statefulset labels")
-        elif daemonset_name:
-            target = f"deployment/{daemonset_name}"
-            notes.append("target inferred from daemonset labels")
-        elif service_name:
-            target = f"service/{service_name}"
-            notes.append("target inferred from service labels")
-        elif node_name:
-            target = f"node/{node_name}"
-            notes.append("target inferred from node labels")
-    if not target:
-        raise ValueError("target could not be inferred from alert input")
-
-    service_name = _first_non_empty(
-        req.service_name,
-        _label_value(labels, "service", "service_name"),
-    )
-    node_name = req.node_name or _label_value(labels, "node", "node_name", "kubernetes_node", "instance")
-    profile = req.profile
-    if profile == "workload" and target.startswith("service/"):
-        profile = "service"
-        notes.append("profile promoted to service based on target")
-
-    scope = _scope_from_target(target, profile)
-    if scope == "node" and not node_name and target.startswith("node/"):
-        node_name = target.split("/", 1)[1]
-    if scope != "node" and not namespace:
-        raise ValueError("namespace could not be inferred from alert input")
-
-    return NormalizedInvestigationRequest(
-        source="alert",
-        scope=scope,
-        cluster=cluster.alias,
-        namespace=namespace,
-        target=target,
-        node_name=node_name if scope == "node" else None,
-        service_name=service_name if scope == "service" else None,
-        profile=profile,
-        lookback_minutes=req.lookback_minutes or get_default_lookback_minutes(),
-        normalization_notes=notes,
-    )
+    subject_set = normalize_ingress_request(ingress_req, deps)
+    try:
+        normalized = normalized_request_from_subject_set(subject_set, deps)
+    except ValueError as exc:
+        if "no canonical investigation subject could be resolved from ingress input" in str(exc):
+            raise ValueError("target could not be inferred from alert input") from exc
+        raise
+    if not normalized.lookback_minutes:
+        normalized = normalized.model_copy(update={"lookback_minutes": get_default_lookback_minutes()})
+    return normalized
 
 
 def collect_workload_evidence(req: CollectContextRequest) -> EvidenceBundle:

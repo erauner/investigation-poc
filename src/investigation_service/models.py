@@ -70,6 +70,75 @@ class InvestigationTarget(BaseModel):
     normalization_notes: list[str] = Field(default_factory=list)
 
 
+class InvestigationIngressRequest(BaseModel):
+    source: Literal["manual", "alert", "shadow", "api"] = "manual"
+    raw_text: str | None = Field(default=None, description="Optional raw ingress text prior to normalization")
+    question: str | None = Field(default=None, description="Optional free-form investigation text")
+    cluster: str | None = Field(default=None, description="Logical cluster alias")
+    namespace: str | None = Field(default=None, description="Namespace for namespaced subjects")
+    target: str | None = Field(default=None, description="Explicit target in kind/name form when provided")
+    explicit_refs: list[str] = Field(default_factory=list, description="Additional explicit resource refs extracted upstream")
+    profile_hint: ProfileType = Field(default="workload", description="Initial profile hint before canonical focus resolution")
+    service_name: str | None = Field(default=None, description="Optional service hint")
+    node_name: str | None = Field(default=None, description="Optional kubernetes node hint")
+    lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
+    alertname: str | None = Field(default=None, description="Optional alert name")
+    labels: dict[str, str] = Field(default_factory=dict, description="Optional alert labels")
+    annotations: dict[str, str] = Field(default_factory=dict, description="Optional alert annotations")
+
+
+class InvestigationSubjectRef(BaseModel):
+    kind: Literal[
+        "alert",
+        "resource_hint",
+        "pod",
+        "deployment",
+        "statefulset",
+        "service",
+        "backend",
+        "frontend",
+        "express_cluster",
+        "kubernetes_node",
+    ]
+    name: str
+    cluster: str | None = None
+    namespace: str | None = None
+    confidence: ConfidenceType = "medium"
+    sources: list[
+        Literal[
+            "explicit_target",
+            "explicit_ref",
+            "question_text",
+            "alert_field",
+            "alert_label",
+            "alert_annotation",
+            "service_hint",
+            "node_hint",
+            "vague_workload",
+            "express_enrichment",
+        ]
+    ] = Field(default_factory=list)
+    relation: Literal["candidate", "member", "dependency", "related"] = "candidate"
+
+
+class ResolvedIngressScope(BaseModel):
+    cluster: str | None = None
+    namespace: str | None = None
+    cluster_source: Literal["explicit", "question_text", "alert_label", "default", "none"] = "none"
+    namespace_source: Literal["explicit", "question_text", "alert_label", "none"] = "none"
+    ambiguous_clusters: list[str] = Field(default_factory=list)
+    ambiguous_namespaces: list[str] = Field(default_factory=list)
+
+
+class NormalizedInvestigationSubjectSet(BaseModel):
+    ingress: InvestigationIngressRequest
+    scope: ResolvedIngressScope
+    candidate_refs: list[InvestigationSubjectRef] = Field(default_factory=list)
+    canonical_focus: InvestigationSubjectRef | None = None
+    related_refs: list[InvestigationSubjectRef] = Field(default_factory=list)
+    normalization_notes: list[str] = Field(default_factory=list)
+
+
 class EvidenceBundle(BaseModel):
     cluster: str = "current-context"
     target: TargetRef
@@ -350,6 +419,7 @@ class InvestigationReportRequest(BaseModel):
     cluster: str | None = Field(default=None, description="Logical cluster alias")
     namespace: str | None = Field(default=None, description="Namespace for namespaced targets")
     target: str | None = Field(default=None, description="Target in form pod/name, deployment/name, service/name, or node/name")
+    question: str | None = Field(default=None, description="Optional free-form investigation text for unified ingress normalization")
     profile: ProfileType = Field(default="workload", description="Investigation profile")
     service_name: str | None = Field(default=None, description="Optional service name hint for service profile")
     lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")

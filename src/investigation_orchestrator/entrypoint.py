@@ -55,6 +55,7 @@ def _incident_from_request(req: InvestigationReportRequest) -> BuildInvestigatio
         cluster=req.cluster,
         namespace=req.namespace,
         target=req.target,
+        question=req.question,
         profile=req.profile,
         service_name=req.service_name,
         lookback_minutes=req.lookback_minutes,
