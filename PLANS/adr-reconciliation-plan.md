@@ -164,7 +164,7 @@ Goal:
 - make the new boundaries explicit without changing too much runtime behavior yet
 
 Status:
-- in progress
+- completed
 
 Deliverables:
 - add a first-class `InvestigationPlannerSeed` model in `src/investigation_service/models.py`
@@ -184,13 +184,18 @@ Why this phase comes first:
 - current code already has downstream `subject_context`
 - the missing seam is planner-seed, not subject propagation
 
+Completion note:
+- seam models now exist
+- planner-seed outcome vocabulary now exists
+- the first planner-owned seam types are established in code
+
 ### Phase 2: Introduce Planner-Seed Derivation As A Real Code Path
 
 Goal:
 - create the new semantic bridge without deleting existing behavior immediately
 
 Status:
-- in progress
+- mostly completed
 
 Primary files:
 - `src/investigation_service/planner.py`
@@ -214,6 +219,8 @@ Important rule:
 Current branch note:
 - `src/investigation_service/planner_seed.py` now exists and owns exact-target collapse for the current single-focus path
 - planner and alert normalization now route through planner-seed instead of ingress-local collapse
+- planner-seed is now the preferred semantic bridge in code, but it still intentionally wraps transitional single-focus collapse behavior for compatibility
+- richer planner-seed outcomes beyond `execution_focus_resolved` and `bounded_ambiguity` remain deferred
 
 ### Phase 3: Move Eager Exact-Target Collapse Out Of Ingress
 
