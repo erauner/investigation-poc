@@ -55,6 +55,8 @@ spec:
     environment {
         IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/investigation-poc'
         SHADOW_IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/investigation-shadow-runtime'
+        LOKI_MCP_IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/loki-mcp-server'
+        ALERTMANAGER_MCP_IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/alertmanager-mcp-server'
         DOCKER_CONFIG = '/kaniko/.docker'
     }
 
@@ -99,6 +101,26 @@ spec:
                                 --destination=${IMAGE_NAME}:latest \
                                 --cache=true \
                                 --cache-repo=${IMAGE_NAME}-cache \
+                                --skip-tls-verify-registry=docker.nexus.erauner.dev \
+                                --custom-platform=linux/amd64
+
+                            /kaniko/executor \
+                                --dockerfile=Dockerfile.loki-mcp \
+                                --context=dir://. \
+                                --destination=${LOKI_MCP_IMAGE_NAME}:${shortCommit} \
+                                --destination=${LOKI_MCP_IMAGE_NAME}:latest \
+                                --cache=true \
+                                --cache-repo=${LOKI_MCP_IMAGE_NAME}-cache \
+                                --skip-tls-verify-registry=docker.nexus.erauner.dev \
+                                --custom-platform=linux/amd64
+
+                            /kaniko/executor \
+                                --dockerfile=Dockerfile.alertmanager-mcp \
+                                --context=dir://. \
+                                --destination=${ALERTMANAGER_MCP_IMAGE_NAME}:${shortCommit} \
+                                --destination=${ALERTMANAGER_MCP_IMAGE_NAME}:latest \
+                                --cache=true \
+                                --cache-repo=${ALERTMANAGER_MCP_IMAGE_NAME}-cache \
                                 --skip-tls-verify-registry=docker.nexus.erauner.dev \
                                 --custom-platform=linux/amd64
 
