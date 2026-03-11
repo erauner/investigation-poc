@@ -5,8 +5,8 @@ from .cluster_registry import resolve_cluster
 from .ingress import (
     IngressDeps,
     ingress_request_from_alert_request,
-    normalized_request_from_subject_set,
     normalize_ingress_request,
+    subject_context_from_subject_set,
 )
 from .k8s_adapter import (
     find_unhealthy_workloads as find_unhealthy_workloads_impl,
@@ -31,6 +31,7 @@ from .models import (
     UnhealthyWorkloadsResponse,
 )
 from .prom_adapter import collect_metrics_for_scope, collect_service_enrichment_metrics
+from .planner_seed import PlannerSeedDeps, normalized_request_from_planner_seed, planner_seed_from_subject_set
 from .routing import canonical_target as _canonical_target
 from .routing import scope_from_target as _scope_from_target
 from .settings import get_default_lookback_minutes, get_log_tail_lines
@@ -356,17 +357,26 @@ def _infer_alert_inputs(req: CollectAlertContextRequest) -> CollectContextReques
 def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestigationRequest:
     ingress_req = ingress_request_from_alert_request(req)
     deps = IngressDeps(
-        canonical_target=_canonical_target,
-        scope_from_target=_scope_from_target,
         resolve_cluster=resolve_cluster,
-        get_backend_cr=lambda *args, **kwargs: {},
-        get_frontend_cr=lambda *args, **kwargs: {},
         get_cluster_cr=lambda *args, **kwargs: {},
         find_unhealthy_pod=find_unhealthy_pod,
     )
     subject_set = normalize_ingress_request(ingress_req, deps)
+    subject_context = subject_context_from_subject_set(subject_set)
+    planner_seed = planner_seed_from_subject_set(
+        subject_set,
+        subject_context=subject_context,
+        deps=PlannerSeedDeps(
+            canonical_target=_canonical_target,
+            scope_from_target=_scope_from_target,
+            resolve_cluster=resolve_cluster,
+            get_backend_cr=lambda *args, **kwargs: {},
+            get_frontend_cr=lambda *args, **kwargs: {},
+            get_cluster_cr=lambda *args, **kwargs: {},
+        ),
+    )
     try:
-        normalized = normalized_request_from_subject_set(subject_set, deps)
+        normalized = normalized_request_from_planner_seed(planner_seed)
     except ValueError as exc:
         if "no canonical investigation subject could be resolved from ingress input" in str(exc):
             raise ValueError("target could not be inferred from alert input") from exc

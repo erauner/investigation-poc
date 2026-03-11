@@ -163,6 +163,9 @@ These are easy to miss while doing the migration:
 Goal:
 - make the new boundaries explicit without changing too much runtime behavior yet
 
+Status:
+- in progress
+
 Deliverables:
 - add a first-class `InvestigationPlannerSeed` model in `src/investigation_service/models.py`
 - add a stable ambiguity taxonomy contract aligned with ADR 0005
@@ -186,6 +189,9 @@ Why this phase comes first:
 Goal:
 - create the new semantic bridge without deleting existing behavior immediately
 
+Status:
+- in progress
+
 Primary files:
 - `src/investigation_service/planner.py`
 - likely a new `src/investigation_service/planner_seed.py`
@@ -204,6 +210,10 @@ Deliverables:
 Important rule:
 - planner-seed becomes the preferred semantic bridge
 - no new shortcuts directly from subject set to exact target outside that seam
+
+Current branch note:
+- `src/investigation_service/planner_seed.py` now exists and owns exact-target collapse for the current single-focus path
+- planner and alert normalization now route through planner-seed instead of ingress-local collapse
 
 ### Phase 3: Move Eager Exact-Target Collapse Out Of Ingress
 

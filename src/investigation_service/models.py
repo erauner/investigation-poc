@@ -13,6 +13,12 @@ GuidelineCategory = Literal["interpretation", "data_source", "next_step", "deleg
 HandoffStatus = Literal["awaiting_external_submission", "ready_for_next_handoff", "complete"]
 HandoffNextAction = Literal["submit_external_steps", "call_handoff_again", "render_report"]
 AdequacyOutcome = Literal["adequate", "weak", "contradictory", "blocked", "not_applicable"]
+PlannerSeedOutcome = Literal[
+    "execution_focus_resolved",
+    "bounded_ambiguity",
+    "deterministic_narrowing_required",
+    "scout_narrowing_eligible",
+]
 
 
 class TargetRef(BaseModel):
@@ -153,6 +159,26 @@ class InvestigationSubjectContext(BaseModel):
     related_subjects: list[InvestigationSubjectRef] = Field(default_factory=list)
     competing_subjects: list[InvestigationSubjectRef] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+
+
+class PlannerSeedExecutionFocus(BaseModel):
+    scope: ScopeType
+    target: str
+    profile: ProfileType
+    node_name: str | None = None
+    service_name: str | None = None
+
+
+class InvestigationPlannerSeed(BaseModel):
+    source: Literal["manual", "alert"]
+    cluster: str | None = None
+    namespace: str | None = None
+    lookback_minutes: int = Field(default=15, ge=1, le=240)
+    subject_context: InvestigationSubjectContext
+    requested_target: str | None = None
+    outcome: PlannerSeedOutcome
+    execution_focus: PlannerSeedExecutionFocus | None = None
+    seed_notes: list[str] = Field(default_factory=list)
 
 
 class EvidenceBundle(BaseModel):
