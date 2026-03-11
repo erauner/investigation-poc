@@ -38,8 +38,6 @@ spec:
             capabilities:
               drop:
                 - ALL
-            runAsNonRoot: true
-            runAsUser: 65532
       containers:
         - name: mcp
           image: alpine:3.21
