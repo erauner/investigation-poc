@@ -49,6 +49,7 @@ from .tools import (
     collect_service_evidence,
     collect_workload_evidence,
     find_unhealthy_pod,
+    normalize_alert_input as normalize_alert_input_impl,
 )
 from . import planner
 
@@ -621,6 +622,10 @@ def normalize_incident_input(req: InvestigationReportRequest) -> InvestigationTa
         normalized,
         requested_target=req.target or normalized.target,
     )
+
+
+def normalize_alert_input(req):
+    return normalize_alert_input_impl(req)
 
 
 def resolve_primary_target(req: InvestigationReportRequest) -> InvestigationTarget:
