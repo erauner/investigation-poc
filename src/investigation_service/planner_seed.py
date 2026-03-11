@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import inspect
 from typing import Any
 
 from .models import (
@@ -281,10 +282,10 @@ def _execution_focus_for_subject(
 
 
 def _resolve_cluster(deps: PlannerSeedDeps, cluster: str | None) -> Any:
-    try:
-        return deps.resolve_cluster(cluster)
-    except TypeError:
+    signature = inspect.signature(deps.resolve_cluster)
+    if len(signature.parameters) >= 2:
         return deps.resolve_cluster(cluster, {})
+    return deps.resolve_cluster(cluster)
 
 
 def _cluster_component_priority(item: dict) -> tuple[int, int, str]:
