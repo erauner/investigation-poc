@@ -327,6 +327,7 @@ Important rule:
 
 Related convergence goal:
 - once planner-seed, scout alignment, and focus-divergence reporting are stable enough, converge `/investigate` and `/investigate-alert` onto one canonical internal entrypoint so the repo no longer has to maintain that separation as a semantic ownership boundary
+- the readiness threshold for that convergence is: alert vs generic should differ only in input parsing/extraction, not in semantic ownership, planner-seed derivation, or runtime entry
 - until then, keep any remaining distinction as thin compatibility wrapping only
 - do not pull this convergence ahead of Phases 4 and 5 unless the shared semantic/runtime path is already stable enough to avoid mixing entrypoint cleanup with deeper behavioral change
 
