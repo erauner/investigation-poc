@@ -200,9 +200,12 @@ Illustratively, that seam may look like:
 ```python
 @dataclass(frozen=True)
 class ExploratoryNodeContext:
+    intent: ScoutIntent
     policy: ExploratoryScoutPolicy
     hints: ScoutHints
     baseline_summary: BaselineEvidenceSummary
+    primary_subject: InvestigationSubjectRef | None
+    related_subjects: list[InvestigationSubjectRef]
     step_id: str
     requested_capability: str
     execution_inputs: StepExecutionInputs
@@ -211,8 +214,10 @@ class ExploratoryNodeContext:
 The important point is not any one exact type name.
 The important point is that bounded exploratory nodes should consume:
 
+- explicit scout intent
 - structured policy
 - structured runtime hints
+- semantic context already chosen upstream
 - canonical execution inputs already emitted by product-owned planning
 
 This seam is:
@@ -229,6 +234,32 @@ It is not:
 
 The baseline summary is intentionally separate from the full evidence artifact.
 Exploratory nodes should receive a compact view of what is already known and what is still missing rather than depending on arbitrary prompt reconstruction from raw runtime state.
+
+## Scout Roles
+
+Bounded scouts can serve two roles:
+
+1. evidence expansion
+   - the bounded execution focus is already known
+   - baseline evidence is weak, contradictory, or blocked
+   - the scout gathers more evidence for that bounded question
+
+2. focus narrowing
+   - ingress and planner-seed derivation yielded a soft primary focus but not a justified bounded execution focus
+   - deterministic narrowing was insufficient
+   - a bounded scout may help identify what operational focus should be inspected first
+
+Scouts remain:
+
+- bounded runtime helpers
+- entered only after deterministic gating
+- advisory to deterministic planner/runtime seams
+
+Scouts do not become:
+
+- semantic owners
+- ad hoc subject interpreters
+- broad free-form tool agents
 
 ## Exploratory Node Input And Output Seams
 
@@ -250,11 +281,20 @@ That intermediate seam may capture things such as:
 - probes attempted
 - which probes were useful, empty, contradictory, or failed
 - additional evidence recovered
+- whether the scout recommends narrowing to a more specific bounded execution focus
 - additional limitations discovered
 - budget consumed and stop reason
 
 The important invariant is that exploratory nodes do not directly redefine planner or report semantics.
 They still terminate in the same deterministic materialization path into canonical typed step artifacts.
+
+Scout-local outcomes may therefore distinguish between:
+
+- evidence delta
+- focus recommendation
+- no useful change
+
+but those distinctions remain transient scout-local seams until deterministic planner/runtime code decides how to consume them.
 
 Bounded scout activation should also key off contract semantics rather than step-name literals alone.
 Equivalent follow-up or scout-intent steps should remain eligible for the same bounded behavior even if planner-owned step ids later change.
@@ -265,9 +305,22 @@ The preferred near-term pattern is:
 
 1. deterministic baseline evidence collection
 2. deterministic adequacy evaluation
-3. optional bounded evidence-scout subgraph for approved evidence planes
-4. deterministic artifact materialization
-5. deterministic batch progression and rendering
+3. deterministic planner-seed narrowing where possible
+4. optional bounded scout seam for:
+   - evidence expansion
+   - or bounded focus narrowing when planner-seed derivation cannot confidently do so alone
+5. deterministic artifact materialization
+6. deterministic batch progression and rendering
+
+With the updated ingress direction from ADR 0005, bounded exploration may also help narrow a soft primary focus into a bounded execution focus when deterministic planner-seed derivation cannot confidently do so alone.
+
+That does not change the ownership boundary:
+
+- ingress still resolves scope and subject candidates first
+- planner-owned semantics still define the bounded execution question
+- planner-seed derivation remains the preferred first narrowing seam
+- exploratory seams may help narrow focus later
+- exploratory seams do not become the owner of semantic subject interpretation
 
 Within that pattern, route semantics should stay layered:
 

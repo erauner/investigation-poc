@@ -151,8 +151,9 @@ The following remain in `investigation_service`:
 
 - normalization and target resolution
 - investigation subject interpretation
-- canonical target selection
-- execution-target derivation
+- soft primary-subject selection
+- planner-seed derivation
+- execution-target derivation when and only when bounded semantic commitment is needed
 - plan construction
 - active-batch selection
 - submission validation
@@ -162,6 +163,13 @@ The following remain in `investigation_service`:
 - final report rendering
 
 This ADR does not move those semantics into LangGraph nodes.
+
+That includes the newer ingress direction as well:
+
+- unified ingress normalization remains product-owned
+- subject-set interpretation remains product-owned
+- planner-seed derivation remains product-owned
+- the host wrapper and LangGraph shell must not become the place where exact subject collapse is invented ad hoc
 
 ## What The Orchestration Layer Owns
 

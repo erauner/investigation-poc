@@ -11,7 +11,7 @@
 
 The planner-led runtime is now strong once it starts from:
 
-- one resolved canonical focus
+- one bounded execution focus
 - one bounded plan
 - one deterministic runtime spine
 
@@ -57,15 +57,17 @@ But that does not mean pod should become the only semantic subject type.
 
 The next ingress refactor should be:
 
-> unify ingress around subject-set normalization and deterministic canonical-focus selection first; keep planning mostly single-focus internally for now; defer true multi-target planning until the value clearly exceeds the semantic and runtime complexity.
+> unify ingress around subject-centric normalization that resolves scope, subject candidates, related refs, ambiguity, and one soft primary focus; defer exact execution-target collapse until planner-seed derivation or bounded evidence kickoff.
 
 This means:
 
 - use one internal ingress normalization pipeline for generic, alert, and mixed freeform requests
 - normalize ingress into a set of extracted subject references rather than one flat target string
-- resolve one canonical primary subject plus related resources
-- continue feeding the existing planner/runtime mostly one canonical focus at first
+- resolve one soft primary subject plus related resources
+- continue feeding the existing planner/runtime mostly one bounded execution focus at first
+- allow related subjects to carry their own cluster and namespace when they are operationally relevant
 - preserve generic Deployment/StatefulSet/pod investigations as first-class paths
+- keep ingress domain-aware while allowing evidence gathering to become more generic and composable where possible
 
 This does not mean:
 
@@ -73,6 +75,7 @@ This does not mean:
 - making the planner fully multi-target immediately
 - collapsing all semantic targets into pods
 - treating everything in one namespace as one application object
+- making the host wrapper or exploratory runtime own subject meaning
 
 ## Initial Scope Constraint
 
@@ -86,7 +89,8 @@ If input references span multiple candidate scopes, the resolver should preserve
 - choose one dominant scope with explicit justification
 - or return a bounded scope-ambiguity outcome rather than silently merging unrelated resources
 
-Cross-context and cross-namespace grouped investigation is not the default problem for the first slice.
+Cross-context grouped investigation is not the default problem for the first slice.
+Cross-namespace related subjects are allowed when they are clearly relevant dependencies or peer-affected subjects, but they do not by themselves force full multi-target planning.
 
 ## Terminology
 
@@ -192,15 +196,98 @@ class NormalizedInvestigationSubjectSet(BaseModel):
 The key shift is:
 
 - ingress should ask what subjects are present
-- then determine what should become the canonical operational focus
-- rather than forcing every request into one target string immediately
+- then determine what should become the soft primary focus
+- rather than forcing every request into one exact operational target immediately
 
 Alert and alert-group inputs should first normalize into subject references and scope hints.
 They should not bypass subject resolution by directly becoming planner targets unless they already unambiguously identify the operational subject.
+Alert groups may remain first-class subject candidates until planner-seed derivation decides whether they collapse to one dominant operational subject or require bounded ambiguity handling.
+
+## Subject Resolution Stops Before Exact Target Collapse
+
+Ingress is responsible for understanding:
+
+- what the request is about
+- within what scope
+- which candidate subjects are present
+- which related subjects are relevant
+- whether scope or subject ambiguity remains bounded but unresolved
+
+Ingress is not responsible for always deciding:
+
+- the final exact workload target runtime will inspect first
+- whether a frontend should become a service or workload investigation
+- which Express component should be the first execution focus
+- the final execution profile solely because an exact target was forced early
+
+That exact collapse should happen later, in planner-seed derivation or a bounded evidence-kickoff seam, when the system can use the normalized subject set instead of pretending ingress already had perfect operational certainty.
+
+This is an intentional architectural boundary, not an incomplete implementation.
+
+## Soft Primary Focus And Planner Seed
+
+The normalized subject set should preserve:
+
+- resolved scope
+- candidate subject refs
+- related refs
+- ambiguity notes
+- one soft primary focus when one is justifiable
+
+Illustratively, ingress may end at a shape like:
+
+```python
+class InvestigationPlannerSeed(BaseModel):
+    dominant_scope: ResolvedIngressScope
+    primary_subject: InvestigationSubjectRef | None
+    subject_set: NormalizedInvestigationSubjectSet
+    execution_target: str | None = None
+    profile: str | None = None
+    seed_notes: list[str] = Field(default_factory=list)
+```
+
+The exact type name is less important than the seam:
+
+- ingress produces subject-centric meaning
+- planner-seed derivation decides whether exact execution focus is already obvious
+- if not, a bounded later seam narrows the focus without losing the richer subject context
+
+Planner-seed derivation is the required semantic bridge between normalized subject sets and bounded planner/runtime execution.
+It is not an optional convenience layer.
+
+In clean cases, planner-seed derivation may be trivial:
+
+- preserve the ingress soft primary focus
+- carry forward the resolved dominant scope
+- set the bounded execution focus with little or no additional narrowing
+
+Clean cases still collapse quickly.
+Messy mixed requests are allowed to remain semantically rich a little longer.
+
+### Soft Primary Focus Versus Canonical Execution Focus
+
+The model should distinguish these two concepts explicitly:
+
+- soft primary focus
+  - the best current semantic focal subject inferred from ingress
+- canonical execution focus
+  - the exact operational subject later chosen for bounded planner/runtime execution
+
+Small practical examples:
+
+- `express_cluster/newmetrics`
+  - soft primary focus from ingress
+- `backend/newmetrics-be`
+  - canonical execution focus later chosen by planner-seed derivation or bounded evidence kickoff
+
+- `service/stc1-stceei`
+  - soft primary focus from an alert-shaped request
+- `service/stc1-stceei`
+  - canonical execution focus if the service target is already clear enough
 
 ## Canonical Focus Selection
 
-The resolver must deterministically choose one canonical primary subject from the normalized subject set.
+The resolver must deterministically choose one soft primary subject from the normalized subject set when one is justifiable.
 
 That selection should consider factors such as:
 
@@ -219,6 +306,34 @@ The normalization stage should preserve:
 - competing candidates
 - ambiguity notes
 - why one focus won when a canonical focus is selected
+
+## Operational Follow-On When Focus Remains Ambiguous
+
+When no soft primary focus is justifiable, planner-seed derivation may:
+
+- return a bounded ambiguity outcome
+- request one deterministic narrowing step
+- or enter a bounded evidence-kickoff seam designed to narrow focus without fabricating certainty
+
+Planner-seed derivation remains the preferred first narrowing seam.
+If it still cannot justify a bounded execution focus, a bounded scout may be used as a later fallback narrowing seam rather than the default semantic resolver.
+
+Small practical example:
+
+- input
+  - `deployment/api and service/payments in tenant-a`
+- ingress result
+  - two plausible subjects, no justified soft primary focus
+- next action
+  - bounded ambiguity or one deterministic narrowing step, not fake certainty
+
+When planner-seed derivation later chooses a bounded execution focus different from the soft primary focus, that divergence should be preserved explicitly in provenance and reporting.
+The system should remain able to say, plainly:
+
+- requested subject
+- soft primary focus
+- bounded execution focus
+- why the narrowing changed
 
 ## Primary Subject Versus Related Resources
 
@@ -258,6 +373,85 @@ not:
 
 In the near term, related resources are contextual attachments to one primary subject.
 They should not yet imply a planner mode that treats the entire family as co-equal execution subjects.
+Cross-namespace related subjects are therefore contextual first, not automatically separate execution seeds.
+
+Related resources must not be assumed to share the dominant namespace.
+The model should support related subjects with their own scope when a tenant workload depends on:
+
+- shared platform services
+- external StatefulSets or services in other namespaces
+- peer-affected subjects that are operationally relevant but not semantically the same object
+
+So the intended model is:
+
+- one dominant scope
+- one soft primary subject
+- many scoped related subjects
+- single-target execution for now
+
+Dominant scope is the main execution scope for the current slice.
+It is not a claim that no relevant related subjects may exist outside it.
+
+## Intended Relation Vocabulary
+
+The subject model should use a small intended relation vocabulary so related-subject semantics do not drift across code and docs.
+
+Illustratively:
+
+- `member`
+  - semantically part of the same logical application family
+- `dependency`
+  - operationally relevant dependency, same namespace or external
+- `peer_affected`
+  - separate but plausibly co-affected subject
+- `contextual_signal`
+  - relevant signal or supporting reference that should be preserved without being treated as a likely execution focus
+
+The exact type names may evolve, but the architecture should preserve the distinction between:
+
+- same-family membership
+- operational dependency
+- peer co-affected context
+- weaker contextual signal
+
+## Related-Subject Lifecycle And Caps
+
+Related subjects should not behave like a flat permanent bag of references.
+They need a bounded lifecycle.
+
+Illustratively, a related subject may be:
+
+- preserved as context only
+- used as contributing evidence context
+- promoted into bounded execution focus by deterministic planner/runtime logic
+- dropped from active context when later evidence shows it is irrelevant or stale
+
+The architecture should also enforce caps and policy for related-subject expansion so that:
+
+- cross-namespace dependency context does not silently become unbounded fan-out
+- alert groups do not become semantic junk drawers
+- related subjects do not silently become co-equal execution targets
+
+## Ambiguity Taxonomy
+
+Not all uncertainty is the same, and later planner/runtime behavior should not collapse them into one generic bucket.
+
+The architecture should distinguish at least:
+
+- scope ambiguity
+- subject ambiguity
+- bounded execution-focus ambiguity
+- contradictory evidence
+- insufficient evidence
+
+These do not imply the same next action.
+For example:
+
+- scope ambiguity usually requires blocking or deterministic narrowing
+- subject ambiguity may still preserve a soft primary focus plus competing candidates
+- bounded execution-focus ambiguity may justify a bounded narrowing seam
+- contradictory evidence should soften confidence rather than silently rerouting meaning
+- insufficient evidence may degrade honestly without implying a different subject
 
 ## Generic Kubernetes Support Remains First-Class
 
@@ -289,9 +483,9 @@ The preferred resolution flow is:
    - alert identifiers
 2. classify references into generic versus Express-aware candidate subjects
 3. enrich with deterministic Express-family grouping when the signals match Express patterns
-4. choose one canonical primary subject
+4. choose one soft primary subject
 5. attach related resources and dependency context
-6. derive one current planner seed from the primary subject
+6. derive one current planner seed from the primary subject and subject set
 
 This implies distinct layers such as:
 
@@ -299,6 +493,7 @@ This implies distinct layers such as:
 - generic subject resolution
 - Express-aware enrichment and grouping
 - dependency and related-resource attachment
+- planner-seed derivation
 
 ## Planner Sequencing
 
@@ -310,12 +505,14 @@ The recommended sequence is:
 
 - single ingress model
 - subject set normalization
-- one primary subject plus related resources
+- one soft primary subject plus related resources
 - existing planner remains mostly single-focus
+- planner-seed derivation may still feed one bounded execution focus when it is obvious
 
 ### Stage 2
 
 - planner and bounded scouts may consume related-resource context as hints
+- exact execution-target collapse may move from ingress into planner-seed derivation or bounded evidence kickoff where needed
 
 ### Stage 3
 
@@ -358,9 +555,46 @@ So the internal model should distinguish:
 
 - semantic subject
 - execution target
-- runtime evidence
+- runtime evidence substrate
 
-rather than collapsing everything into pods.
+## Domain-Aware Ingress, Generic Evidence Planes
+
+Ingress should remain domain-aware:
+
+- tenant namespace matters
+- Express grouping matters when signals fit
+- DB workloads are related but not semantically part of an Express cluster
+- related subjects may cross namespace boundaries
+
+Evidence gathering should become more generic and composable where possible:
+
+- get resource
+- describe resource
+- get events
+- get logs
+- get metrics
+- list related runtime objects
+
+The architecture should therefore split responsibility cleanly:
+
+- ingress owns meaning
+- planner-seed derivation owns bounded commitment to execution focus
+- evidence planes gather data generically where possible
+- runtime remains deterministic and typed
+
+Generic evidence planes must not become shadow semantic resolvers.
+They may gather data broadly, but they should not quietly re-own subject meaning, family grouping, or dependency semantics outside typed planner-owned contracts.
+
+## Non-Goals For This ADR Revision
+
+This revision does not require:
+
+- true multi-target planning yet
+- family-scoped parallel execution
+- collapsing all investigations to pods
+- making namespace the only investigation boundary
+- moving semantic meaning into the host wrapper or exploratory runtime
+- preserving internal helpers whose only purpose is eager exact-target collapse
 
 ## Non-Goals For This Slice
 
@@ -371,6 +605,15 @@ This ADR does not imply:
 - making every related resource a co-equal execution subject
 - replacing all public wrappers immediately
 - redesigning all planner semantics at the same time as ingress
+
+## Failure Modes This Direction Intends To Avoid
+
+This direction is intentionally meant to avoid:
+
+- fake certainty from early exact-target collapse
+- accidental namespace or object-family conflation
+- semantic meaning being re-invented ad hoc in runtime or host layers
+- reports that hide when bounded execution focus diverged from the earlier semantic framing
 
 ## Consequences
 
@@ -387,6 +630,8 @@ This ADR does not imply:
 - adds a new normalization and subject-resolution layer to maintain
 - requires careful terminology cleanup around cluster, node, namespace, and Express terms
 - risks false certainty if confidence and ambiguity are not preserved explicitly during normalization
+- requires planner-seed derivation to become a real seam rather than letting random helpers recreate eager collapse elsewhere
+- requires reports and operator-facing outputs to explain focus changes truthfully when bounded execution focus differs from the earlier semantic focus
 
 ## Implementation Direction
 
@@ -399,6 +644,8 @@ The preferred implementation order is:
 5. derive current planner seed inputs from the primary subject while preserving related resources as context
 6. keep public wrappers as thin aliases until the unified ingress path proves reliable
 7. only later consider true multi-target or family-scoped planning modes
+
+As planner-seed derivation becomes the preferred seam, ingress-local helpers whose main job is eager exact-target collapse, profile promotion, or CR-backed operational rewriting are candidates for simplification or removal once the planner-seed behavior is proven.
 
 ## What This ADR Does Not Decide
 

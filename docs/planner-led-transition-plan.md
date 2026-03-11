@@ -1006,13 +1006,13 @@ Validation gate:
 
 Presentation profile work may proceed in parallel, but it must remain strictly downstream of canonical evidence adequacy, exploratory routing, and deterministic artifact materialization.
 
-### Slice 15: Unified Ingress And Subject Resolution
+### Slice 15: Unified Ingress, Soft Primary Focus, And Planner-Seed Derivation
 
 Status: Proposed
 
 Goal:
 
-- unify generic, alert, and mixed freeform ingress around one subject-resolution pipeline that produces one canonical primary subject plus related resources, without forcing full multi-target planning immediately
+- unify generic, alert, and mixed freeform ingress around one subject-resolution pipeline that produces scope, subject candidates, related refs, ambiguity, and one soft primary focus, without forcing full multi-target planning immediately
 
 Delivered in this slice should be:
 
@@ -1026,8 +1026,9 @@ Delivered in this slice should be:
   - one Kubernetes context / datacenter
   - one tenant namespace
   - with explicit ambiguity handling rather than silent cross-scope merging
+- cross-namespace related subjects supported as explicit scoped dependencies or peer-affected subjects without forcing immediate grouped execution
 - normalization into a subject set rather than one flat target string
-- deterministic canonical primary-subject selection plus related resources
+- deterministic soft primary-subject selection plus related resources
 - explicit environment scope modeling for:
   - Kubernetes context / datacenter
   - tenant namespace
@@ -1039,16 +1040,41 @@ Delivered in this slice should be:
   - Kubernetes node
 - terminology cleanup that reserves `kubernetes_node` for actual cluster machines and avoids bare `node` for Express members in new internal model types
 - deterministic Express-aware grouping and dependency attachment without making Express assumptions mandatory for generic workload paths
-- planner seed derivation that still feeds the current planner/runtime mostly one canonical focus at first
+- planner-seed derivation that still feeds the current planner/runtime mostly one bounded execution focus at first
+- explicit permission to stop preserving internal eager-collapse helpers whose only job is to force one exact target too early
+- explicit preservation of focus divergence in provenance and reporting when bounded execution focus later differs from the earlier semantic focus
+- explicit caps and lifecycle rules for related-subject expansion so cross-namespace context stays bounded and contextual first
+- explicit ambiguity taxonomy that distinguishes scope, subject, bounded execution-focus, contradiction, and insufficiency
 
 Validation gate:
 
 - generic Deployment and StatefulSet investigations still resolve cleanly without Express-specific assumptions
 - Express-cluster requests resolve Backend and Frontend resources as one logical application family without collapsing DB into the same semantic object
 - mixed requests preserve related resources and ambiguity notes rather than forcing fake certainty
-- the planner/runtime can still run mostly unchanged from one canonical focus while carrying related context forward
+- cross-namespace dependencies can be preserved as related subjects without pretending they are part of the tenant application object
+- the planner/runtime can still run mostly unchanged from one bounded execution focus while carrying related context forward
+- generic evidence planes do not become shadow semantic resolvers for subject meaning or dependency semantics
+
+Explicitly out of scope in this slice:
+
+- true multi-target planning
+- family-scoped parallel execution
+- grouped execution across several namespaces or clusters
+- forcing all investigations to become pod-centric
+
+Preserve public surface stability, not internal helper lineage:
+
+- compatibility wrappers may stay where they still earn their keep
+- internal helpers that only preserve eager exact-target collapse are not architectural obligations
+- planner-seed derivation is the preferred replacement seam for that behavior
 
 Presentation profile work may continue in parallel where it is formatting-only, but unified ingress and subject resolution are the more foundational semantic dependency.
+
+Implementation alignment note:
+
+- the ADRs define the intended architecture
+- the staged code migration tracker for this slice lives in `PLANS/adr-reconciliation-plan.md`
+- if current code, old helper structure, and ADR 0005 disagree, reconcile toward the ADRs and update the plan tracker rather than preserving eager-collapse behavior by accident
 
 ## Current Rollout Framing
 
@@ -1072,9 +1098,9 @@ The next implementation order should now be:
 1. formalize and unify the evidence adequacy contract
 2. finish and align the bounded scout pattern across workload, service, and node seams
 3. add structured scout policy and leading-context configuration
-4. unify ingress and subject resolution around one primary subject plus related resources
+4. unify ingress and subject resolution around one soft primary focus plus related resources, then derive planner seeds later than ingress collapse
 5. presentation profiles
 6. only later:
-   - human-in-the-loop interrupts
-   - true multi-target or family-scoped planning
-   - broader hosted checkpoint/resume work for exploratory subgraphs
+  - human-in-the-loop interrupts
+  - true multi-target or family-scoped planning
+  - broader hosted checkpoint/resume work for exploratory subgraphs
