@@ -325,6 +325,11 @@ Important rule:
 - do not preserve internal helper lineage for its own sake
 - when a helper exists only to preserve eager exact-target collapse or duplicate pre-planner-seed behavior, the default action is to remove it or fold it behind the new seam rather than retain it as legacy structure
 
+Related convergence goal:
+- once planner-seed, scout alignment, and focus-divergence reporting are stable enough, converge `/investigate` and `/investigate-alert` onto one canonical internal entrypoint so the repo no longer has to maintain that separation as a semantic ownership boundary
+- until then, keep any remaining distinction as thin compatibility wrapping only
+- do not pull this convergence ahead of Phases 4 and 5 unless the shared semantic/runtime path is already stable enough to avoid mixing entrypoint cleanup with deeper behavioral change
+
 ### Phase 7: Reevaluate Multi-Target Planning Later
 
 Goal:
