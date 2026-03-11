@@ -7,6 +7,8 @@ from .models import (
     InvestigationFocusProvenance,
     InvestigationPlan,
     InvestigationState,
+    InvestigationSubjectContext,
+    InvestigationSubjectRef,
     InvestigationTarget,
     NormalizedInvestigationRequest,
     PlannerSeedExecutionFocus,
@@ -59,6 +61,48 @@ def _execution_focus_from_target(target: InvestigationTarget | None) -> PlannerS
     )
 
 
+def _subject_ref_from_target(target: InvestigationTarget) -> InvestigationSubjectRef:
+    kind, _, name = target.target.partition("/")
+    subject_kind = "kubernetes_node" if kind == "node" else kind
+    return InvestigationSubjectRef(
+        kind=subject_kind,
+        name=name or target.target,
+        cluster=target.cluster,
+        namespace=target.namespace,
+        confidence="high",
+        sources=["express_enrichment"],
+    )
+
+
+def _aligned_subject_context(target: InvestigationTarget) -> InvestigationSubjectContext | None:
+    subject_context = target.subject_context
+    if subject_context is None:
+        return None
+    return subject_context.model_copy(
+        update={
+            "primary_subject": _subject_ref_from_target(target),
+        }
+    )
+
+
+def _focus_change_reasons(
+    prior_target: InvestigationTarget | None,
+    aligned_target: InvestigationTarget | None,
+    current_focus: PlannerSeedExecutionFocus,
+) -> list[str]:
+    prior_notes = list(prior_target.normalization_notes) if prior_target is not None else []
+    current_notes = list(aligned_target.normalization_notes) if aligned_target is not None else []
+    delta_reasons = [note for note in current_notes if note not in prior_notes]
+    focus_reasons = [
+        note
+        for note in delta_reasons
+        if note.startswith("resolved ")
+        or note.startswith("alert-derived ")
+        or note.startswith("profile promoted ")
+    ]
+    return focus_reasons or [f"aligned bounded focus to collected evidence: {current_focus.target}"]
+
+
 def _step_provenance(executions: list[EvidenceBatchExecution]) -> list[ExecutedStepTrace]:
     traces: list[ExecutedStepTrace] = []
     for execution in executions:
@@ -79,6 +123,7 @@ def _step_provenance(executions: list[EvidenceBatchExecution]) -> list[ExecutedS
 
 def _focus_provenance_for_state(
     plan: InvestigationPlan,
+    prior_target: InvestigationTarget | None,
     aligned_target: InvestigationTarget | None,
 ) -> InvestigationFocusProvenance | None:
     focus_provenance = plan.focus_provenance
@@ -99,9 +144,23 @@ def _focus_provenance_for_state(
         )
 
     updated = focus_provenance.model_copy(deep=True)
+    prior_focus = updated.current_bounded_execution_focus or _execution_focus_from_target(prior_target)
     current_focus = _execution_focus_from_target(aligned_target)
     if current_focus is not None:
-        updated = updated.model_copy(update={"current_bounded_execution_focus": current_focus})
+        updates: dict[str, object] = {"current_bounded_execution_focus": current_focus}
+        if aligned_target is not None and aligned_target.subject_context and aligned_target.subject_context.primary_subject is not None:
+            updates["soft_primary_focus"] = aligned_target.subject_context.primary_subject.model_copy(deep=True)
+            updates["related_subjects_considered"] = [
+                subject.model_copy(deep=True) for subject in aligned_target.subject_context.related_subjects
+            ]
+        if prior_focus != current_focus:
+            updates["latest_focus_change_reasons"] = _focus_change_reasons(
+                prior_target,
+                aligned_target,
+                current_focus,
+            )
+            updates["latest_focus_change_source_step_id"] = "collect-target-evidence"
+        updated = updated.model_copy(update=updates)
     return updated
 
 
@@ -146,6 +205,9 @@ def align_target_with_primary_evidence(
             }
         )
 
+    if aligned != target:
+        aligned = aligned.model_copy(update={"subject_context": _aligned_subject_context(aligned)})
+
     return aligned
 
 
@@ -159,9 +221,10 @@ def build_investigation_state(
     artifacts = [artifact for execution in executions for artifact in execution.artifacts]
     primary_evidence = _primary_evidence_from_artifacts(artifacts)
     change_candidates = _change_candidates_from_artifacts(artifacts)
-    aligned_target = align_target_with_primary_evidence(updated_plan.target or initial_plan.target, primary_evidence)
+    prior_target = updated_plan.target or initial_plan.target
+    aligned_target = align_target_with_primary_evidence(prior_target, primary_evidence)
     plan = updated_plan.model_copy(update={"target": aligned_target})
-    focus_provenance = _focus_provenance_for_state(plan, aligned_target)
+    focus_provenance = _focus_provenance_for_state(plan, prior_target, aligned_target)
     if focus_provenance is not None:
         plan = plan.model_copy(update={"focus_provenance": focus_provenance})
     tool_path_trace = ToolPathTrace(

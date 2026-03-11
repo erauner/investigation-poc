@@ -483,18 +483,9 @@ def _execution_focus_from_target(target: InvestigationTarget) -> PlannerSeedExec
 def _focus_reasons_from_target(target: InvestigationTarget) -> list[str]:
     reasons: list[str] = []
     for note in target.normalization_notes:
-        if note.startswith("canonical focus selected:"):
-            reasons.append(note)
+        if note.startswith("related refs preserved:"):
             continue
-        if note.startswith("resolved "):
-            reasons.append(note)
-            continue
-        if note.startswith("alert-derived "):
-            reasons.append(note)
-            continue
-        if note.startswith("profile promoted "):
-            reasons.append(note)
-            continue
+        reasons.append(note)
     return reasons or list(target.normalization_notes)
 
 
