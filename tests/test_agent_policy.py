@@ -309,9 +309,15 @@ process.stdout.write(JSON.stringify({{ genericTask, inferredAlertTask, explicitA
 
     assert "[INVESTIGATION_ENTRYPOINT]=generic" in payload["genericTask"]
     assert ALERT_EXTRACTION_REQUIRED_PHRASE not in payload["genericTask"].lower()
+    for phrase in BANNED_PROMPT_PHRASES:
+        assert phrase not in payload["genericTask"]
     assert "[INVESTIGATION_ENTRYPOINT]=alert" in payload["inferredAlertTask"]
     assert ALERT_EXTRACTION_REQUIRED_PHRASE in payload["inferredAlertTask"].lower()
     assert ALERT_NAMESPACE_GUARDRAIL_REQUIRED_PHRASE in payload["inferredAlertTask"].lower()
     assert ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE in payload["inferredAlertTask"].lower()
     assert ALERT_FIVE_SECTION_REQUIRED_PHRASE in payload["inferredAlertTask"].lower()
+    for phrase in BANNED_PROMPT_PHRASES:
+        assert phrase not in payload["inferredAlertTask"]
     assert "alertname: PodCrashLooping" in payload["explicitAlertTask"]
+    for phrase in BANNED_PROMPT_PHRASES:
+        assert phrase not in payload["explicitAlertTask"]

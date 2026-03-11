@@ -1,5 +1,6 @@
 import investigation_service.reporting as reporting
 import investigation_service.tools as tools
+import pytest
 from investigation_service.models import (
     CollectAlertContextRequest,
     CollectContextRequest,
@@ -114,3 +115,32 @@ def test_tools_cleanup_removes_duplicate_private_alert_normalization_helpers() -
     assert not hasattr(tools, "_label_value")
     assert not hasattr(tools, "_annotation_value")
     assert not hasattr(tools, "_infer_target_from_text")
+
+
+def test_reporting_resolve_cluster_forwards_labels_when_delegate_supports_them(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_resolve_cluster(cluster: str | None, labels: dict[str, str] | None = None) -> str:
+        captured["cluster"] = cluster
+        captured["labels"] = labels
+        return "erauner-home"
+
+    monkeypatch.setattr(tools, "resolve_cluster", fake_resolve_cluster)
+
+    resolved = reporting.resolve_cluster(None, {"cluster": "erauner-home"})
+
+    assert resolved == "erauner-home"
+    assert captured == {
+        "cluster": None,
+        "labels": {"cluster": "erauner-home"},
+    }
+
+
+def test_reporting_resolve_cluster_reraises_delegate_typeerror(monkeypatch) -> None:
+    def fake_resolve_cluster(cluster: str | None, labels: dict[str, str] | None = None) -> str:
+        raise TypeError("broken cluster resolver")
+
+    monkeypatch.setattr(tools, "resolve_cluster", fake_resolve_cluster)
+
+    with pytest.raises(TypeError, match="broken cluster resolver"):
+        reporting.resolve_cluster(None, {"cluster": "erauner-home"})
