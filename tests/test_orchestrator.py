@@ -1789,7 +1789,7 @@ def test_apply_review_decision_rejects_stale_review_fingerprint(monkeypatch) -> 
         checkpoint_config=GraphCheckpointConfig(thread_id="stale-review-thread"),
         values={
             "pending_exploration_review": pending_review.model_copy(
-                update={"proposed_probe": "Probe one additional runtime pod for deployment/crashy excluding crashy-b."}
+                update={"baseline_runtime_pod_name": "crashy-b"}
             )
         },
         as_node="prepare_exploration_review",

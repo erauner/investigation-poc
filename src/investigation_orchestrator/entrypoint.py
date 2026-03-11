@@ -1,3 +1,5 @@
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Literal
 
@@ -193,13 +195,10 @@ def _pending_review_or_raise(state: OrchestrationState) -> PendingExplorationRev
     return pending_review
 
 
-def _pending_review_fingerprint(review: PendingExplorationReview) -> tuple[str, str, str | None, str]:
-    return (
-        review.batch_id,
-        review.step.step_id,
-        review.probe_kind,
-        review.proposed_probe,
-    )
+def _pending_review_fingerprint(review: PendingExplorationReview) -> str:
+    payload = review.model_dump(mode="json", exclude={"decision"})
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _apply_exploration_review_decision(
