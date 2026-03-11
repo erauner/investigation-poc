@@ -179,18 +179,21 @@ def query(query_string: str) -> float | None:
     value = result[0].get("value")
     if not value or len(value) < 2:
         return None
-    return float(value[1])
+    parsed = float(value[1])
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        return None
+    return parsed
 
 
 def query_range(query_string: str) -> list[float]:
     end = time.time()
-    start = end - 180
+    start = end - max(lookback_minutes, 1) * 60
     params = urllib.parse.urlencode(
         {
             "query": query_string,
             "start": f"{start:.0f}",
             "end": f"{end:.0f}",
-            "step": "15",
+            "step": "60",
         }
     )
     url = f"{prom_url}/api/v1/query_range?{params}"

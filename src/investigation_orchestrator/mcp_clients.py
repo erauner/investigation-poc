@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 import asyncio
 import json
+import math
 import re
 import threading
 
@@ -165,15 +166,18 @@ def _normalize_metric_value(raw: Any) -> float | None:
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
-        return float(raw)
+        value = float(raw)
+        return value if math.isfinite(value) else None
     if isinstance(raw, str):
         try:
-            return float(raw)
+            value = float(raw)
+            return value if math.isfinite(value) else None
         except ValueError:
             match = re.search(r"=>\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*@\[", raw)
             if match:
                 try:
-                    return float(match.group(1))
+                    value = float(match.group(1))
+                    return value if math.isfinite(value) else None
                 except ValueError:
                     return None
             return None
@@ -838,18 +842,20 @@ class PrometheusMcpClient:
                     await session.initialize()
                     tool_path = ["prometheus-mcp-server"]
                     family_results: list[tuple[str, dict[str, float | None]]] = []
+                    end_time = datetime.now(timezone.utc)
+                    start_time = end_time - timedelta(minutes=max(inputs.lookback_minutes or 15, 1))
+                    start_rfc3339 = start_time.isoformat().replace("+00:00", "Z")
+                    end_rfc3339 = end_time.isoformat().replace("+00:00", "Z")
                     for family_id, queries in query_families:
                         family_metrics: dict[str, float | None] = {}
-                        end_time = datetime.now(timezone.utc)
-                        start_time = end_time - timedelta(minutes=max(inputs.lookback_minutes or 15, 1))
                         for label, query in queries.items():
                             raw = await self._call_tool(
                                 session,
                                 "execute_range_query",
                                 {
                                     "query": query,
-                                    "start": start_time.isoformat().replace("+00:00", "Z"),
-                                    "end": end_time.isoformat().replace("+00:00", "Z"),
+                                    "start": start_rfc3339,
+                                    "end": end_rfc3339,
                                     "step": "60s",
                                 },
                             )
