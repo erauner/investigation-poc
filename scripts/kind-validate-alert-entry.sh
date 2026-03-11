@@ -9,7 +9,7 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-investigation}"
 KIND_CONTEXT="${KIND_CONTEXT:-kind-${KIND_CLUSTER_NAME}}"
 HTTP_PORT="${HTTP_PORT:-18080}"
 ALERTMANAGER_PORT="${ALERTMANAGER_PORT:-19093}"
-ALERT_PROMPT="${ALERT_PROMPT:-Investigate alert PodCrashLooping for pod crashy in namespace ${SMOKE_NAMESPACE}. Preserve alertname=PodCrashLooping and the original alert-derived target string pod/crashy explicitly. If the target still needs clarification, resolve it first. Prefer run_orchestrated_investigation as the default end-to-end runtime path. Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, advance_investigation_runtime, execute_investigation_step, and update_investigation_plan as lower-level debug or fallback seams rather than the primary path. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
+ALERT_PROMPT="${ALERT_PROMPT:-Investigate alert PodCrashLooping for target pod/crashy in namespace ${SMOKE_NAMESPACE}. Preserve alertname=PodCrashLooping and the original alert-derived target string pod/crashy explicitly. If the target still needs clarification, resolve it first. Prefer run_orchestrated_investigation as the default end-to-end runtime path. Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, advance_investigation_runtime, execute_investigation_step, and update_investigation_plan as lower-level debug or fallback seams rather than the primary path. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 CLUSTER_PREEXISTED=0
 HTTP_URL="http://127.0.0.1:${HTTP_PORT}"
 ALERTMANAGER_URL="http://127.0.0.1:${ALERTMANAGER_PORT}"
@@ -110,6 +110,15 @@ wait_for_alertmanager_ready() {
 
   echo "Timed out waiting for Alertmanager readiness" >&2
   exit 1
+}
+
+start_alertmanager_port_forward() {
+  if [[ -n "${alertmanager_port_forward_pid:-}" ]]; then
+    kill "${alertmanager_port_forward_pid}" >/dev/null 2>&1 || true
+    wait "${alertmanager_port_forward_pid}" 2>/dev/null || true
+  fi
+  kubectl --context "${KIND_CONTEXT}" -n kagent port-forward svc/alertmanager "${ALERTMANAGER_PORT}:9093" >"${ALERT_PORT_FORWARD_LOG_PATH}" 2>&1 &
+  alertmanager_port_forward_pid=$!
 }
 
 wait_for_namespace_ready() {
@@ -274,8 +283,7 @@ wait_for_namespace_ready "${SMOKE_NAMESPACE}"
 echo "==> Port-forwarding investigation service and Alertmanager"
 kubectl --context "${KIND_CONTEXT}" -n kagent port-forward svc/investigation-service "${HTTP_PORT}:8080" >/tmp/kind-validate-alert-entry-http.log 2>&1 &
 http_port_forward_pid=$!
-kubectl --context "${KIND_CONTEXT}" -n kagent port-forward svc/alertmanager "${ALERTMANAGER_PORT}:9093" >"${ALERT_PORT_FORWARD_LOG_PATH}" 2>&1 &
-alertmanager_port_forward_pid=$!
+start_alertmanager_port_forward
 wait_for_http_ready
 wait_for_alertmanager_ready
 
@@ -299,6 +307,7 @@ alert_output="${tmp_dir}/alert.md"
 echo "==> Resetting Alertmanager and injecting a synthetic active alert"
 kubectl --context "${KIND_CONTEXT}" -n kagent rollout restart deploy/alertmanager >/dev/null
 kubectl --context "${KIND_CONTEXT}" -n kagent rollout status deploy/alertmanager --timeout=180s
+start_alertmanager_port_forward
 wait_for_alertmanager_ready
 python3 - "${ALERTMANAGER_URL}" "${SMOKE_NAMESPACE}" <<'PY'
 import json
@@ -440,6 +449,7 @@ PY
 echo "==> Resetting Alertmanager to verify the no-match path"
 kubectl --context "${KIND_CONTEXT}" -n kagent rollout restart deploy/alertmanager >/dev/null
 kubectl --context "${KIND_CONTEXT}" -n kagent rollout status deploy/alertmanager --timeout=180s
+start_alertmanager_port_forward
 wait_for_alertmanager_ready
 
 python3 - "${HTTP_URL}" "${SMOKE_NAMESPACE}" "${REPORT_PATH}" <<'PY'
