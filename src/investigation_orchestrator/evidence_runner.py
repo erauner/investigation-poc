@@ -94,6 +94,9 @@ class AppliedExplorationReviewResult:
     submitted_step: SubmittedStepArtifact
     exploration_outcome: ExplorationOutcome | None = None
 
+    def __getattr__(self, name: str):
+        return getattr(self.submitted_step, name)
+
 
 def _planned_loki_route() -> ActualRoute:
     return ActualRoute(
@@ -118,6 +121,12 @@ def _merge_log_excerpts(primary: str, loki: str) -> str:
     if loki in primary:
         return primary
     return f"[Existing logs]\n{primary}\n\n[Loki logs]\n{loki}"
+
+
+def _filter_satisfied_log_limitations(limitations: list[str], *, merged_logs: str) -> list[str]:
+    if not merged_logs.strip():
+        return list(limitations)
+    return [item for item in limitations if "logs unavailable" not in item.lower()]
 
 
 def _workload_runtime_pod_name(artifact: SubmittedStepArtifact) -> str | None:
@@ -158,6 +167,7 @@ def _augment_submission_with_optional_loki_logs(
             loki_snapshot = _loki_mcp_client.collect_service_logs(
                 step.execution_inputs,
                 target=bundle.target,
+                object_state=bundle.object_state,
             )
     except PeerMcpError:
         return artifact.model_copy(
@@ -175,6 +185,7 @@ def _augment_submission_with_optional_loki_logs(
         )
 
     merged_logs = _merge_log_excerpts(bundle.log_excerpt, loki_snapshot.log_excerpt)
+    filtered_limitations = _filter_satisfied_log_limitations(bundle.limitations, merged_logs=merged_logs)
     if step.requested_capability == "workload_evidence_plane":
         return materialize_workload_submission(
             step,
@@ -186,7 +197,7 @@ def _augment_submission_with_optional_loki_logs(
             contributing_routes=_merged_contributing_routes(artifact.contributing_routes, [loki_route]),
             attempted_routes=artifact.attempted_routes,
             cluster_alias=bundle.cluster,
-            extra_limitations=bundle.limitations,
+            extra_limitations=filtered_limitations,
         )
 
     return materialize_service_submission(
@@ -200,11 +211,8 @@ def _augment_submission_with_optional_loki_logs(
         events=bundle.events,
         log_excerpt=merged_logs,
         cluster_alias=bundle.cluster,
-        extra_limitations=bundle.limitations,
+        extra_limitations=filtered_limitations,
     )
-
-    def __getattr__(self, name: str):
-        return getattr(self.submitted_step, name)
 
 
 def _workload_submission_via_peer_mcp(

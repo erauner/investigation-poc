@@ -38,6 +38,14 @@ spec:
             - query_exemplars
       - type: McpServer
         mcpServer:
+          name: loki-mcp-server
+          kind: RemoteMCPServer
+          toolNames:
+            - loki_query
+            - loki_label_names
+            - loki_label_values
+      - type: McpServer
+        mcpServer:
           name: investigation-mcp-server
           kind: RemoteMCPServer
           toolNames:

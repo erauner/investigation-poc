@@ -187,8 +187,15 @@ def _derive_service_findings(object_state: dict, metrics: dict) -> list[Finding]
     return findings
 
 
-def _derive_error_like_log_findings(logs: str, *, service_degradation_present: bool) -> list[Finding]:
+def _derive_error_like_log_findings(
+    logs: str,
+    *,
+    service_degradation_present: bool,
+    require_corroborating_degradation: bool = False,
+) -> list[Finding]:
     if "error" not in logs.lower() and "exception" not in logs.lower():
+        return []
+    if require_corroborating_degradation and not service_degradation_present:
         return []
     return [
         Finding(
@@ -370,6 +377,7 @@ def derive_findings(profile: str, object_state: dict, events: list[str], logs: s
             _derive_error_like_log_findings(
                 logs,
                 service_degradation_present=service_degradation_present,
+                require_corroborating_degradation=True,
             )
         )
     elif profile == "otel-pipeline":

@@ -44,6 +44,12 @@ EXPECTED_PROMETHEUS_MCP_TOOLS = {
     "query_exemplars",
 }
 
+EXPECTED_LOKI_MCP_TOOLS = {
+    "loki_query",
+    "loki_label_names",
+    "loki_label_values",
+}
+
 BANNED_AGENT_TOOLS = {
     "build_alert_investigation_report",
     "build_investigation_report",
@@ -128,6 +134,9 @@ def test_k8s_kustomization_includes_agent_manifest() -> None:
     manifest = _load_yaml("k8s/kustomization.yaml")
 
     assert "agent.yaml" in manifest["resources"]
+    assert "loki-remotemcpserver.yaml" in manifest["resources"]
+    assert "loki-mcp-deployment.yaml" in manifest["resources"]
+    assert "loki-mcp-service.yaml" in manifest["resources"]
 
 
 def test_shadow_agent_manifest_uses_byo_lane() -> None:
@@ -156,10 +165,16 @@ def test_agent_manifest_uses_narrow_planner_led_tool_catalog() -> None:
         for item in tools
         if item["type"] == "McpServer" and item["mcpServer"]["name"] == "prometheus-mcp-server"
     )
+    loki_tools = next(
+        item["mcpServer"]["toolNames"]
+        for item in tools
+        if item["type"] == "McpServer" and item["mcpServer"]["name"] == "loki-mcp-server"
+    )
 
     assert set(investigation_tools) == EXPECTED_INVESTIGATION_AGENT_TOOLS
     assert set(kubernetes_tools) == EXPECTED_KUBERNETES_MCP_TOOLS
     assert set(prometheus_tools) == EXPECTED_PROMETHEUS_MCP_TOOLS
+    assert set(loki_tools) == EXPECTED_LOKI_MCP_TOOLS
     assert not (set(investigation_tools) & BANNED_AGENT_TOOLS)
 
 

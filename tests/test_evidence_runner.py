@@ -797,7 +797,7 @@ def test_workload_external_step_augments_logs_with_loki_without_changing_actual_
                     object_state={"kind": "pod", "name": "crashy-abc123"},
                     events=["Warning BackOff pod/crashy-abc123"],
                     log_excerpt="panic: startup failed",
-                    limitations=[],
+                    limitations=["pod logs unavailable for target"],
                     tool_path=["kubernetes-mcp-server", "resources_get", "events_list", "pods_log"],
                     runtime_pod_name="crashy-abc123",
                 )
@@ -816,7 +816,7 @@ def test_workload_external_step_augments_logs_with_loki_without_changing_actual_
                     cluster_alias="erauner-home",
                     target=target,
                     log_excerpt="exception: dependency unavailable",
-                    tool_path=["loki-mcp-server", "query_logs"],
+                    tool_path=["loki-mcp-server", "loki_query"],
                 ),
             },
         )(),
@@ -827,6 +827,7 @@ def test_workload_external_step_augments_logs_with_loki_without_changing_actual_
     assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
     assert artifact.evidence_bundle is not None
     assert "[Loki logs]" in artifact.evidence_bundle.log_excerpt
+    assert "pod logs unavailable for target" not in artifact.evidence_bundle.limitations
     assert any(route.mcp_server == "loki-mcp-server" for route in artifact.contributing_routes)
     assert artifact.attempted_routes == []
 
@@ -865,7 +866,11 @@ def test_service_external_step_augments_with_loki_logs_without_changing_metrics_
                 "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
                     cluster_alias="erauner-home",
                     target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
-                    object_state={"kind": "service", "name": "api"},
+                    object_state={
+                        "kind": "service",
+                        "name": "api",
+                        "matchedPods": [{"name": "api-abc123"}],
+                    },
                     events=["Warning Unhealthy service/api"],
                     limitations=[],
                     tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
@@ -881,11 +886,11 @@ def test_service_external_step_augments_with_loki_logs_without_changing_metrics_
             (),
             {
                 "is_configured": lambda _self: True,
-                "collect_service_logs": lambda _self, _inputs, target: LokiLogsSnapshot(
+                "collect_service_logs": lambda _self, _inputs, target, object_state=None: LokiLogsSnapshot(
                     cluster_alias="erauner-home",
                     target=target,
                     log_excerpt="error: upstream returned 500",
-                    tool_path=["loki-mcp-server", "query_logs"],
+                    tool_path=["loki-mcp-server", "loki_query"],
                 ),
             },
         )(),
@@ -951,7 +956,7 @@ def test_service_external_step_records_loki_failure_as_attempt_only(monkeypatch)
             (),
             {
                 "is_configured": lambda _self: True,
-                "collect_service_logs": lambda _self, _inputs, target: (_ for _ in ()).throw(
+                "collect_service_logs": lambda _self, _inputs, target, object_state=None: (_ for _ in ()).throw(
                     PeerMcpError("loki down")
                 ),
             },
@@ -965,6 +970,14 @@ def test_service_external_step_records_loki_failure_as_attempt_only(monkeypatch)
     assert artifact.evidence_bundle.log_excerpt == ""
     assert artifact.attempted_routes[-1].mcp_server == "loki-mcp-server"
     assert artifact.attempted_routes[-1].tool_path == ["loki-mcp-server"]
+
+
+def test_applied_exploration_review_result_proxies_submitted_step_attributes() -> None:
+    step = _workload_step()
+    submitted = evidence_runner._submitted_artifact(step)
+    review_result = evidence_runner.AppliedExplorationReviewResult(submitted_step=submitted)
+
+    assert review_result.step_id == submitted.step_id
 
 
 def test_collect_external_steps_replays_only_deferred_external_steps(monkeypatch) -> None:
