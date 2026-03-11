@@ -7,6 +7,7 @@ from investigation_orchestrator import mcp_clients
 from investigation_orchestrator.mcp_clients import KubernetesMcpClient, LokiMcpClient, PrometheusMcpClient
 from investigation_service.models import StepExecutionInputs
 import pytest
+import re
 
 
 class _DummyAsyncClient:
@@ -304,13 +305,13 @@ def test_collect_workload_logs_normalizes_loki_payload(monkeypatch) -> None:
     assert calls == [
         (
             "loki_query",
-            {
-                "query": '{namespace="operator-smoke",pod="api-abc123"}',
-                "start": "15m",
-                "limit": 200,
-            },
+            calls[0][1],
         )
     ]
+    assert calls[0][1]["query"] == '{namespace="operator-smoke",pod="api-abc123"}'
+    assert calls[0][1]["limit"] == 200
+    assert re.fullmatch(r".+Z", str(calls[0][1]["start"]))
+    assert re.fullmatch(r".+Z", str(calls[0][1]["end"]))
     assert snapshot.log_excerpt == "error: upstream failed\nexception: retry exhausted"
     assert snapshot.tool_path == ["loki-mcp-server", "loki_query"]
 
@@ -359,13 +360,13 @@ def test_collect_service_logs_builds_loki_query_from_matched_pods(monkeypatch) -
     assert calls == [
         (
             "loki_query",
-            {
-                "query": '{namespace="operator-smoke",pod=~"api\\-abc123|api\\-def456"}',
-                "start": "15m",
-                "limit": 200,
-            },
+            calls[0][1],
         )
     ]
+    assert calls[0][1]["query"] == '{namespace="operator-smoke",pod=~"api\\-abc123|api\\-def456"}'
+    assert calls[0][1]["limit"] == 200
+    assert re.fullmatch(r".+Z", str(calls[0][1]["start"]))
+    assert re.fullmatch(r".+Z", str(calls[0][1]["end"]))
     assert snapshot.log_excerpt == "error: upstream returned 500"
     assert snapshot.tool_path == ["loki-mcp-server", "loki_query"]
 

@@ -212,7 +212,9 @@ def _normalize_loki_logs(raw: Any) -> str:
 
 def _format_loki_window(minutes: int | None) -> str:
     lookback_minutes = max(minutes or 15, 1)
-    return f"{lookback_minutes}m"
+    return (
+        datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
+    ).isoformat().replace("+00:00", "Z")
 
 
 def _build_workload_loki_query(target: TargetRef, runtime_pod_name: str) -> str:
@@ -1164,6 +1166,7 @@ class LokiMcpClient:
                         {
                             "query": _build_workload_loki_query(target, runtime_pod_name or target.name),
                             "start": _format_loki_window(inputs.lookback_minutes),
+                            "end": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                             "limit": get_log_tail_lines(),
                         },
                     )
@@ -1203,6 +1206,7 @@ class LokiMcpClient:
                         {
                             "query": _build_service_loki_query(target, object_state),
                             "start": _format_loki_window(inputs.lookback_minutes),
+                            "end": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                             "limit": get_log_tail_lines(),
                         },
                     )

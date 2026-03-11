@@ -12,7 +12,7 @@ usage() {
 
 validate_scenario() {
   case "${METRICS_SMOKE_SCENARIO}" in
-    healthy_complete|weak_but_usable|empty_or_broken)
+    healthy_complete|weak_but_usable|empty_or_broken|loki_complementary)
       ;;
     *)
       echo "Unsupported METRICS_SMOKE_SCENARIO: ${METRICS_SMOKE_SCENARIO}" >&2

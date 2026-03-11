@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: investigation-service-config
+  namespace: kagent
+data:
+  LOKI_URL: http://loki.kagent.svc.cluster.local:3100
+  LOKI_MCP_URL: http://loki-mcp-server.kagent:8080/stream

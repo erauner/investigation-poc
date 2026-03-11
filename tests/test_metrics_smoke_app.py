@@ -54,6 +54,7 @@ def test_parse_metrics_scenario_defaults_to_healthy_complete() -> None:
 
     assert module.parse_metrics_scenario(None) == module.MetricsScenario.HEALTHY_COMPLETE
     assert module.parse_metrics_scenario("weak_but_usable") == module.MetricsScenario.WEAK_BUT_USABLE
+    assert module.parse_metrics_scenario("loki_complementary") == module.MetricsScenario.LOKI_COMPLEMENTARY
 
 
 def test_metrics_registry_for_weak_scenario_hides_metrics_after_cutover(monkeypatch) -> None:
@@ -87,3 +88,29 @@ def test_empty_or_broken_registry_does_not_emit_service_histogram() -> None:
 
     assert "http_server_request_duration_seconds" in healthy_output
     assert "http_server_request_duration_seconds" not in empty_output
+
+
+def test_loki_complementary_registry_emits_service_histogram() -> None:
+    module = _load_metrics_smoke_app()
+    module.REQUEST_LATENCY.labels(method="GET", route="/slow", status="200").observe(1.6)
+
+    output = module.generate_latest(
+        module.metrics_registry_for_scenario(module.MetricsScenario.LOKI_COMPLEMENTARY)
+    ).decode("utf-8")
+
+    assert "http_server_request_duration_seconds" in output
+
+
+def test_build_loki_push_payload_includes_namespace_pod_and_service(monkeypatch) -> None:
+    module = _load_metrics_smoke_app()
+    monkeypatch.setattr(module, "POD_NAMESPACE", "metrics-smoke")
+    monkeypatch.setattr(module, "POD_NAME", "metrics-api-abc123")
+    monkeypatch.setattr(module, "SERVICE_NAME", "metrics-api")
+
+    payload = module.build_loki_push_payload("error: upstream returned 500", timestamp_ns=123)
+
+    assert payload == (
+        b'{"streams": [{"stream": {"job": "metrics-smoke", "namespace": "metrics-smoke", '
+        b'"pod": "metrics-api-abc123", "service": "metrics-api"}, "values": [["123", '
+        b'"error: upstream returned 500"]]}]}'
+    )
