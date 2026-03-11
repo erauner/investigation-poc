@@ -104,11 +104,11 @@ def maybe_run_bounded_service_evidence_expansion_scout(
     baseline_artifact: SubmittedStepArtifact,
     prometheus_mcp_client: PrometheusMcpClient,
 ) -> tuple[SubmittedStepArtifact, ExplorationOutcome | None]:
-    if step.exploration_intent is None:
-        return baseline_artifact, None
     if scout_context is None:
         return baseline_artifact, None
     if scout_context.intent != "evidence_expansion":
+        return baseline_artifact, None
+    if not hasattr(prometheus_mcp_client, "collect_service_range_metrics"):
         return baseline_artifact, None
     policy = scout_context.policy
     if policy.max_additional_probe_runs < 1 or policy.max_metric_families < 1:

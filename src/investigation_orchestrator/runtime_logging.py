@@ -57,6 +57,7 @@ def summarize_graph_state(state: OrchestrationState | dict[str, Any] | None) -> 
         "active_batch_present": active_batch is not None,
         "active_batch_id_token": _identifier_token(active_batch.batch_id) if active_batch is not None else None,
         "submitted_steps_count": len(state.get("submitted_steps") or []),
+        "exploration_outcomes_count": len(state.get("exploration_outcomes") or []),
         "pending_exploration_review": pending_review is not None,
         "pending_review_step_id_token": _identifier_token(pending_review.step.step_id) if pending_review is not None else None,
         "pending_review_capability": pending_review.capability if pending_review is not None else None,

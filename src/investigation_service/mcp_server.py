@@ -232,6 +232,7 @@ def advance_investigation_runtime(
     incident: dict,
     execution_context: dict | None = None,
     submitted_steps: list[dict] | None = None,
+    exploration_outcomes: list[dict] | None = None,
     batch_id: str | None = None,
 ) -> dict:
     """Advance exactly one active evidence batch.
@@ -240,6 +241,7 @@ def advance_investigation_runtime(
     - incident=<the same request shape used to build the plan>
     - execution_context=<seeded from the built plan or carried forward from a prior advance>
     - submitted_steps=<optional typed artifacts for any externally satisfied pending steps in this batch>
+    - exploration_outcomes=<optional runtime-local scout outcomes paired with this batch advance>
     - batch_id=<optional explicit batch id>
 
     Transition behavior:
@@ -259,6 +261,7 @@ def advance_investigation_runtime(
             "incident": incident,
             "execution_context": execution_context,
             "submitted_steps": submitted_steps or [],
+            "exploration_outcomes": exploration_outcomes or [],
             "batch_id": batch_id,
         },
         lambda: advance_investigation_runtime_impl(
@@ -266,6 +269,7 @@ def advance_investigation_runtime(
                 incident=incident,
                 execution_context=execution_context,
                 submitted_steps=submitted_steps or [],
+                exploration_outcomes=exploration_outcomes or [],
                 batch_id=batch_id,
             )
         ).model_dump(mode="json")
@@ -278,6 +282,7 @@ def handoff_active_evidence_batch(
     execution_context: dict | None = None,
     handoff_token: str | None = None,
     submitted_steps: list[dict] | None = None,
+    exploration_outcomes: list[dict] | None = None,
     batch_id: str | None = None,
 ) -> dict:
     """Preferred agent-facing runtime helper for one bounded evidence-batch handoff.
@@ -288,6 +293,7 @@ def handoff_active_evidence_batch(
     - follow-up calls: prefer handoff_token=<the opaque token returned by the previous handoff response>
     - execution_context=<legacy optional seeded or carried-forward runtime context; prefer handoff_token for handoff continuation>
     - submitted_steps=<optional typed artifacts for externally satisfied pending steps>
+    - exploration_outcomes=<optional runtime-local scout outcomes paired with this batch advance>
     - batch_id=<optional explicit batch id>
 
     Behavior:
@@ -312,6 +318,7 @@ def handoff_active_evidence_batch(
             "execution_context": execution_context,
             "handoff_token": handoff_token,
             "submitted_steps": submitted_steps or [],
+            "exploration_outcomes": exploration_outcomes or [],
             "batch_id": batch_id,
         },
         lambda: handoff_active_evidence_batch_impl(
@@ -320,6 +327,7 @@ def handoff_active_evidence_batch(
                 execution_context=execution_context,
                 handoff_token=handoff_token,
                 submitted_steps=submitted_steps or [],
+                exploration_outcomes=exploration_outcomes or [],
                 batch_id=batch_id,
             )
         ).model_dump(mode="json")

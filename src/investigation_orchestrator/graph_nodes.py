@@ -13,7 +13,7 @@ from investigation_service.models import (
     SubmittedStepArtifact,
 )
 
-from .evidence_runner import ExternalStepCollectionResult
+from .evidence_runner import AppliedExplorationReviewResult, ExternalStepCollectionResult
 from .state import OrchestrationState, PendingExplorationReview
 
 
@@ -24,7 +24,7 @@ class OrchestratorRuntimeDeps:
     advance_batch: Callable[..., AdvanceInvestigationRuntimeResponse]
     render_report: Callable[[InvestigationReportRequest, ReportingExecutionContext], InvestigationReport]
     collect_external_steps: Callable[..., ExternalStepCollectionResult]
-    apply_pending_exploration_review: Callable[[PendingExplorationReview], object]
+    apply_pending_exploration_review: Callable[[PendingExplorationReview], AppliedExplorationReviewResult]
     active_batch_is_render_only: Callable[[InvestigationPlan], bool]
 
 
@@ -114,11 +114,10 @@ def apply_exploration_review_node(
         raise ValueError("pending exploration review is still awaiting decision")
     review_result = deps.apply_pending_exploration_review(pending_review)
     exploration_outcomes = list(state.get("exploration_outcomes", []))
-    if getattr(review_result, "exploration_outcome", None) is not None:
+    if review_result.exploration_outcome is not None:
         exploration_outcomes.append(review_result.exploration_outcome)
-    submitted_step = getattr(review_result, "submitted_step", review_result)
     return {
-        "submitted_steps": [*state["submitted_steps"], submitted_step],
+        "submitted_steps": [*state["submitted_steps"], review_result.submitted_step],
         "exploration_outcomes": exploration_outcomes,
         "pending_exploration_review": None,
     }

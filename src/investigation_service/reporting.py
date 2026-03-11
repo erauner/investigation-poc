@@ -363,6 +363,8 @@ def _advance_investigation_runtime(
     *,
     exploration_outcomes=None,
 ) -> AdvanceInvestigationRuntimeResponse:
+    if exploration_outcomes is None:
+        exploration_outcomes = req.exploration_outcomes
     initial_plan, updated_plan, executions, _allow_bounded_fallback_execution = _reporting_execution_context(
         InvestigationReportingRequest(
             **req.incident.model_dump(mode="python"),
@@ -440,7 +442,7 @@ def handoff_active_evidence_batch(req: HandoffActiveEvidenceBatchRequest) -> Han
         plan=updated_plan,
         incident=req.incident,
         submitted_steps=req.submitted_steps,
-        exploration_outcomes=None,
+        exploration_outcomes=req.exploration_outcomes,
         batch_id=req.batch_id,
         deps=_planner_deps(),
     )

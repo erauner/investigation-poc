@@ -10,6 +10,7 @@ from investigation_service.models import (
     EvidenceBatch,
     EvidenceBatchExecution,
     EvidenceBundle,
+    ExplorationOutcome,
     Finding,
     Hypothesis,
     InvestigationAnalysis,
@@ -658,6 +659,45 @@ def test_advance_investigation_runtime_returns_context_without_fallback(monkeypa
     assert response.next_active_batch is None
 
 
+def test_advance_investigation_runtime_forwards_exploration_outcomes(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+    monkeypatch.setattr(
+        reporting,
+        "execute_investigation_step",
+        lambda _req: (_ for _ in ()).throw(AssertionError("fallback execution should not run")),
+    )
+
+    def fake_advance_active_batch(**kwargs):
+        captured.update(kwargs)
+        return reporting.SubmittedEvidenceReconciliationResult(
+            execution=_execution(),
+            updated_plan=_runtime_plan().model_copy(update={"active_batch_id": None}),
+        )
+
+    monkeypatch.setattr(reporting.planner, "advance_active_evidence_batch", fake_advance_active_batch)
+
+    outcome = ExplorationOutcome(
+        step_id="collect-target-evidence",
+        capability="service_evidence_plane",
+        intent="evidence_expansion",
+        outcome="evidence_delta",
+        probe_kind="service_range_metrics",
+        notes=["probe_improved_artifact"],
+    )
+    response = reporting.advance_investigation_runtime(
+        AdvanceInvestigationRuntimeRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+            execution_context=ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[]),
+            submitted_steps=[],
+            exploration_outcomes=[outcome],
+        )
+    )
+
+    assert captured["exploration_outcomes"] == [outcome]
+    assert response.next_active_batch is None
+
+
 def test_handoff_active_evidence_batch_prepares_external_batch_without_advancing(monkeypatch) -> None:
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
     monkeypatch.setattr(
@@ -728,6 +768,51 @@ def test_handoff_active_evidence_batch_advances_after_submission(monkeypatch) ->
     assert response.next_action == "render_report"
     assert response.required_external_step_ids == []
     assert response.handoff_token
+
+
+def test_handoff_active_evidence_batch_forwards_exploration_outcomes(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+
+    def fake_advance_active_batch(**kwargs):
+        captured.update(kwargs)
+        return reporting.SubmittedEvidenceReconciliationResult(
+            execution=_execution(),
+            updated_plan=_runtime_plan().model_copy(update={"active_batch_id": None}),
+        )
+
+    monkeypatch.setattr(reporting.planner, "advance_active_evidence_batch", fake_advance_active_batch)
+
+    outcome = ExplorationOutcome(
+        step_id="collect-target-evidence",
+        capability="service_evidence_plane",
+        intent="evidence_expansion",
+        outcome="no_useful_change",
+        probe_kind="service_range_metrics",
+        notes=["probe_not_improving"],
+    )
+    response = reporting.handoff_active_evidence_batch(
+        HandoffActiveEvidenceBatchRequest(
+            incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
+            execution_context=ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[]),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="prometheus-mcp-server",
+                        tool_name="execute_query",
+                        tool_path=["prometheus-mcp-server", "execute_query"],
+                    ),
+                )
+            ],
+            exploration_outcomes=[outcome],
+        )
+    )
+
+    assert captured["exploration_outcomes"] == [outcome]
+    assert response.execution is not None
 
 
 def test_handoff_active_evidence_batch_auto_advances_planner_owned_batch(monkeypatch) -> None:

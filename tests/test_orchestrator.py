@@ -1,7 +1,7 @@
 from investigation_orchestrator.entrypoint import run_orchestrated_investigation
 from investigation_orchestrator.checkpointing import GraphCheckpointConfig, create_in_memory_checkpointer
 from investigation_orchestrator.graph import get_investigation_graph_state, update_investigation_graph_state
-from investigation_orchestrator.evidence_runner import ExternalStepCollectionResult
+from investigation_orchestrator.evidence_runner import AppliedExplorationReviewResult, ExternalStepCollectionResult
 from investigation_orchestrator.runtime_logging import summarize_graph_state
 from investigation_orchestrator.state import PendingExplorationReview
 from investigation_service.models import (
@@ -11,6 +11,7 @@ from investigation_service.models import (
     EvidenceBatch,
     EvidenceBatchExecution,
     EvidenceStepContract,
+    ExplorationOutcome,
     InvestigationReport,
     InvestigationReportRequest,
     InvestigationSubject,
@@ -26,11 +27,13 @@ import pytest
 
 def _external_steps_result(
     *submitted_steps,
+    exploration_outcomes=(),
     pending_exploration_review=None,
     deferred_external_steps=(),
 ) -> ExternalStepCollectionResult:
     return ExternalStepCollectionResult(
         submitted_steps=list(submitted_steps),
+        exploration_outcomes=tuple(exploration_outcomes),
         pending_exploration_review=pending_exploration_review,
         deferred_external_steps=tuple(deferred_external_steps),
     )
@@ -249,8 +252,9 @@ def test_run_orchestrated_investigation_advances_and_renders(monkeypatch) -> Non
         ),
     )
 
-    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+    def fake_advance(_incident, _execution_context, *, submitted_steps, exploration_outcomes=None, batch_id=None):
         captured["submitted"] = submitted_steps
+        captured["exploration_outcomes"] = exploration_outcomes
         return AdvanceInvestigationRuntimeResponse(
             execution_context=_context(active_batch_id=None),
             next_active_batch=None,
@@ -376,7 +380,7 @@ def test_run_orchestrated_investigation_forwards_workload_peer_failure_metadata(
         ),
     )
 
-    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+    def fake_advance(_incident, _execution_context, *, submitted_steps, exploration_outcomes=None, batch_id=None):
         captured["submitted"] = submitted_steps
         return AdvanceInvestigationRuntimeResponse(
             execution_context=_context(active_batch_id=None),
@@ -518,7 +522,7 @@ def test_run_orchestrated_investigation_forwards_service_peer_failure_metadata(m
         ),
     )
 
-    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+    def fake_advance(_incident, _execution_context, *, submitted_steps, exploration_outcomes=None, batch_id=None):
         captured["submitted"] = submitted_steps
         return AdvanceInvestigationRuntimeResponse(
             execution_context=_context(active_batch_id=None),
@@ -661,7 +665,7 @@ def test_run_orchestrated_investigation_forwards_node_peer_failure_metadata(monk
         ),
     )
 
-    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+    def fake_advance(_incident, _execution_context, *, submitted_steps, exploration_outcomes=None, batch_id=None):
         captured["submitted"] = submitted_steps
         return AdvanceInvestigationRuntimeResponse(
             execution_context=_context(active_batch_id=None),
@@ -1301,7 +1305,7 @@ def test_internal_graph_runner_resumes_after_external_step_materialization(monke
         ),
     )
 
-    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+    def fake_advance(_incident, _execution_context, *, submitted_steps, exploration_outcomes=None, batch_id=None):
         captured["submitted"] = submitted_steps
         return AdvanceInvestigationRuntimeResponse(
             execution_context=_context(active_batch_id=None),
@@ -1454,21 +1458,31 @@ def test_runtime_pauses_for_pending_workload_exploration_review(monkeypatch) -> 
     monkeypatch.setattr(
         entrypoint,
         "apply_pending_exploration_review",
-        lambda review: review.baseline_artifact.model_copy(
-            update={
-                "evidence_bundle": review.baseline_artifact.evidence_bundle.model_copy(
-                    update={
-                        "limitations": [
-                            *review.baseline_artifact.evidence_bundle.limitations,
-                            "bounded workload scout skipped by review decision",
-                        ]
-                    }
-                )
-            }
+        lambda review: AppliedExplorationReviewResult(
+            submitted_step=review.baseline_artifact.model_copy(
+                update={
+                    "evidence_bundle": review.baseline_artifact.evidence_bundle.model_copy(
+                        update={
+                            "limitations": [
+                                *review.baseline_artifact.evidence_bundle.limitations,
+                                "bounded workload scout skipped by review decision",
+                            ]
+                        }
+                    )
+                }
+            ),
+            exploration_outcome=ExplorationOutcome(
+                step_id=review.step.step_id,
+                capability=review.capability,
+                intent=review.intent,
+                outcome="no_useful_change",
+                probe_kind=review.probe_kind,
+                notes=["review_skipped"],
+            ),
         ),
     )
 
-    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+    def fake_advance(_incident, _execution_context, *, submitted_steps, exploration_outcomes=None, batch_id=None):
         captured["submitted"] = submitted_steps
         return AdvanceInvestigationRuntimeResponse(
             execution_context=_context(active_batch_id=None),
@@ -2366,6 +2380,16 @@ def test_runtime_review_resumes_deferred_external_steps_in_same_batch(monkeypatc
             return _external_steps_result(service_artifact)
         assert allow_exploration_review is True
         return _external_steps_result(
+            exploration_outcomes=[
+                ExplorationOutcome(
+                    step_id="collect-service-evidence",
+                    capability="service_evidence_plane",
+                    intent="evidence_expansion",
+                    outcome="no_useful_change",
+                    probe_kind="service_range_metrics",
+                    notes=["probe_not_improving"],
+                )
+            ],
             pending_exploration_review=PendingExplorationReview(
                 batch_id="batch-1",
                 step=workload_step,
@@ -2383,22 +2407,33 @@ def test_runtime_review_resumes_deferred_external_steps_in_same_batch(monkeypatc
     monkeypatch.setattr(
         entrypoint,
         "apply_pending_exploration_review",
-        lambda review: review.baseline_artifact.model_copy(
-            update={
-                "evidence_bundle": review.baseline_artifact.evidence_bundle.model_copy(
-                    update={
-                        "limitations": [
-                            *review.baseline_artifact.evidence_bundle.limitations,
-                            "bounded workload scout approved by review decision",
-                        ]
-                    }
-                )
-            }
+        lambda review: AppliedExplorationReviewResult(
+            submitted_step=review.baseline_artifact.model_copy(
+                update={
+                    "evidence_bundle": review.baseline_artifact.evidence_bundle.model_copy(
+                        update={
+                            "limitations": [
+                                *review.baseline_artifact.evidence_bundle.limitations,
+                                "bounded workload scout approved by review decision",
+                            ]
+                        }
+                    )
+                }
+            ),
+            exploration_outcome=ExplorationOutcome(
+                step_id=review.step.step_id,
+                capability=review.capability,
+                intent=review.intent,
+                outcome="evidence_delta",
+                probe_kind=review.probe_kind,
+                notes=["probe_improved_artifact"],
+            ),
         ),
     )
 
-    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+    def fake_advance(_incident, _execution_context, *, submitted_steps, exploration_outcomes=None, batch_id=None):
         captured["submitted"] = submitted_steps
+        captured["exploration_outcomes"] = exploration_outcomes
         return AdvanceInvestigationRuntimeResponse(
             execution_context=_context(active_batch_id=None),
             next_active_batch=None,
@@ -2451,6 +2486,11 @@ def test_runtime_review_resumes_deferred_external_steps_in_same_batch(monkeypatc
         "collect-target-evidence",
         "collect-service-evidence",
     ]
+    assert [outcome.step_id for outcome in captured["exploration_outcomes"]] == [
+        "collect-service-evidence",
+        "collect-target-evidence",
+    ]
+    assert resumed.state["exploration_outcomes"] == []
 
 
 def test_runtime_pauses_for_pending_workload_exploration_review_approve(monkeypatch) -> None:
@@ -2552,22 +2592,33 @@ def test_runtime_pauses_for_pending_workload_exploration_review_approve(monkeypa
     monkeypatch.setattr(
         entrypoint,
         "apply_pending_exploration_review",
-        lambda review: review.baseline_artifact.model_copy(
-            update={
-                "evidence_bundle": review.baseline_artifact.evidence_bundle.model_copy(
-                    update={
-                        "limitations": [
-                            *review.baseline_artifact.evidence_bundle.limitations,
-                            "bounded workload scout approved by review decision",
-                        ]
-                    }
-                )
-            }
+        lambda review: AppliedExplorationReviewResult(
+            submitted_step=review.baseline_artifact.model_copy(
+                update={
+                    "evidence_bundle": review.baseline_artifact.evidence_bundle.model_copy(
+                        update={
+                            "limitations": [
+                                *review.baseline_artifact.evidence_bundle.limitations,
+                                "bounded workload scout approved by review decision",
+                            ]
+                        }
+                    )
+                }
+            ),
+            exploration_outcome=ExplorationOutcome(
+                step_id=review.step.step_id,
+                capability=review.capability,
+                intent=review.intent,
+                outcome="evidence_delta",
+                probe_kind=review.probe_kind,
+                notes=["probe_improved_artifact"],
+            ),
         ),
     )
 
-    def fake_advance(_incident, _execution_context, *, submitted_steps, batch_id=None):
+    def fake_advance(_incident, _execution_context, *, submitted_steps, exploration_outcomes=None, batch_id=None):
         captured["submitted"] = submitted_steps
+        captured["exploration_outcomes"] = exploration_outcomes
         return AdvanceInvestigationRuntimeResponse(
             execution_context=_context(active_batch_id=None),
             next_active_batch=None,
@@ -2808,6 +2859,7 @@ def test_summarize_graph_state_handles_pending_review_without_probe_kind() -> No
             "execution_context": _context(),
             "active_batch": None,
             "submitted_steps": [],
+            "exploration_outcomes": [],
             "pending_exploration_review": PendingExplorationReview(
                 batch_id="batch-1",
                 step=step,
@@ -2825,6 +2877,7 @@ def test_summarize_graph_state_handles_pending_review_without_probe_kind() -> No
 
     assert summary["pending_review_probe_kind"] is None
     assert summary["pending_review_stop_reason"] == "awaiting_review"
+    assert summary["exploration_outcomes_count"] == 0
 
 
 def test_internal_graph_resume_applies_pod_compatibility_when_request_is_provided(monkeypatch) -> None:

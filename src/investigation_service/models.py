@@ -418,6 +418,7 @@ class AdvanceInvestigationRuntimeRequest(BaseModel):
     execution_context: "ReportingExecutionContext | None" = None
     batch_id: str | None = None
     submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
+    exploration_outcomes: list[ExplorationOutcome] = Field(default_factory=list)
 
 
 class AdvanceInvestigationRuntimeResponse(BaseModel):
@@ -431,6 +432,7 @@ class HandoffActiveEvidenceBatchRequest(BaseModel):
     handoff_token: str | None = None
     batch_id: str | None = None
     submitted_steps: list[SubmittedStepArtifact] = Field(default_factory=list)
+    exploration_outcomes: list[ExplorationOutcome] = Field(default_factory=list)
 
 
 class HandoffActiveEvidenceBatchResponse(BaseModel):
