@@ -45,6 +45,7 @@ from investigation_service.reporting import (
     render_investigation_report,
 )
 from investigation_service.synthesis import build_root_cause_report
+import investigation_service.tools as tools_module
 from investigation_service.tools import normalize_alert_input
 from investigation_service.tools import evidence_bundle_from_context, render_collected_context
 
@@ -900,6 +901,162 @@ def test_normalize_alert_input_accepts_explicit_node_name() -> None:
     assert normalized.target == "node/worker3"
     assert normalized.scope == "node"
     assert normalized.node_name == "worker3"
+
+
+def test_normalize_alert_input_expands_explicit_pod_shorthand(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "find_unhealthy_pod",
+        lambda req: type(
+            "UnhealthyPodResponse",
+            (),
+            {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+        )(),
+    )
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="PodAlert",
+            namespace="operator-smoke",
+            target="pod",
+        )
+    )
+
+    assert normalized.target == "pod/crashy-abc123"
+    assert "resolved vague workload target to pod/crashy-abc123" in normalized.normalization_notes
+
+
+def test_normalize_alert_input_expands_explicit_workload_shorthand(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "find_unhealthy_pod",
+        lambda req: type(
+            "UnhealthyPodResponse",
+            (),
+            {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+        )(),
+    )
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="WorkloadAlert",
+            namespace="operator-smoke",
+            target="workload",
+        )
+    )
+
+    assert normalized.target == "pod/crashy-abc123"
+    assert "resolved vague workload target to pod/crashy-abc123" in normalized.normalization_notes
+
+
+def test_normalize_alert_input_resolves_explicit_backend_target(monkeypatch) -> None:
+    monkeypatch.setattr(tools_module, "get_backend_cr", lambda namespace, name, cluster=None: {})
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="BackendAlert",
+            namespace="operator-smoke",
+            target="Backend/crashy",
+        )
+    )
+
+    assert normalized.target == "deployment/crashy"
+    assert "resolved Backend/crashy to deployment/crashy" in normalized.normalization_notes
+
+
+def test_normalize_alert_input_resolves_explicit_frontend_target(monkeypatch) -> None:
+    monkeypatch.setattr(tools_module, "get_frontend_cr", lambda namespace, name, cluster=None: {})
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="FrontendAlert",
+            namespace="operator-smoke",
+            target="Frontend/landing",
+            profile="service",
+        )
+    )
+
+    assert normalized.target == "deployment/landing"
+    assert normalized.scope == "workload"
+    assert normalized.profile == "service"
+    assert "resolved Frontend/landing to deployment/landing" in normalized.normalization_notes
+
+
+def test_normalize_alert_input_raises_on_explicit_cluster_target_lookup_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "get_cluster_cr",
+        lambda namespace, name, cluster=None: {"error": "not found"},
+    )
+
+    with pytest.raises(ValueError, match="cluster lookup failed for tenant: not found"):
+        normalize_alert_input(
+            CollectAlertContextRequest(
+                alertname="ClusterAlert",
+                namespace="operator-smoke",
+                target="Cluster/tenant",
+            )
+        )
+
+
+def test_normalize_alert_input_preserves_cluster_related_subject_enrichment(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "get_cluster_cr",
+        lambda namespace, name, cluster=None: {
+            "status": {
+                "componentStatuses": [
+                    {"kind": "Backend", "name": f"{name}-be", "phase": "Failed"},
+                    {"kind": "StatefulSet", "name": f"{name}-db", "phase": "Ready"},
+                ]
+            }
+        },
+    )
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="ClusterAlert",
+            namespace="operator-smoke",
+            target="Cluster/tenant",
+        )
+    )
+
+    assert normalized.subject_context is not None
+    assert {(ref.kind, ref.name, ref.relation) for ref in normalized.subject_context.related_subjects} >= {
+        ("backend", "tenant-be", "member"),
+        ("statefulset", "tenant-db", "dependency"),
+    }
+
+
+def test_normalize_alert_input_preserves_explicit_current_context_for_backend_lookup(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        tools_module,
+        "resolve_cluster",
+        lambda cluster: type(
+            "ResolvedCluster",
+            (),
+            {"alias": "current-context", "source": "legacy_current_context"},
+        )(),
+    )
+    monkeypatch.setattr(
+        tools_module,
+        "get_backend_cr",
+        lambda namespace, name, cluster=None: (seen.setdefault("cluster", cluster), {})[1],
+    )
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="BackendAlert",
+            cluster="current-context",
+            namespace="operator-smoke",
+            target="Backend/crashy",
+        )
+    )
+
+    assert normalized.cluster is None
+    assert normalized.target == "deployment/crashy"
+    assert getattr(seen["cluster"], "source", None) == "legacy_current_context"
 
 
 def test_normalize_alert_route_is_not_public() -> None:

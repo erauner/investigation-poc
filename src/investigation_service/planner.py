@@ -6,9 +6,7 @@ from .adequacy import assess_target_evidence_adequacy
 from .execution_policy import policy_fields
 from .ingress import (
     IngressDeps,
-    canonical_focus_ref,
     ingress_request_from_report_request,
-    normalized_request_from_subject_set,
     normalize_ingress_request,
     subject_context_from_subject_set,
 )
@@ -31,6 +29,7 @@ from .models import (
     GetActiveEvidenceBatchRequest,
     InvestigationSubject,
     InvestigationPlan,
+    InvestigationPlannerSeed,
     InvestigationTarget,
     InvestigationMode,
     InvestigationReportRequest,
@@ -45,21 +44,17 @@ from .models import (
     SubmittedStepArtifact,
     UpdateInvestigationPlanRequest,
 )
-
-_VAGUE_WORKLOAD_TARGETS = {
-    "pod",
-    "pods",
-    "workload",
-    "workloads",
-    "unhealthy",
-    "unhealthy-pod",
-    "unhealthy-workload",
-}
+from .planner_seed import (
+    PostSeedNormalizationDeps,
+    apply_post_seed_normalization,
+    PlannerSeedDeps,
+    normalized_request_from_planner_seed,
+    planner_seed_from_subject_set,
+)
 
 
 @dataclass(frozen=True)
 class PlannerDeps:
-    normalize_alert_input: Callable[[CollectAlertContextRequest], NormalizedInvestigationRequest]
     canonical_target: Callable[[str, str, str | None], str]
     scope_from_target: Callable[[str, str], str]
     resolve_cluster: Callable[[str | None], Any]
@@ -93,13 +88,20 @@ class StepRuntimeSpec:
 
 def _ingress_deps(deps: PlannerDeps) -> IngressDeps:
     return IngressDeps(
+        resolve_cluster=deps.resolve_cluster,
+        get_cluster_cr=deps.get_cluster_cr,
+        find_unhealthy_pod=deps.find_unhealthy_pod,
+    )
+
+
+def _planner_seed_deps(deps: PlannerDeps) -> PlannerSeedDeps:
+    return PlannerSeedDeps(
         canonical_target=deps.canonical_target,
         scope_from_target=deps.scope_from_target,
         resolve_cluster=deps.resolve_cluster,
         get_backend_cr=deps.get_backend_cr,
         get_frontend_cr=deps.get_frontend_cr,
         get_cluster_cr=deps.get_cluster_cr,
-        find_unhealthy_pod=deps.find_unhealthy_pod,
     )
 
 
@@ -151,20 +153,17 @@ def normalized_request(
     req: InvestigationReportRequest,
     deps: PlannerDeps,
 ) -> NormalizedInvestigationRequest:
-    _, normalized = _subject_set_and_normalized(req, deps)
-    if normalized is None:
-        raise ValueError("no canonical investigation subject could be resolved from ingress input")
-    return normalized
+    _, seed = _subject_set_and_seed(req, deps)
+    return _normalized_request_from_seed(seed, deps)
 
 
 def resolve_primary_target(
     req: InvestigationReportRequest,
     deps: PlannerDeps,
 ) -> InvestigationTarget:
-    subject_set, normalized = _subject_set_and_normalized(req, deps)
-    if normalized is None:
-        raise ValueError("no canonical investigation subject could be resolved from ingress input")
-    requested_target = canonical_focus_ref(subject_set, req.target) or normalized.target
+    _, seed = _subject_set_and_seed(req, deps)
+    normalized = _normalized_request_from_seed(seed, deps)
+    requested_target = seed.requested_target or normalized.target
     return investigation_target_from_normalized(normalized, requested_target=requested_target)
 
 
@@ -176,215 +175,43 @@ def _normalized_subject_set(
     return normalize_ingress_request(ingress_req, _ingress_deps(deps))
 
 
-def _subject_set_and_normalized(
+def _subject_set_and_seed(
     req: InvestigationReportRequest,
     deps: PlannerDeps,
-) -> tuple[NormalizedInvestigationSubjectSet, NormalizedInvestigationRequest | None]:
+) -> tuple[NormalizedInvestigationSubjectSet, InvestigationPlannerSeed]:
     subject_set = _normalized_subject_set(req, deps)
+    subject_context = subject_context_from_subject_set(subject_set)
+    seed = planner_seed_from_subject_set(
+        subject_set,
+        subject_context=subject_context,
+        deps=_planner_seed_deps(deps),
+    )
+    return subject_set, seed
+
+
+def _seed_to_normalized_or_none(
+    seed: InvestigationPlannerSeed,
+    deps: PlannerDeps,
+) -> NormalizedInvestigationRequest | None:
     try:
-        return subject_set, normalized_request_from_subject_set(subject_set, _ingress_deps(deps))
+        return _normalized_request_from_seed(seed, deps)
     except ValueError as exc:
-        if _is_subject_resolution_error(str(exc)):
-            return subject_set, None
+        message = str(exc)
+        if message.startswith("bounded ingress ambiguity:") or message == (
+            "no canonical investigation subject could be resolved from ingress input"
+        ):
+            return None
         raise
 
 
-def _is_subject_resolution_error(message: str) -> bool:
-    return message.startswith("bounded ingress ambiguity:") or message == (
-        "no canonical investigation subject could be resolved from ingress input"
-    )
-
-
-def resolve_vague_workload_target(
-    normalized: NormalizedInvestigationRequest,
+def _normalized_request_from_seed(
+    seed: InvestigationPlannerSeed,
     deps: PlannerDeps,
 ) -> NormalizedInvestigationRequest:
-    if normalized.scope != "workload":
-        return normalized
-
-    lowered = normalized.target.strip().lower()
-    if lowered not in _VAGUE_WORKLOAD_TARGETS:
-        return normalized
-    if not normalized.namespace:
-        raise ValueError("namespace is required when resolving a vague workload target")
-
-    unhealthy = deps.find_unhealthy_pod(
-        FindUnhealthyPodRequest(cluster=normalized.cluster, namespace=normalized.namespace)
-    )
-    candidate = unhealthy.candidate
-    if candidate is None:
-        raise ValueError("no unhealthy pod found in namespace")
-
-    notes = list(normalized.normalization_notes)
-    notes.append(f"resolved vague workload target to {candidate.target}")
-    return normalized.model_copy(update={"target": candidate.target, "normalization_notes": notes})
-
-
-def resolved_cluster_value(cluster) -> str | None:
-    if getattr(cluster, "source", None) == "legacy_current_context":
-        return None
-    return cluster.alias
-
-
-def resolve_backend_convenience_target(
-    normalized: NormalizedInvestigationRequest,
-    deps: PlannerDeps,
-) -> NormalizedInvestigationRequest:
-    raw_target = normalized.target.strip()
-    if "/" not in raw_target:
-        return normalized
-
-    kind, name = raw_target.split("/", 1)
-    if kind.lower() != "backend":
-        return normalized
-    if not name:
-        raise ValueError("backend target name is required")
-    if not normalized.namespace:
-        raise ValueError("namespace is required for Backend targets")
-
-    cluster = deps.resolve_cluster(normalized.cluster)
-    backend = deps.get_backend_cr(normalized.namespace, name, cluster=cluster)
-    resolved_target = f"deployment/{name}"
-    notes = list(normalized.normalization_notes)
-    notes.append(f"resolved Backend/{name} to {resolved_target}")
-    if backend.get("error"):
-        notes.append("backend lookup failed; using deployment fallback")
-
-    return normalized.model_copy(
-        update={
-            "cluster": resolved_cluster_value(cluster),
-            "scope": "workload",
-            "profile": "workload",
-            "service_name": name,
-            "target": resolved_target,
-            "normalization_notes": notes,
-        }
-    )
-
-
-def resolve_frontend_convenience_target(
-    normalized: NormalizedInvestigationRequest,
-    deps: PlannerDeps,
-) -> NormalizedInvestigationRequest:
-    raw_target = normalized.target.strip()
-    if "/" not in raw_target:
-        return normalized
-
-    kind, name = raw_target.split("/", 1)
-    if kind.lower() != "frontend":
-        return normalized
-    if not name:
-        raise ValueError("frontend target name is required")
-    if not normalized.namespace:
-        raise ValueError("namespace is required for Frontend targets")
-
-    cluster = deps.resolve_cluster(normalized.cluster)
-    frontend = deps.get_frontend_cr(normalized.namespace, name, cluster=cluster)
-    if normalized.profile == "service":
-        resolved_target = f"service/{name}"
-        scope = "service"
-        profile = "service"
-        service_name = name
-    else:
-        resolved_target = f"deployment/{name}"
-        scope = "workload"
-        profile = "workload"
-        service_name = name
-    notes = list(normalized.normalization_notes)
-    notes.append(f"resolved Frontend/{name} to {resolved_target}")
-    if frontend.get("error"):
-        notes.append(f"frontend lookup failed; using {resolved_target} fallback")
-
-    return normalized.model_copy(
-        update={
-            "cluster": resolved_cluster_value(cluster),
-            "scope": scope,
-            "profile": profile,
-            "service_name": service_name,
-            "target": resolved_target,
-            "normalization_notes": notes,
-        }
-    )
-
-
-def cluster_component_priority(item: dict) -> tuple[int, int, str]:
-    phase = (item.get("phase") or "").lower()
-    ready = bool(item.get("ready"))
-    if phase == "failed":
-        rank = 0
-    elif phase == "degraded":
-        rank = 1
-    elif not ready:
-        rank = 2
-    elif phase in {"deploying", "waitingfordeps", "pending"}:
-        rank = 3
-    else:
-        rank = 4
-    return (rank, int(item.get("wave", 0)), item.get("name") or "")
-
-
-def component_target(kind: str, name: str, profile: str) -> tuple[str, str, str, str | None]:
-    lowered = kind.lower()
-    if lowered == "frontend" and profile == "service":
-        return (f"service/{name}", "service", "service", name)
-    if lowered in {"backend", "frontend"}:
-        return (f"deployment/{name}", "workload", "workload", name)
-    if lowered == "deployment":
-        return (f"deployment/{name}", "workload", "workload", None)
-    if lowered == "service":
-        return (f"service/{name}", "service", "service", name)
-    if lowered == "statefulset":
-        return (f"statefulset/{name}", "workload", "workload", None)
-    raise ValueError(f"unsupported cluster component kind for investigation: {kind}")
-
-
-def resolve_cluster_convenience_target(
-    normalized: NormalizedInvestigationRequest,
-    deps: PlannerDeps,
-) -> NormalizedInvestigationRequest:
-    raw_target = normalized.target.strip()
-    if "/" not in raw_target:
-        return normalized
-
-    kind, name = raw_target.split("/", 1)
-    if kind.lower() != "cluster":
-        return normalized
-    if not name:
-        raise ValueError("cluster target name is required")
-    if not normalized.namespace:
-        raise ValueError("namespace is required for Cluster targets")
-
-    cluster = deps.resolve_cluster(normalized.cluster)
-    cluster_cr = deps.get_cluster_cr(normalized.namespace, name, cluster=cluster)
-    if cluster_cr.get("error"):
-        raise ValueError(f"cluster lookup failed for {name}: {cluster_cr['error']}")
-
-    statuses = cluster_cr.get("status", {}).get("componentStatuses") or []
-    if not statuses:
-        raise ValueError(f"cluster {name} has no componentStatuses to investigate")
-
-    selected = sorted(statuses, key=cluster_component_priority)[0]
-    component_kind = selected.get("kind") or ""
-    component_name = selected.get("name") or ""
-    if not component_kind or not component_name:
-        raise ValueError(f"cluster {name} has an incomplete component status entry")
-
-    resolved_target, scope, profile, service_name = component_target(
-        component_kind, component_name, normalized.profile
-    )
-    notes = list(normalized.normalization_notes)
-    notes.append(f"resolved Cluster/{name} to failing component {component_kind}/{component_name}")
-    notes.append(f"resolved {component_kind}/{component_name} to {resolved_target}")
-
-    return normalized.model_copy(
-        update={
-            "cluster": resolved_cluster_value(cluster),
-            "scope": scope,
-            "profile": profile,
-            "service_name": service_name,
-            "target": resolved_target,
-            "normalization_notes": notes,
-        }
+    normalized = normalized_request_from_planner_seed(seed)
+    return apply_post_seed_normalization(
+        normalized,
+        PostSeedNormalizationDeps(find_unhealthy_pod=deps.find_unhealthy_pod),
     )
 
 
@@ -1504,16 +1331,17 @@ def build_investigation_plan(
     deps: PlannerDeps,
 ) -> InvestigationPlan:
     report_req = _report_request_from_plan_request(req)
-    subject_set, normalized = _subject_set_and_normalized(report_req, deps)
+    subject_set, seed = _subject_set_and_seed(report_req, deps)
+    subject_context = seed.subject_context
+    normalized = _seed_to_normalized_or_none(seed, deps)
     resolved_target = (
         investigation_target_from_normalized(
             normalized,
-            requested_target=canonical_focus_ref(subject_set, report_req.target) or normalized.target,
+            requested_target=seed.requested_target or normalized.target,
         )
         if normalized is not None
         else None
     )
-    subject_context = subject_context_from_subject_set(subject_set)
     mode = classify_investigation_mode(
         req,
         has_resolved_target=resolved_target is not None,
@@ -1521,7 +1349,7 @@ def build_investigation_plan(
         subject_resolution_status=subject_context.resolution_status,
     )
     if mode != "factual_analysis" and resolved_target is None and subject_context.resolution_status != "unresolved":
-        normalized_request_from_subject_set(subject_set, _ingress_deps(deps))
+        _normalized_request_from_seed(seed, deps)
 
     if mode == "alert_rca":
         if resolved_target is None:

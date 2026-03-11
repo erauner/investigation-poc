@@ -14,9 +14,7 @@ from .models import (
     InvestigationReportRequest,
     InvestigationSubjectContext,
     InvestigationSubjectRef,
-    NormalizedInvestigationRequest,
     NormalizedInvestigationSubjectSet,
-    ProfileType,
     ResolvedIngressScope,
 )
 
@@ -67,11 +65,7 @@ _RELATION_PRIORITY = {"candidate": 0, "related": 1, "member": 2, "dependency": 3
 
 @dataclass(frozen=True)
 class IngressDeps:
-    canonical_target: Callable[[str, str, str | None], str]
-    scope_from_target: Callable[[str, str], str]
     resolve_cluster: Callable[..., Any]
-    get_backend_cr: Callable[..., dict]
-    get_frontend_cr: Callable[..., dict]
     get_cluster_cr: Callable[..., dict]
     find_unhealthy_pod: Callable[[FindUnhealthyPodRequest], Any]
 
@@ -146,58 +140,6 @@ def normalize_ingress_request(
         related_refs=related_refs,
         normalization_notes=notes,
     )
-
-
-def normalized_request_from_subject_set(
-    subject_set: NormalizedInvestigationSubjectSet,
-    deps: IngressDeps,
-) -> NormalizedInvestigationRequest:
-    subject_context = subject_context_from_subject_set(subject_set)
-    if subject_context.resolution_status == "ambiguous_scope":
-        if subject_set.scope.ambiguous_clusters:
-            raise ValueError(
-                "bounded ingress ambiguity: cluster scope candidates="
-                + ", ".join(subject_set.scope.ambiguous_clusters)
-            )
-        raise ValueError(
-            "bounded ingress ambiguity: namespace scope candidates="
-            + ", ".join(subject_set.scope.ambiguous_namespaces)
-        )
-    focus = subject_set.canonical_focus
-    if focus is None:
-        if subject_context.resolution_status == "ambiguous_subject":
-            raise ValueError(
-                "bounded ingress ambiguity: competing primary subjects="
-                + ", ".join(_subject_ref_string(ref) for ref in subject_context.competing_subjects)
-            )
-        raise ValueError("no canonical investigation subject could be resolved from ingress input")
-
-    normalized = _normalized_request_for_focus(subject_set, focus, deps)
-    notes = list(normalized.normalization_notes)
-    notes.append(f"canonical focus selected: {_subject_ref_string(focus)}")
-    if subject_set.related_refs:
-        notes.append(
-            "related refs preserved: "
-            + ", ".join(
-                f"{_subject_ref_string(ref)} ({ref.relation})" for ref in subject_set.related_refs
-            )
-        )
-    subject_context = subject_context.model_copy(update={"notes": list(notes)})
-    return normalized.model_copy(update={"normalization_notes": notes, "subject_context": subject_context})
-
-
-def canonical_focus_ref(
-    subject_set: NormalizedInvestigationSubjectSet,
-    fallback_target: str | None = None,
-) -> str | None:
-    if fallback_target:
-        return fallback_target
-    focus = subject_set.canonical_focus
-    if focus is None:
-        return None
-    return _subject_ref_string(focus)
-
-
 def subject_context_from_subject_set(
     subject_set: NormalizedInvestigationSubjectSet,
 ) -> InvestigationSubjectContext:
@@ -486,128 +428,6 @@ def _select_canonical_focus(
         ):
             return None
     return ranked[0]
-
-
-def _normalized_request_for_focus(
-    subject_set: NormalizedInvestigationSubjectSet,
-    focus: InvestigationSubjectRef,
-    deps: IngressDeps,
-) -> NormalizedInvestigationRequest:
-    source = "alert" if subject_set.ingress.alertname else "manual"
-    notes = list(subject_set.normalization_notes)
-    profile = subject_set.ingress.profile_hint
-    scope = "workload"
-    target = focus.name
-    node_name: str | None = None
-    service_name: str | None = subject_set.ingress.service_name
-
-    if focus.kind == "resource_hint":
-        target = deps.canonical_target(focus.name, profile, service_name)
-        scope = deps.scope_from_target(target, profile)
-    elif focus.kind == "pod":
-        target = f"pod/{focus.name}"
-        scope = "workload"
-    elif focus.kind == "deployment":
-        target = f"deployment/{focus.name}"
-        scope = "workload"
-    elif focus.kind == "statefulset":
-        target = f"statefulset/{focus.name}"
-        scope = "workload"
-    elif focus.kind == "service":
-        target = f"service/{focus.name}"
-        scope = "service"
-        if profile != "service":
-            notes.append("profile promoted to service based on target")
-        profile = "service"
-        service_name = focus.name
-    elif focus.kind == "kubernetes_node":
-        target = f"node/{focus.name}"
-        scope = "node"
-        node_name = focus.name
-    elif focus.kind == "backend":
-        if not subject_set.scope.namespace:
-            raise ValueError("namespace is required for Backend targets")
-        cluster = _resolve_cluster(deps, subject_set.scope.cluster, {})
-        backend = deps.get_backend_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
-        target = f"deployment/{focus.name}"
-        scope = "workload"
-        service_name = focus.name
-        notes.append(f"resolved Backend/{focus.name} to {target}")
-        if backend.get("error"):
-            notes.append("backend lookup failed; using deployment fallback")
-    elif focus.kind == "frontend":
-        if not subject_set.scope.namespace:
-            raise ValueError("namespace is required for Frontend targets")
-        cluster = _resolve_cluster(deps, subject_set.scope.cluster, {})
-        frontend = deps.get_frontend_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
-        if profile == "service" and "explicit_target" not in focus.sources:
-            target = f"service/{focus.name}"
-            scope = "service"
-            profile = "service"
-        else:
-            target = f"deployment/{focus.name}"
-            scope = "workload"
-        service_name = focus.name
-        notes.append(f"resolved Frontend/{focus.name} to {target}")
-        if frontend.get("error"):
-            notes.append(f"frontend lookup failed; using {target} fallback")
-    elif focus.kind == "express_cluster":
-        if not subject_set.scope.namespace:
-            raise ValueError("namespace is required for Cluster targets")
-        cluster = _resolve_cluster(deps, subject_set.scope.cluster, {})
-        cluster_cr = deps.get_cluster_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
-        if cluster_cr.get("error"):
-            target = f"Cluster/{focus.name}"
-            scope = "workload"
-            notes.append(f"cluster lookup failed for {focus.name}; retaining logical cluster target")
-            return NormalizedInvestigationRequest(
-                source=source,
-                scope=scope,
-                cluster=subject_set.scope.cluster,
-                namespace=subject_set.scope.namespace,
-                target=target,
-                node_name=None,
-                service_name=service_name,
-                profile=profile,
-                lookback_minutes=subject_set.ingress.lookback_minutes,
-                normalization_notes=notes,
-            )
-        statuses = cluster_cr.get("status", {}).get("componentStatuses") or []
-        if not statuses:
-            raise ValueError(f"cluster {focus.name} has no componentStatuses to investigate")
-        selected = sorted(statuses, key=_cluster_component_priority)[0]
-        component_kind = selected.get("kind") or ""
-        component_name = selected.get("name") or ""
-        if not component_kind or not component_name:
-            raise ValueError(f"cluster {focus.name} has an incomplete component status entry")
-        target, scope, profile, service_name = _component_target(component_kind, component_name, profile)
-        notes.append(f"resolved Cluster/{focus.name} to failing component {component_kind}/{component_name}")
-        notes.append(f"resolved {component_kind}/{component_name} to {target}")
-    else:
-        raise ValueError(f"unsupported canonical focus kind: {focus.kind}")
-
-    if scope == "service" and profile == "workload":
-        profile = "service"
-        notes.append("profile promoted to service based on target")
-    if subject_set.scope.cluster:
-        cluster_note = f"cluster resolved from {subject_set.scope.cluster_source}: {subject_set.scope.cluster}"
-        if cluster_note not in notes:
-            notes.append(cluster_note)
-
-    return NormalizedInvestigationRequest(
-        source=source,
-        scope=scope,  # type: ignore[arg-type]
-        cluster=subject_set.scope.cluster,
-        namespace=subject_set.scope.namespace,
-        target=target,
-        node_name=node_name if scope == "node" else None,
-        service_name=service_name if scope == "service" or service_name else service_name,
-        profile=profile,
-        lookback_minutes=subject_set.ingress.lookback_minutes,
-        normalization_notes=notes,
-    )
-
-
 def _infer_alert_target(
     req: InvestigationIngressRequest,
     scope: ResolvedIngressScope,
@@ -833,34 +653,3 @@ def _infer_target_from_text(text: str | None) -> str | None:
         if match:
             return f"{kind}/{match.group(1)}"
     return None
-
-
-def _cluster_component_priority(item: dict) -> tuple[int, int, str]:
-    phase = (item.get("phase") or "").lower()
-    ready = bool(item.get("ready"))
-    if phase == "failed":
-        rank = 0
-    elif phase == "degraded":
-        rank = 1
-    elif not ready:
-        rank = 2
-    elif phase in {"deploying", "waitingfordeps", "pending"}:
-        rank = 3
-    else:
-        rank = 4
-    return (rank, int(item.get("wave", 0)), item.get("name") or "")
-
-
-def _component_target(kind: str, name: str, profile: ProfileType) -> tuple[str, str, ProfileType, str | None]:
-    lowered = kind.lower()
-    if lowered == "frontend" and profile == "service":
-        return (f"service/{name}", "service", "service", name)
-    if lowered in {"backend", "frontend"}:
-        return (f"deployment/{name}", "workload", "workload", name)
-    if lowered == "deployment":
-        return (f"deployment/{name}", "workload", "workload", None)
-    if lowered == "service":
-        return (f"service/{name}", "service", "service", name)
-    if lowered == "statefulset":
-        return (f"statefulset/{name}", "workload", "workload", None)
-    raise ValueError(f"unsupported cluster component kind for investigation: {kind}")

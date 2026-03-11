@@ -163,6 +163,9 @@ These are easy to miss while doing the migration:
 Goal:
 - make the new boundaries explicit without changing too much runtime behavior yet
 
+Status:
+- completed
+
 Deliverables:
 - add a first-class `InvestigationPlannerSeed` model in `src/investigation_service/models.py`
 - add a stable ambiguity taxonomy contract aligned with ADR 0005
@@ -181,10 +184,18 @@ Why this phase comes first:
 - current code already has downstream `subject_context`
 - the missing seam is planner-seed, not subject propagation
 
+Completion note:
+- seam models now exist
+- planner-seed outcome vocabulary now exists
+- the first planner-owned seam types are established in code
+
 ### Phase 2: Introduce Planner-Seed Derivation As A Real Code Path
 
 Goal:
 - create the new semantic bridge without deleting existing behavior immediately
+
+Status:
+- mostly completed
 
 Primary files:
 - `src/investigation_service/planner.py`
@@ -204,6 +215,12 @@ Deliverables:
 Important rule:
 - planner-seed becomes the preferred semantic bridge
 - no new shortcuts directly from subject set to exact target outside that seam
+
+Current branch note:
+- `src/investigation_service/planner_seed.py` now exists and owns exact-target collapse for the current single-focus path
+- planner and alert normalization now route through planner-seed instead of ingress-local collapse
+- planner-seed is now the preferred semantic bridge in code, but it still intentionally wraps transitional single-focus collapse behavior for compatibility
+- richer planner-seed outcomes beyond `execution_focus_resolved` and `bounded_ambiguity` remain deferred
 
 ### Phase 3: Move Eager Exact-Target Collapse Out Of Ingress
 
@@ -292,6 +309,7 @@ Candidates:
 Important rule:
 - preserve public surfaces where useful
 - do not preserve internal helper lineage for its own sake
+- when a helper exists only to preserve eager exact-target collapse or duplicate pre-planner-seed behavior, the default action is to remove it or fold it behind the new seam rather than retain it as legacy structure
 
 ### Phase 7: Reevaluate Multi-Target Planning Later
 
@@ -465,3 +483,8 @@ Keep this document updated whenever one of these becomes true:
 - a scout path starts influencing execution focus
 
 If code and ADRs appear to disagree, reconcile toward the ADRs unless there is a deliberate new decision recorded in docs.
+
+Migration hygiene rule:
+
+- in every implementation plan and follow-up PR, treat obsolete eager-collapse helpers as removal-or-repurpose candidates by default
+- do not preserve duplicate internal paths as legacy compatibility unless they still protect a public contract that is intentionally being kept stable

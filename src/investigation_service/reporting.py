@@ -49,7 +49,6 @@ from .tools import (
     collect_service_evidence,
     collect_workload_evidence,
     find_unhealthy_pod,
-    normalize_alert_input,
 )
 from . import planner
 
@@ -65,7 +64,6 @@ def _is_empty_correlation_limitation(value: str) -> bool:
 
 def _planner_deps() -> PlannerDeps:
     return PlannerDeps(
-        normalize_alert_input=normalize_alert_input,
         canonical_target=canonical_target,
         scope_from_target=scope_from_target,
         resolve_cluster=resolve_cluster,
@@ -269,7 +267,9 @@ def _incident_matches_plan_identity(
             return False
     if incident.namespace is not None and (target is None or target.namespace != incident.namespace):
         return False
-    if incident.cluster is not None and (target is None or target.cluster != incident.cluster):
+    if incident.cluster is not None and (
+        target is None or target.cluster != _canonical_identity_cluster(incident.cluster)
+    ):
         return False
     if incident.service_name is not None and (target is None or target.service_name != incident.service_name):
         return False
@@ -278,6 +278,18 @@ def _incident_matches_plan_identity(
     if incident.alertname and plan.mode != "alert_rca":
         return False
     return True
+
+
+def _canonical_identity_cluster(cluster: str | None) -> str | None:
+    if cluster is None:
+        return None
+    try:
+        resolved = resolve_cluster(cluster)
+    except Exception:
+        return cluster
+    if getattr(resolved, "source", None) == "legacy_current_context":
+        return None
+    return getattr(resolved, "alias", cluster)
 
 
 def _active_batch_contract_or_none(

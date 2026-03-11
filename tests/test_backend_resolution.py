@@ -1,48 +1,100 @@
-from investigation_service import planner
-from investigation_service.models import NormalizedInvestigationRequest
-from investigation_service.planner import PlannerDeps
+from investigation_service.ingress import subject_context_from_subject_set
+from investigation_service.models import (
+    InvestigationIngressRequest,
+    InvestigationSubjectRef,
+    NormalizedInvestigationSubjectSet,
+    ResolvedIngressScope,
+)
+from investigation_service.planner_seed import (
+    PlannerSeedDeps,
+    normalized_request_from_planner_seed,
+    planner_seed_from_subject_set,
+)
 
 
-def _deps(**overrides) -> PlannerDeps:
-    base = PlannerDeps(
-        normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected alert normalization: {req}")),
+def _deps(**overrides) -> PlannerSeedDeps:
+    base = PlannerSeedDeps(
         canonical_target=lambda target, profile, service_name: target,
         scope_from_target=lambda target, profile: "workload",
         resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": cluster})(),
         get_backend_cr=lambda namespace, name, cluster=None: {},
         get_frontend_cr=lambda namespace, name, cluster=None: {},
         get_cluster_cr=lambda namespace, name, cluster=None: {},
-        find_unhealthy_pod=lambda req: None,
     )
-    return PlannerDeps(**{**base.__dict__, **overrides})
+    return PlannerSeedDeps(**{**base.__dict__, **overrides})
 
-def _seed_normalized(
+
+def _normalized_from_target(
     *,
     cluster: str | None,
     namespace: str,
     target: str,
     profile: str = "workload",
-) -> NormalizedInvestigationRequest:
-    return NormalizedInvestigationRequest(
-        source="manual",
-        scope="workload" if profile != "service" else "service",
-        cluster=cluster,
-        namespace=namespace,
-        target=target,
-        profile=profile,
+    deps: PlannerSeedDeps,
+):
+    kind, name = target.split("/", 1)
+    normalized_kind = {
+        "Backend": "backend",
+        "Frontend": "frontend",
+        "Cluster": "express_cluster",
+    }.get(kind, kind.lower())
+    subject_set = NormalizedInvestigationSubjectSet(
+        ingress=InvestigationIngressRequest(
+            source="manual",
+            cluster=cluster,
+            namespace=namespace,
+            target=target,
+            profile_hint=profile,  # type: ignore[arg-type]
+        ),
+        scope=ResolvedIngressScope(
+            cluster=cluster,
+            namespace=namespace,
+            cluster_source="explicit",
+            namespace_source="explicit",
+        ),
+        candidate_refs=[
+            InvestigationSubjectRef(
+                kind=normalized_kind,  # type: ignore[arg-type]
+                name=name,
+                cluster=cluster,
+                namespace=namespace,
+                confidence="high",
+                sources=["explicit_target"],
+            )
+        ],
+        canonical_focus=InvestigationSubjectRef(
+            kind=normalized_kind,  # type: ignore[arg-type]
+            name=name,
+            cluster=cluster,
+            namespace=namespace,
+            confidence="high",
+            sources=["explicit_target"],
+        ),
+        related_refs=[],
         normalization_notes=[],
     )
+    seed = planner_seed_from_subject_set(
+        subject_set,
+        subject_context=subject_context_from_subject_set(subject_set),
+        deps=deps,
+    )
+    return normalized_request_from_planner_seed(seed)
 
 
 def test_backend_resolution_notes_fallback_when_backend_lookup_fails() -> None:
     deps = _deps(
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
-        get_backend_cr=lambda namespace, name, cluster=None: {"error": "not found", "namespace": namespace, "name": name},
+        get_backend_cr=lambda namespace, name, cluster=None: {
+            "error": "not found",
+            "namespace": namespace,
+            "name": name,
+        }
     )
 
-    normalized = planner.resolve_backend_convenience_target(
-        _seed_normalized(cluster="erauner-home", namespace="operator-smoke", target="Backend/crashy"),
-        deps,
+    normalized = _normalized_from_target(
+        cluster="erauner-home",
+        namespace="operator-smoke",
+        target="Backend/crashy",
+        deps=deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -54,13 +106,18 @@ def test_backend_resolution_notes_fallback_when_backend_lookup_fails() -> None:
 
 def test_frontend_resolution_notes_fallback_when_frontend_lookup_fails() -> None:
     deps = _deps(
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
-        get_frontend_cr=lambda namespace, name, cluster=None: {"error": "not found", "namespace": namespace, "name": name},
+        get_frontend_cr=lambda namespace, name, cluster=None: {
+            "error": "not found",
+            "namespace": namespace,
+            "name": name,
+        }
     )
 
-    normalized = planner.resolve_frontend_convenience_target(
-        _seed_normalized(cluster="erauner-home", namespace="operator-smoke", target="Frontend/landing"),
-        deps,
+    normalized = _normalized_from_target(
+        cluster="erauner-home",
+        namespace="operator-smoke",
+        target="Frontend/landing",
+        deps=deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -70,49 +127,34 @@ def test_frontend_resolution_notes_fallback_when_frontend_lookup_fails() -> None
     assert "frontend lookup failed; using deployment/landing fallback" in normalized.normalization_notes
 
 
-def test_frontend_service_profile_resolves_to_service_when_lookup_fails() -> None:
+def test_explicit_frontend_target_stays_workload_scope_even_with_service_profile() -> None:
     deps = _deps(
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
-        get_frontend_cr=lambda namespace, name, cluster=None: {"error": "not found", "namespace": namespace, "name": name},
+        get_frontend_cr=lambda namespace, name, cluster=None: {
+            "error": "not found",
+            "namespace": namespace,
+            "name": name,
+        }
     )
 
-    normalized = planner.resolve_frontend_convenience_target(
-        _seed_normalized(
-            cluster="erauner-home",
-            namespace="operator-smoke",
-            target="Frontend/landing",
-            profile="service",
-        ),
-        deps,
+    normalized = _normalized_from_target(
+        cluster="erauner-home",
+        namespace="operator-smoke",
+        target="Frontend/landing",
+        profile="service",
+        deps=deps,
     )
 
     assert normalized.cluster == "erauner-home"
-    assert normalized.scope == "service"
+    assert normalized.scope == "workload"
     assert normalized.profile == "service"
     assert normalized.service_name == "landing"
-    assert normalized.target == "service/landing"
-    assert "resolved Frontend/landing to service/landing" in normalized.normalization_notes
-    assert "frontend lookup failed; using service/landing fallback" in normalized.normalization_notes
-
-
-def test_frontend_legacy_current_context_does_not_set_cluster_alias() -> None:
-    deps = _deps(
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "current-context", "source": "legacy_current_context"})(),
-        get_frontend_cr=lambda namespace, name, cluster=None: {"kind": "Frontend", "metadata": {"name": name, "namespace": namespace}},
-    )
-
-    normalized = planner.resolve_frontend_convenience_target(
-        _seed_normalized(cluster=None, namespace="operator-smoke", target="Frontend/landing", profile="service"),
-        deps,
-    )
-
-    assert normalized.cluster is None
-    assert normalized.target == "service/landing"
+    assert normalized.target == "deployment/landing"
+    assert "resolved Frontend/landing to deployment/landing" in normalized.normalization_notes
+    assert "frontend lookup failed; using deployment/landing fallback" in normalized.normalization_notes
 
 
 def test_cluster_resolution_picks_first_failing_component() -> None:
     deps = _deps(
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
         get_cluster_cr=lambda namespace, name, cluster=None: {
             "status": {
                 "componentStatuses": [
@@ -120,12 +162,14 @@ def test_cluster_resolution_picks_first_failing_component() -> None:
                     {"name": "api", "kind": "Backend", "wave": 1, "phase": "Failed", "ready": False},
                 ]
             }
-        },
+        }
     )
 
-    normalized = planner.resolve_cluster_convenience_target(
-        _seed_normalized(cluster="erauner-home", namespace="operator-smoke", target="Cluster/testapp"),
-        deps,
+    normalized = _normalized_from_target(
+        cluster="erauner-home",
+        namespace="operator-smoke",
+        target="Cluster/testapp",
+        deps=deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -137,7 +181,6 @@ def test_cluster_resolution_picks_first_failing_component() -> None:
 
 def test_cluster_service_profile_resolves_frontend_component_to_service() -> None:
     deps = _deps(
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
         get_cluster_cr=lambda namespace, name, cluster=None: {
             "status": {
                 "componentStatuses": [
@@ -145,17 +188,15 @@ def test_cluster_service_profile_resolves_frontend_component_to_service() -> Non
                     {"name": "api", "kind": "Backend", "wave": 1, "phase": "Healthy", "ready": True},
                 ]
             }
-        },
+        }
     )
 
-    normalized = planner.resolve_cluster_convenience_target(
-        _seed_normalized(
-            cluster="erauner-home",
-            namespace="operator-smoke",
-            target="Cluster/testapp",
-            profile="service",
-        ),
-        deps,
+    normalized = _normalized_from_target(
+        cluster="erauner-home",
+        namespace="operator-smoke",
+        target="Cluster/testapp",
+        profile="service",
+        deps=deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -169,7 +210,6 @@ def test_cluster_service_profile_resolves_frontend_component_to_service() -> Non
 
 def test_cluster_resolution_preserves_statefulset_component_target() -> None:
     deps = _deps(
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
         get_cluster_cr=lambda namespace, name, cluster=None: {
             "status": {
                 "componentStatuses": [
@@ -177,12 +217,14 @@ def test_cluster_resolution_preserves_statefulset_component_target() -> None:
                     {"name": "api", "kind": "Backend", "wave": 2, "phase": "Healthy", "ready": True},
                 ]
             }
-        },
+        }
     )
 
-    normalized = planner.resolve_cluster_convenience_target(
-        _seed_normalized(cluster="erauner-home", namespace="operator-smoke", target="Cluster/testapp"),
-        deps,
+    normalized = _normalized_from_target(
+        cluster="erauner-home",
+        namespace="operator-smoke",
+        target="Cluster/testapp",
+        deps=deps,
     )
 
     assert normalized.cluster == "erauner-home"
@@ -191,38 +233,26 @@ def test_cluster_resolution_preserves_statefulset_component_target() -> None:
     assert "resolved StatefulSet/newmetrics-db to statefulset/newmetrics-db" in normalized.normalization_notes
 
 
-def test_cluster_legacy_current_context_does_not_set_cluster_alias() -> None:
+def test_backend_explicit_current_context_resolves_in_legacy_mode() -> None:
     deps = _deps(
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "current-context", "source": "legacy_current_context"})(),
-        get_cluster_cr=lambda namespace, name, cluster=None: {
-            "status": {
-                "componentStatuses": [
-                    {"name": "landing", "kind": "Frontend", "wave": 1, "phase": "Healthy", "ready": True},
-                ]
-            }
+        resolve_cluster=lambda cluster: type(
+            "ResolvedCluster",
+            (),
+            {"alias": "current-context", "source": "legacy_current_context"},
+        )(),
+        get_backend_cr=lambda namespace, name, cluster=None: {
+            "kind": "Backend",
+            "metadata": {"name": name, "namespace": namespace},
         },
     )
 
-    normalized = planner.resolve_cluster_convenience_target(
-        _seed_normalized(cluster=None, namespace="operator-smoke", target="Cluster/testapp", profile="service"),
-        deps,
+    normalized = _normalized_from_target(
+        cluster="current-context",
+        namespace="operator-smoke",
+        target="Backend/crashy",
+        deps=deps,
     )
 
-    assert normalized.cluster is None
-    assert normalized.target == "service/landing"
-
-
-def test_backend_explicit_current_context_resolves_in_legacy_mode() -> None:
-    deps = _deps(
-        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "current-context", "source": "legacy_current_context"})(),
-        get_backend_cr=lambda namespace, name, cluster=None: {"kind": "Backend", "metadata": {"name": name, "namespace": namespace}},
-    )
-
-    normalized = planner.resolve_backend_convenience_target(
-        _seed_normalized(cluster="current-context", namespace="operator-smoke", target="Backend/crashy"),
-        deps,
-    )
-
-    assert normalized.cluster is None
+    assert normalized.cluster == "current-context"
     assert normalized.target == "deployment/crashy"
     assert normalized.service_name == "crashy"

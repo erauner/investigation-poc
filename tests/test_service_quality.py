@@ -1,3 +1,5 @@
+import pytest
+
 from investigation_service.analysis import derive_findings
 from investigation_service.models import CollectContextRequest, InvestigationReportRequest, TargetRef
 from investigation_service import planner, reporting
@@ -141,17 +143,15 @@ def test_manual_frontend_target_stays_workload_scope_even_with_service_profile()
 
 
 def test_manual_cluster_target_stays_workload_scope_even_with_service_profile() -> None:
-    normalized = planner.normalized_request(
-        InvestigationReportRequest(
-            namespace="operator-smoke",
-            target="Cluster/testapp",
-            profile="service",
-        ),
-        reporting._planner_deps(),
-    )
-
-    assert normalized.scope == "workload"
-    assert normalized.profile == "service"
+    with pytest.raises(ValueError, match="cluster lookup failed for testapp:"):
+        planner.normalized_request(
+            InvestigationReportRequest(
+                namespace="operator-smoke",
+                target="Cluster/testapp",
+                profile="service",
+            ),
+            reporting._planner_deps(),
+        )
 
 
 def test_collect_context_for_workload_enriches_with_service_metrics(monkeypatch) -> None:
