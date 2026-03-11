@@ -272,6 +272,7 @@ class InvestigationPlan(BaseModel):
     steps: list[PlanStep] = Field(default_factory=list)
     evidence_batches: list[EvidenceBatch] = Field(default_factory=list)
     active_batch_id: str | None = None
+    pending_exploration_outcomes: list[ExplorationOutcome] = Field(default_factory=list)
     planning_notes: list[str] = Field(default_factory=list)
 
 

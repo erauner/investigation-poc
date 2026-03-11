@@ -1331,6 +1331,21 @@ def _apply_plan_exploration_recommendations(
     return updated
 
 
+def _merged_exploration_outcomes(
+    plan: InvestigationPlan,
+    exploration_outcomes: list[ExplorationOutcome] | None,
+) -> list[ExplorationOutcome]:
+    merged: list[ExplorationOutcome] = []
+    seen: set[str] = set()
+    for outcome in [*plan.pending_exploration_outcomes, *(exploration_outcomes or [])]:
+        key = outcome.model_dump_json()
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(outcome)
+    return merged
+
+
 def update_investigation_plan(req: UpdateInvestigationPlanRequest) -> InvestigationPlan:
     return _update_investigation_plan(req, exploration_outcomes=None)
 
@@ -1343,6 +1358,7 @@ def _update_investigation_plan(
     plan = req.plan
     step_ids = set(req.execution.executed_step_ids)
     batch_id = req.execution.batch_id
+    merged_exploration_outcomes = _merged_exploration_outcomes(plan, exploration_outcomes)
 
     updated_steps: list[PlanStep] = []
     for step in plan.steps:
@@ -1378,10 +1394,17 @@ def _update_investigation_plan(
             continue
         refreshed_batches.append(batch.model_copy(update={"status": "deferred"}))
 
-    plan = plan.model_copy(update={"steps": refreshed_steps, "evidence_batches": refreshed_batches, "active_batch_id": next_active_batch_id})
     batch_status = next((batch.status for batch in refreshed_batches if batch.id == batch_id), None)
+    plan = plan.model_copy(
+        update={
+            "steps": refreshed_steps,
+            "evidence_batches": refreshed_batches,
+            "active_batch_id": next_active_batch_id,
+            "pending_exploration_outcomes": [] if batch_status == "completed" else merged_exploration_outcomes,
+        }
+    )
     if batch_status == "completed":
-        recommendations = _build_plan_exploration_recommendations(plan, req.execution, exploration_outcomes)
+        recommendations = _build_plan_exploration_recommendations(plan, req.execution, merged_exploration_outcomes)
         if recommendations:
             return _apply_plan_exploration_recommendations(plan, recommendations)
 

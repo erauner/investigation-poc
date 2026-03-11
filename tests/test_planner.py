@@ -1056,6 +1056,79 @@ def test_submit_evidence_step_artifacts_forwards_exploration_outcomes_into_plan_
     ]
 
 
+def test_submit_then_advance_preserves_exploration_outcomes_until_batch_completion() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="deployment/api", service_name="api"),
+        _deps([]),
+    )
+    outcome = ExplorationOutcome(
+        step_id="collect-target-evidence",
+        capability="service_evidence_plane",
+        intent="evidence_expansion",
+        outcome="evidence_delta",
+        probe_kind="service_range_metrics",
+        notes=["probe_improved_artifact"],
+    )
+
+    submitted = submit_evidence_step_artifacts(
+        SubmitEvidenceArtifactsRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api", service_name="api"),
+            submitted_steps=[
+                SubmittedStepArtifact(
+                    step_id="collect-target-evidence",
+                    evidence_bundle=_bundle(
+                        findings=[
+                            Finding(
+                                severity="info",
+                                source="heuristic",
+                                title="No Critical Signals Found",
+                                evidence="nothing decisive",
+                            )
+                        ]
+                    ),
+                    actual_route=ActualRoute(
+                        source_kind="peer_mcp",
+                        mcp_server="kubernetes-mcp-server",
+                        tool_name="resources_get",
+                        tool_path=["kubernetes-mcp-server", "resources_get"],
+                    ),
+                )
+            ],
+            exploration_outcomes=[outcome],
+        )
+    )
+
+    assert submitted.updated_plan.active_batch_id == "batch-1"
+    assert submitted.updated_plan.pending_exploration_outcomes == [outcome]
+
+    captured: dict[str, object] = {}
+    original_build = planner_module._build_plan_exploration_recommendations
+
+    def fake_build(plan, execution, exploration_outcomes):
+        captured["plan"] = plan
+        captured["execution"] = execution
+        captured["exploration_outcomes"] = exploration_outcomes
+        return original_build(plan, execution, exploration_outcomes)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(planner_module, "_build_plan_exploration_recommendations", fake_build)
+    try:
+        advanced = advance_active_evidence_batch(
+            plan=submitted.updated_plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="deployment/api", service_name="api"),
+            submitted_steps=[],
+            batch_id="batch-1",
+            deps=_deps([]),
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert captured["execution"].batch_id == "batch-1"
+    assert captured["exploration_outcomes"] == [outcome]
+    assert advanced.updated_plan.pending_exploration_outcomes == []
+
+
 def test_advance_active_evidence_batch_preserves_service_follow_up_insertion() -> None:
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(namespace="default", target="deployment/api", service_name="api"),
