@@ -903,6 +903,52 @@ def test_normalize_alert_input_accepts_explicit_node_name() -> None:
     assert normalized.node_name == "worker3"
 
 
+def test_normalize_alert_input_expands_explicit_pod_shorthand(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "find_unhealthy_pod",
+        lambda req: type(
+            "UnhealthyPodResponse",
+            (),
+            {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+        )(),
+    )
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="PodAlert",
+            namespace="operator-smoke",
+            target="pod",
+        )
+    )
+
+    assert normalized.target == "pod/crashy-abc123"
+    assert "resolved vague workload target to pod/crashy-abc123" in normalized.normalization_notes
+
+
+def test_normalize_alert_input_expands_explicit_workload_shorthand(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "find_unhealthy_pod",
+        lambda req: type(
+            "UnhealthyPodResponse",
+            (),
+            {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+        )(),
+    )
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="WorkloadAlert",
+            namespace="operator-smoke",
+            target="workload",
+        )
+    )
+
+    assert normalized.target == "pod/crashy-abc123"
+    assert "resolved vague workload target to pod/crashy-abc123" in normalized.normalization_notes
+
+
 def test_normalize_alert_input_resolves_explicit_backend_target(monkeypatch) -> None:
     monkeypatch.setattr(tools_module, "get_backend_cr", lambda namespace, name, cluster=None: {})
 
@@ -951,6 +997,37 @@ def test_normalize_alert_input_raises_on_explicit_cluster_target_lookup_failure(
                 target="Cluster/tenant",
             )
         )
+
+
+def test_normalize_alert_input_preserves_explicit_current_context_for_backend_lookup(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        tools_module,
+        "resolve_cluster",
+        lambda cluster: type(
+            "ResolvedCluster",
+            (),
+            {"alias": "current-context", "source": "legacy_current_context"},
+        )(),
+    )
+    monkeypatch.setattr(
+        tools_module,
+        "get_backend_cr",
+        lambda namespace, name, cluster=None: (seen.setdefault("cluster", cluster), {})[1],
+    )
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="BackendAlert",
+            cluster="current-context",
+            namespace="operator-smoke",
+            target="Backend/crashy",
+        )
+    )
+
+    assert normalized.cluster is None
+    assert normalized.target == "deployment/crashy"
+    assert getattr(seen["cluster"], "source", None) == "legacy_current_context"
 
 
 def test_normalize_alert_route_is_not_public() -> None:

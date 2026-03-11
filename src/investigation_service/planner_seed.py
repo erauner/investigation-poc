@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .models import (
+    FindUnhealthyPodRequest,
     InvestigationPlannerSeed,
     InvestigationSubjectContext,
     InvestigationSubjectRef,
@@ -22,6 +23,11 @@ class PlannerSeedDeps:
     get_backend_cr: Callable[..., dict]
     get_frontend_cr: Callable[..., dict]
     get_cluster_cr: Callable[..., dict]
+
+
+@dataclass(frozen=True)
+class PostSeedNormalizationDeps:
+    find_unhealthy_pod: Callable[[FindUnhealthyPodRequest], Any]
 
 
 def planner_seed_from_subject_set(
@@ -114,6 +120,39 @@ def normalized_request_from_planner_seed(
     )
 
 
+def apply_post_seed_normalization(
+    normalized: NormalizedInvestigationRequest,
+    deps: PostSeedNormalizationDeps,
+) -> NormalizedInvestigationRequest:
+    if normalized.scope != "workload":
+        return normalized
+
+    lowered = normalized.target.strip().lower()
+    if lowered not in {
+        "pod",
+        "pods",
+        "workload",
+        "workloads",
+        "unhealthy",
+        "unhealthy-pod",
+        "unhealthy-workload",
+    }:
+        return normalized
+    if not normalized.namespace:
+        raise ValueError("namespace is required when resolving a vague workload target")
+
+    unhealthy = deps.find_unhealthy_pod(
+        FindUnhealthyPodRequest(cluster=normalized.cluster, namespace=normalized.namespace)
+    )
+    candidate = unhealthy.candidate
+    if candidate is None:
+        raise ValueError("no unhealthy pod found in namespace")
+
+    notes = list(normalized.normalization_notes)
+    notes.append(f"resolved vague workload target to {candidate.target}")
+    return normalized.model_copy(update={"target": candidate.target, "normalization_notes": notes})
+
+
 def _requested_target(
     subject_set: NormalizedInvestigationSubjectSet,
     subject_context: InvestigationSubjectContext,
@@ -123,6 +162,12 @@ def _requested_target(
     if subject_context.primary_subject is not None:
         return _subject_ref_string(subject_context.primary_subject)
     return None
+
+
+def _lookup_cluster_token(subject_set: NormalizedInvestigationSubjectSet) -> str | None:
+    if subject_set.ingress.cluster is not None:
+        return subject_set.ingress.cluster
+    return subject_set.scope.cluster
 
 
 def _execution_focus_for_subject(
@@ -136,6 +181,7 @@ def _execution_focus_for_subject(
     target = focus.name
     node_name: str | None = None
     service_name: str | None = subject_set.ingress.service_name
+    lookup_cluster = _lookup_cluster_token(subject_set)
 
     if focus.kind == "resource_hint":
         target = deps.canonical_target(focus.name, profile, service_name)
@@ -160,7 +206,7 @@ def _execution_focus_for_subject(
     elif focus.kind == "backend":
         if not subject_set.scope.namespace:
             raise ValueError("namespace is required for Backend targets")
-        cluster = _resolve_cluster(deps, subject_set.scope.cluster)
+        cluster = _resolve_cluster(deps, lookup_cluster)
         backend = deps.get_backend_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
         target = f"deployment/{focus.name}"
         service_name = focus.name
@@ -170,7 +216,7 @@ def _execution_focus_for_subject(
     elif focus.kind == "frontend":
         if not subject_set.scope.namespace:
             raise ValueError("namespace is required for Frontend targets")
-        cluster = _resolve_cluster(deps, subject_set.scope.cluster)
+        cluster = _resolve_cluster(deps, lookup_cluster)
         frontend = deps.get_frontend_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
         if profile == "service" and "explicit_target" not in focus.sources:
             target = f"service/{focus.name}"
@@ -185,7 +231,7 @@ def _execution_focus_for_subject(
     elif focus.kind == "express_cluster":
         if not subject_set.scope.namespace:
             raise ValueError("namespace is required for Cluster targets")
-        cluster = _resolve_cluster(deps, subject_set.scope.cluster)
+        cluster = _resolve_cluster(deps, lookup_cluster)
         cluster_cr = deps.get_cluster_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
         if cluster_cr.get("error"):
             raise ValueError(f"cluster lookup failed for {focus.name}: {cluster_cr['error']}")

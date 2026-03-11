@@ -392,6 +392,35 @@ def test_resolve_primary_target_normalizes_question_cluster_text_via_cluster_reg
     assert target.target == "pod/api"
 
 
+def test_resolve_primary_target_preserves_explicit_current_context_for_backend_lookup() -> None:
+    seen: dict[str, object] = {}
+    deps = _deps([])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "resolve_cluster": lambda cluster: type(
+                "ResolvedCluster",
+                (),
+                {"alias": "current-context", "source": "legacy_current_context"},
+            )(),
+            "get_backend_cr": lambda namespace, name, cluster=None: (seen.setdefault("cluster", cluster), {})[1],
+        }
+    )
+
+    target = resolve_primary_target(
+        InvestigationReportRequest(
+            cluster="current-context",
+            namespace="default",
+            target="Backend/api",
+        ),
+        deps,
+    )
+
+    assert target.cluster is None
+    assert target.target == "deployment/api"
+    assert getattr(seen["cluster"], "source", None) == "legacy_current_context"
+
+
 def test_resolve_primary_target_requires_namespace_for_backend_targets() -> None:
     with pytest.raises(ValueError, match="namespace is required for Backend targets"):
         resolve_primary_target(

@@ -35,6 +35,7 @@ from .models import (
 )
 from .prom_adapter import collect_metrics_for_scope, collect_service_enrichment_metrics
 from .planner_seed import PlannerSeedDeps, normalized_request_from_planner_seed, planner_seed_from_subject_set
+from .planner_seed import PostSeedNormalizationDeps, apply_post_seed_normalization
 from .routing import canonical_target as _canonical_target
 from .routing import scope_from_target as _scope_from_target
 from .settings import get_default_lookback_minutes, get_log_tail_lines
@@ -384,6 +385,10 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
         if "no canonical investigation subject could be resolved from ingress input" in str(exc):
             raise ValueError("target could not be inferred from alert input") from exc
         raise
+    normalized = apply_post_seed_normalization(
+        normalized,
+        PostSeedNormalizationDeps(find_unhealthy_pod=find_unhealthy_pod),
+    )
     if not normalized.lookback_minutes:
         normalized = normalized.model_copy(update={"lookback_minutes": get_default_lookback_minutes()})
     return normalized

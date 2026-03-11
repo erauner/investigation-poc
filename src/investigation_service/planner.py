@@ -45,20 +45,12 @@ from .models import (
     UpdateInvestigationPlanRequest,
 )
 from .planner_seed import (
+    PostSeedNormalizationDeps,
+    apply_post_seed_normalization,
     PlannerSeedDeps,
     normalized_request_from_planner_seed,
     planner_seed_from_subject_set,
 )
-
-_VAGUE_WORKLOAD_TARGETS = {
-    "pod",
-    "pods",
-    "workload",
-    "workloads",
-    "unhealthy",
-    "unhealthy-pod",
-    "unhealthy-workload",
-}
 
 
 @dataclass(frozen=True)
@@ -218,32 +210,10 @@ def _normalized_request_from_seed(
     deps: PlannerDeps,
 ) -> NormalizedInvestigationRequest:
     normalized = normalized_request_from_planner_seed(seed)
-    return resolve_vague_workload_target(normalized, deps)
-
-
-def resolve_vague_workload_target(
-    normalized: NormalizedInvestigationRequest,
-    deps: PlannerDeps,
-) -> NormalizedInvestigationRequest:
-    if normalized.scope != "workload":
-        return normalized
-
-    lowered = normalized.target.strip().lower()
-    if lowered not in _VAGUE_WORKLOAD_TARGETS:
-        return normalized
-    if not normalized.namespace:
-        raise ValueError("namespace is required when resolving a vague workload target")
-
-    unhealthy = deps.find_unhealthy_pod(
-        FindUnhealthyPodRequest(cluster=normalized.cluster, namespace=normalized.namespace)
+    return apply_post_seed_normalization(
+        normalized,
+        PostSeedNormalizationDeps(find_unhealthy_pod=deps.find_unhealthy_pod),
     )
-    candidate = unhealthy.candidate
-    if candidate is None:
-        raise ValueError("no unhealthy pod found in namespace")
-
-    notes = list(normalized.normalization_notes)
-    notes.append(f"resolved vague workload target to {candidate.target}")
-    return normalized.model_copy(update={"target": candidate.target, "normalization_notes": notes})
 
 
 def _report_request_from_plan_request(req: BuildInvestigationPlanRequest) -> InvestigationReportRequest:
