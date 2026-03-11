@@ -6,6 +6,7 @@
   - `docs/adr/0001-artifact-oriented-investigation-workflow.md`
   - `docs/adr/0003-langgraph-execution-shell.md`
   - `docs/adr/0004-bounded-exploratory-evidence.md`
+  - `docs/adr/0005-unified-ingress-and-subject-resolution.md`
 
 ## Purpose
 
@@ -85,6 +86,8 @@ What this means:
 - bounded exploration is no longer only a future idea
 - the remaining work is now about unifying the bounded-scout pattern, policy inputs, and observability rather than proving the concept from scratch
 - the rollout order changed, but the underlying architecture did not
+- the next semantic front-door bottleneck is no longer only runtime flexibility
+- the next semantic front-door bottleneck is ingress and subject resolution across generic, alert, and mixed multi-reference requests
 
 ## Post-Slice-7 Validation Findings
 
@@ -1003,6 +1006,43 @@ Validation gate:
 
 Presentation profile work may proceed in parallel, but it must remain strictly downstream of canonical evidence adequacy, exploratory routing, and deterministic artifact materialization.
 
+### Slice 15: Unified Ingress And Subject Resolution
+
+Status: Proposed
+
+Goal:
+
+- unify generic, alert, and mixed freeform investigation ingress around one subject-resolution pipeline without forcing full multi-target planning immediately
+
+Delivered in this slice should be:
+
+- one internal ingress request model that can represent:
+  - freeform generic investigation text
+  - one alert
+  - a group of alerts
+  - explicit resource references
+  - mixed Slack-style text with several related references
+- normalization into a subject set rather than one flat target string
+- one canonical primary subject plus related resources
+- explicit environment scope modeling for:
+  - Kubernetes context / datacenter
+  - tenant namespace
+- explicit subject distinctions for:
+  - Express cluster
+  - Express component
+  - DB workload
+  - generic Deployment / StatefulSet / pod-backed workload
+  - Kubernetes node
+- deterministic Express-aware grouping and dependency attachment without making Express assumptions mandatory for generic workload paths
+- planner seed derivation that still feeds the current planner/runtime mostly one canonical focus at first
+
+Validation gate:
+
+- generic Deployment and StatefulSet investigations still resolve cleanly without Express-specific assumptions
+- Express-cluster requests resolve Backend and Frontend resources as one logical application family without collapsing DB into the same semantic object
+- mixed requests preserve related resources and ambiguity notes rather than forcing fake certainty
+- the planner/runtime can still run mostly unchanged from one canonical focus while carrying related context forward
+
 ## Current Rollout Framing
 
 This transition plan, not the ADRs, should carry the time-sensitive rollout framing.
@@ -1025,7 +1065,9 @@ The next implementation order should now be:
 1. formalize and unify the evidence adequacy contract
 2. finish and align the bounded scout pattern across workload, service, and node seams
 3. add structured scout policy and leading-context configuration
-4. presentation profiles
-5. only later:
+4. unify ingress and subject resolution around one primary subject plus related resources
+5. presentation profiles
+6. only later:
    - human-in-the-loop interrupts
+   - true multi-target or family-scoped planning
    - broader hosted checkpoint/resume work for exploratory subgraphs
