@@ -1,6 +1,8 @@
-from investigation_service.ingress import subject_context_from_subject_set
+from investigation_service.ingress import IngressDeps, normalize_ingress_request, subject_context_from_subject_set
 from investigation_service.models import InvestigationIngressRequest, InvestigationSubjectRef, NormalizedInvestigationSubjectSet, ResolvedIngressScope
 from investigation_service.planner_seed import (
+    PostSeedNormalizationDeps,
+    apply_post_seed_normalization,
     PlannerSeedDeps,
     normalized_request_from_planner_seed,
     planner_seed_from_subject_set,
@@ -148,3 +150,71 @@ def test_planner_seed_raises_when_cluster_lookup_fails() -> None:
         assert str(exc) == "cluster lookup failed for tenant: not found"
     else:  # pragma: no cover - defensive
         raise AssertionError("expected cluster lookup failure")
+
+
+def test_normalize_ingress_request_emits_resource_hint_for_vague_workload_text() -> None:
+    subject_set = normalize_ingress_request(
+        InvestigationIngressRequest(
+            source="manual",
+            namespace="default",
+            question="Investigate unhealthy workload in namespace default",
+            raw_text="Investigate unhealthy workload in namespace default",
+            profile_hint="workload",
+        ),
+        IngressDeps(
+            resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": cluster})(),
+            get_cluster_cr=lambda namespace, name, cluster=None: {},
+        ),
+    )
+
+    assert [(ref.kind, ref.name, ref.sources) for ref in subject_set.candidate_refs] == [
+        ("resource_hint", "workload", ["vague_workload"])
+    ]
+    assert subject_set.canonical_focus is not None
+    assert subject_set.canonical_focus.kind == "resource_hint"
+    assert subject_set.canonical_focus.name == "workload"
+    assert all("resolved vague workload target" not in note for note in subject_set.normalization_notes)
+
+
+def test_vague_workload_hint_only_becomes_concrete_in_post_seed_normalization() -> None:
+    focus = InvestigationSubjectRef(
+        kind="resource_hint",
+        name="workload",
+        cluster="erauner-home",
+        namespace="default",
+        confidence="medium",
+        sources=["vague_workload"],
+    )
+    subject_set = _subject_set(focus=focus)
+    subject_set = subject_set.model_copy(
+        update={
+            "ingress": subject_set.ingress.model_copy(update={"target": None, "question": "Investigate unhealthy workload"}),
+            "candidate_refs": [focus],
+        }
+    )
+
+    seed = planner_seed_from_subject_set(
+        subject_set,
+        subject_context=subject_context_from_subject_set(subject_set),
+        deps=_deps(canonical_target=lambda target, profile, service_name: target),
+    )
+
+    assert seed.execution_focus is not None
+    assert seed.execution_focus.target == "workload"
+
+    normalized = normalized_request_from_planner_seed(seed)
+    assert normalized.target == "workload"
+
+    concretized = apply_post_seed_normalization(
+        normalized,
+        PostSeedNormalizationDeps(
+            find_unhealthy_pod=lambda req: type(
+                "UnhealthyPodResponse",
+                (),
+                {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+            )()
+        ),
+    )
+
+    assert concretized.target == "pod/crashy-abc123"
+    assert "resolved vague workload target to pod/crashy-abc123" in concretized.normalization_notes

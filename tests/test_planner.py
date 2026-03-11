@@ -160,6 +160,32 @@ def test_resolve_primary_target_expands_explicit_workload_shorthand() -> None:
     assert "resolved vague workload target to pod/crashy-abc123" in target.normalization_notes
 
 
+def test_resolve_primary_target_expands_vague_workload_question_through_post_seed_normalization() -> None:
+    unhealthy = type(
+        "UnhealthyPodResponse",
+        (),
+        {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+    )()
+    deps = _deps(calls=[])
+    deps = PlannerDeps(**{**deps.__dict__, "find_unhealthy_pod": lambda req: unhealthy})
+
+    target = resolve_primary_target(
+        InvestigationReportRequest(
+            namespace="default",
+            question="Investigate unhealthy workload in namespace default",
+        ),
+        deps,
+    )
+
+    assert target.requested_target == "workload"
+    assert target.target == "pod/crashy-abc123"
+    assert target.subject_context is not None
+    assert target.subject_context.primary_subject is not None
+    assert target.subject_context.primary_subject.kind == "resource_hint"
+    assert target.subject_context.primary_subject.name == "workload"
+    assert "resolved vague workload target to pod/crashy-abc123" in target.normalization_notes
+
+
 def test_build_investigation_plan_creates_targeted_plan_without_collecting_evidence() -> None:
     calls: list[str] = []
 

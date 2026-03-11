@@ -90,7 +90,6 @@ def _ingress_deps(deps: PlannerDeps) -> IngressDeps:
     return IngressDeps(
         resolve_cluster=deps.resolve_cluster,
         get_cluster_cr=deps.get_cluster_cr,
-        find_unhealthy_pod=deps.find_unhealthy_pod,
     )
 
 

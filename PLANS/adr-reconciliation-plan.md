@@ -226,7 +226,7 @@ Goal:
 - ingress stops at meaning, not final operational commitment
 
 Status:
-- next
+- in progress
 
 Current focus:
 - remove ingress-time vague-workload runtime narrowing
