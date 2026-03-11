@@ -1,5 +1,5 @@
 from investigation_service import planner
-from investigation_service.models import InvestigationReportRequest
+from investigation_service.models import NormalizedInvestigationRequest
 from investigation_service.planner import PlannerDeps
 
 
@@ -16,9 +16,22 @@ def _deps(**overrides) -> PlannerDeps:
     )
     return PlannerDeps(**{**base.__dict__, **overrides})
 
-
-def _normalized(req: InvestigationReportRequest, deps: PlannerDeps):
-    return planner.normalized_request(req, deps)
+def _seed_normalized(
+    *,
+    cluster: str | None,
+    namespace: str,
+    target: str,
+    profile: str = "workload",
+) -> NormalizedInvestigationRequest:
+    return NormalizedInvestigationRequest(
+        source="manual",
+        scope="workload" if profile != "service" else "service",
+        cluster=cluster,
+        namespace=namespace,
+        target=target,
+        profile=profile,
+        normalization_notes=[],
+    )
 
 
 def test_backend_resolution_notes_fallback_when_backend_lookup_fails() -> None:
@@ -28,10 +41,7 @@ def test_backend_resolution_notes_fallback_when_backend_lookup_fails() -> None:
     )
 
     normalized = planner.resolve_backend_convenience_target(
-        _normalized(
-            InvestigationReportRequest(cluster="erauner-home", namespace="operator-smoke", target="Backend/crashy"),
-            deps,
-        ),
+        _seed_normalized(cluster="erauner-home", namespace="operator-smoke", target="Backend/crashy"),
         deps,
     )
 
@@ -49,10 +59,7 @@ def test_frontend_resolution_notes_fallback_when_frontend_lookup_fails() -> None
     )
 
     normalized = planner.resolve_frontend_convenience_target(
-        _normalized(
-            InvestigationReportRequest(cluster="erauner-home", namespace="operator-smoke", target="Frontend/landing"),
-            deps,
-        ),
+        _seed_normalized(cluster="erauner-home", namespace="operator-smoke", target="Frontend/landing"),
         deps,
     )
 
@@ -70,14 +77,11 @@ def test_frontend_service_profile_resolves_to_service_when_lookup_fails() -> Non
     )
 
     normalized = planner.resolve_frontend_convenience_target(
-        _normalized(
-            InvestigationReportRequest(
-                cluster="erauner-home",
-                namespace="operator-smoke",
-                target="Frontend/landing",
-                profile="service",
-            ),
-            deps,
+        _seed_normalized(
+            cluster="erauner-home",
+            namespace="operator-smoke",
+            target="Frontend/landing",
+            profile="service",
         ),
         deps,
     )
@@ -98,10 +102,7 @@ def test_frontend_legacy_current_context_does_not_set_cluster_alias() -> None:
     )
 
     normalized = planner.resolve_frontend_convenience_target(
-        _normalized(
-            InvestigationReportRequest(namespace="operator-smoke", target="Frontend/landing", profile="service"),
-            deps,
-        ),
+        _seed_normalized(cluster=None, namespace="operator-smoke", target="Frontend/landing", profile="service"),
         deps,
     )
 
@@ -123,10 +124,7 @@ def test_cluster_resolution_picks_first_failing_component() -> None:
     )
 
     normalized = planner.resolve_cluster_convenience_target(
-        _normalized(
-            InvestigationReportRequest(cluster="erauner-home", namespace="operator-smoke", target="Cluster/testapp"),
-            deps,
-        ),
+        _seed_normalized(cluster="erauner-home", namespace="operator-smoke", target="Cluster/testapp"),
         deps,
     )
 
@@ -151,14 +149,11 @@ def test_cluster_service_profile_resolves_frontend_component_to_service() -> Non
     )
 
     normalized = planner.resolve_cluster_convenience_target(
-        _normalized(
-            InvestigationReportRequest(
-                cluster="erauner-home",
-                namespace="operator-smoke",
-                target="Cluster/testapp",
-                profile="service",
-            ),
-            deps,
+        _seed_normalized(
+            cluster="erauner-home",
+            namespace="operator-smoke",
+            target="Cluster/testapp",
+            profile="service",
         ),
         deps,
     )
@@ -170,6 +165,30 @@ def test_cluster_service_profile_resolves_frontend_component_to_service() -> Non
     assert normalized.target == "service/landing"
     assert "resolved Cluster/testapp to failing component Frontend/landing" in normalized.normalization_notes
     assert "resolved Frontend/landing to service/landing" in normalized.normalization_notes
+
+
+def test_cluster_resolution_preserves_statefulset_component_target() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
+        get_cluster_cr=lambda namespace, name, cluster=None: {
+            "status": {
+                "componentStatuses": [
+                    {"name": "newmetrics-db", "kind": "StatefulSet", "wave": 1, "phase": "Failed", "ready": False},
+                    {"name": "api", "kind": "Backend", "wave": 2, "phase": "Healthy", "ready": True},
+                ]
+            }
+        },
+    )
+
+    normalized = planner.resolve_cluster_convenience_target(
+        _seed_normalized(cluster="erauner-home", namespace="operator-smoke", target="Cluster/testapp"),
+        deps,
+    )
+
+    assert normalized.cluster == "erauner-home"
+    assert normalized.target == "statefulset/newmetrics-db"
+    assert "resolved Cluster/testapp to failing component StatefulSet/newmetrics-db" in normalized.normalization_notes
+    assert "resolved StatefulSet/newmetrics-db to statefulset/newmetrics-db" in normalized.normalization_notes
 
 
 def test_cluster_legacy_current_context_does_not_set_cluster_alias() -> None:
@@ -185,10 +204,7 @@ def test_cluster_legacy_current_context_does_not_set_cluster_alias() -> None:
     )
 
     normalized = planner.resolve_cluster_convenience_target(
-        _normalized(
-            InvestigationReportRequest(namespace="operator-smoke", target="Cluster/testapp", profile="service"),
-            deps,
-        ),
+        _seed_normalized(cluster=None, namespace="operator-smoke", target="Cluster/testapp", profile="service"),
         deps,
     )
 
@@ -203,10 +219,7 @@ def test_backend_explicit_current_context_resolves_in_legacy_mode() -> None:
     )
 
     normalized = planner.resolve_backend_convenience_target(
-        _normalized(
-            InvestigationReportRequest(cluster="current-context", namespace="operator-smoke", target="Backend/crashy"),
-            deps,
-        ),
+        _seed_normalized(cluster="current-context", namespace="operator-smoke", target="Backend/crashy"),
         deps,
     )
 

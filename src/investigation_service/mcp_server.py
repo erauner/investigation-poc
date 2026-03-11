@@ -55,6 +55,7 @@ def resolve_primary_target(
     labels: dict[str, str] | None = None,
     annotations: dict[str, str] | None = None,
     node_name: str | None = None,
+    question: str | None = None,
 ) -> dict:
     """Resolve the primary investigation target, including convenience targets and vague workload expansion, without collecting evidence."""
     return run_logged_tool(
@@ -70,12 +71,14 @@ def resolve_primary_target(
             "labels": labels or {},
             "annotations": annotations or {},
             "node_name": node_name,
+            "question": question,
         },
         lambda: resolve_primary_target_impl(
             InvestigationReportRequest(
                 cluster=cluster,
                 namespace=namespace,
                 target=target,
+                question=question,
                 profile=profile,
                 service_name=service_name,
                 lookback_minutes=lookback_minutes,
@@ -413,6 +416,7 @@ def rank_hypotheses(
     labels: dict[str, str] | None = None,
     annotations: dict[str, str] | None = None,
     node_name: str | None = None,
+    question: str | None = None,
     execution_context: dict | None = None,
 ) -> dict:
     """Analyze collected investigation evidence and return ranked hypotheses without rendering the final report."""
@@ -429,6 +433,7 @@ def rank_hypotheses(
             "labels": labels or {},
             "annotations": annotations or {},
             "node_name": node_name,
+            "question": question,
             "execution_context": execution_context,
         },
         lambda: rank_hypotheses_impl(
@@ -436,6 +441,7 @@ def rank_hypotheses(
                 cluster=cluster,
                 namespace=namespace,
                 target=target,
+                question=question,
                 profile=profile,
                 service_name=service_name,
                 lookback_minutes=lookback_minutes,
@@ -465,6 +471,7 @@ def render_investigation_report(
     labels: dict[str, str] | None = None,
     annotations: dict[str, str] | None = None,
     node_name: str | None = None,
+    question: str | None = None,
     execution_context: dict | None = None,
 ) -> dict:
     """Render the final investigation report from the staged artifact-oriented pipeline. Prefer passing execution_context from advance_investigation_runtime when available."""
@@ -485,6 +492,7 @@ def render_investigation_report(
             "labels": labels or {},
             "annotations": annotations or {},
             "node_name": node_name,
+            "question": question,
             "execution_context": execution_context,
         },
         lambda: render_investigation_report_impl(
@@ -492,6 +500,7 @@ def render_investigation_report(
                 cluster=cluster,
                 namespace=namespace,
                 target=target,
+                question=question,
                 profile=profile,
                 service_name=service_name,
                 lookback_minutes=lookback_minutes,
@@ -525,6 +534,7 @@ def run_orchestrated_investigation(
     labels: dict[str, str] | None = None,
     annotations: dict[str, str] | None = None,
     node_name: str | None = None,
+    question: str | None = None,
 ) -> dict:
     """Run the bounded investigation orchestration loop in product code and return the final report.
 
@@ -548,12 +558,14 @@ def run_orchestrated_investigation(
             "labels": labels or {},
             "annotations": annotations or {},
             "node_name": node_name,
+            "question": question,
         },
         lambda: run_orchestrated_investigation_impl(
             InvestigationReportRequest(
                 cluster=cluster,
                 namespace=namespace,
                 target=target,
+                question=question,
                 profile=profile,
                 service_name=service_name,
                 lookback_minutes=lookback_minutes,

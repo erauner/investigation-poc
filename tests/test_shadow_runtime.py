@@ -13,10 +13,25 @@ from investigation_shadow_runtime.host_adapter import format_shadow_report, pars
 from investigation_shadow_runtime.runner import run_shadow_investigation
 
 
+def _resolved_target(*, req, target: str, profile: str = "workload", node_name: str | None = None):
+    return type(
+        "ResolvedTarget",
+        (),
+        {
+            "cluster": req.cluster,
+            "namespace": req.namespace,
+            "target": target,
+            "profile": profile,
+            "service_name": None,
+            "node_name": node_name,
+        },
+    )()
+
+
 def test_parse_shadow_task_supports_vague_workload_prompt(monkeypatch) -> None:
     monkeypatch.setattr(
-        "investigation_shadow_runtime.host_adapter.find_unhealthy_pod",
-        lambda req: type("Response", (), {"candidate": type("Candidate", (), {"target": "pod/crashy"})()})(),
+        "investigation_shadow_runtime.host_adapter.resolve_primary_target",
+        lambda req: _resolved_target(req=req, target="pod/crashy"),
     )
 
     request = parse_shadow_task(
@@ -29,26 +44,90 @@ def test_parse_shadow_task_supports_vague_workload_prompt(monkeypatch) -> None:
 
 
 def test_parse_shadow_task_supports_alert_blocks() -> None:
-    request = parse_shadow_task(
-        """
-        Alert: PodCrashLooping
-        Namespace: kagent-smoke
-        Pod: crashy
-        """
-    )
+    captured = {}
 
+    def _resolve(req):
+        captured["request"] = req
+        return _resolved_target(req=req, target="pod/crashy")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("investigation_shadow_runtime.host_adapter.resolve_primary_target", _resolve)
+    try:
+        request = parse_shadow_task(
+            """
+            Alert: PodCrashLooping
+            Namespace: kagent-smoke
+            Pod: crashy
+            """
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert captured["request"].question is not None
+    assert "PodCrashLooping" in captured["request"].question
     assert request.alertname == "PodCrashLooping"
     assert request.namespace == "kagent-smoke"
     assert request.target == "pod/crashy"
     assert request.profile == "workload"
 
 
-def test_parse_shadow_task_supports_direct_node_target() -> None:
-    request = parse_shadow_task("Investigate node/worker3 for memory pressure.")
+def test_parse_shadow_task_supports_direct_node_target(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "investigation_shadow_runtime.host_adapter.resolve_primary_target",
+        lambda req: _resolved_target(req=req, target="node/worker3", node_name="worker3"),
+    )
+
+    request = parse_shadow_task(
+        "Investigate node/worker3 for memory pressure."
+    )
 
     assert request.target == "node/worker3"
     assert request.node_name == "worker3"
     assert request.profile == "workload"
+
+
+def test_parse_shadow_task_does_not_accept_unsupported_job_or_daemonset_targets(monkeypatch) -> None:
+    captured = {}
+
+    def _resolve(req):
+        captured["request"] = req
+        return _resolved_target(req=req, target="pod/fallback")
+
+    monkeypatch.setattr("investigation_shadow_runtime.host_adapter.resolve_primary_target", _resolve)
+
+    parse_shadow_task("Investigate job/backup-runner and daemonset/node-agent in namespace ops.")
+
+    assert captured["request"].target is None
+
+
+def test_parse_shadow_task_rejects_unsupported_text_job_target_end_to_end() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: job"):
+        parse_shadow_task("Investigate job/backup-runner in namespace ops.")
+
+
+def test_parse_shadow_task_rejects_unsupported_json_job_target_end_to_end() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: job"):
+        parse_shadow_task('{"namespace":"ops","target":"job/backup-runner"}')
+
+
+def test_parse_shadow_task_rejects_unsupported_text_daemonset_target_end_to_end() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: daemonset"):
+        parse_shadow_task("Investigate daemonset/node-agent in namespace ops.")
+
+
+def test_parse_shadow_task_rejects_unsupported_json_daemonset_target_end_to_end() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: daemonset"):
+        parse_shadow_task('{"namespace":"ops","target":"daemonset/node-agent"}')
+
+
+def test_parse_shadow_task_rejects_backend_without_namespace_in_json() -> None:
+    with pytest.raises(ValueError, match="namespace is required for Backend targets"):
+        parse_shadow_task('{"target":"Backend/api"}')
+
+
+def test_parse_shadow_task_rejects_frontend_without_namespace_in_json() -> None:
+    with pytest.raises(ValueError, match="namespace is required for Frontend targets"):
+        parse_shadow_task('{"target":"Frontend/api"}')
 
 
 def test_format_shadow_report_uses_fixed_sections() -> None:

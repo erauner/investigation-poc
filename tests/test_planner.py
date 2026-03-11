@@ -114,6 +114,15 @@ def test_classify_investigation_mode_defaults_to_targeted_rca() -> None:
     assert mode == "targeted_rca"
 
 
+def test_classify_investigation_mode_promotes_resolved_question_targets_to_targeted_rca() -> None:
+    mode = classify_investigation_mode(
+        BuildInvestigationPlanRequest(question="Investigate pod/api in namespace default"),
+        has_resolved_target=True,
+    )
+
+    assert mode == "targeted_rca"
+
+
 def test_build_investigation_plan_creates_targeted_plan_without_collecting_evidence() -> None:
     calls: list[str] = []
 
@@ -137,7 +146,7 @@ def test_build_investigation_plan_creates_targeted_plan_without_collecting_evide
     assert target_step.preferred_mcp_server == "kubernetes-mcp-server"
     assert "pods_log" in target_step.preferred_tool_names
     assert [batch.id for batch in plan.evidence_batches] == ["batch-1", "batch-2", "batch-3"]
-    assert calls == ["canonical_target", "scope_from_target"]
+    assert calls == []
 
 
 def test_build_investigation_plan_sets_metrics_first_policy_for_service_targets() -> None:
@@ -223,7 +232,7 @@ def test_build_investigation_plan_resolves_convenience_targets_before_plan_const
     assert plan.target.requested_target == "Backend/api"
     assert plan.target.target == "deployment/api"
     assert "resolved Backend/api to deployment/api" in plan.planning_notes
-    assert calls == ["canonical_target", "scope_from_target", "resolve_cluster", "get_backend_cr"]
+    assert calls == ["resolve_cluster", "get_backend_cr"]
 
 
 def test_build_investigation_plan_supports_factual_mode_without_a_target() -> None:
@@ -242,6 +251,94 @@ def test_build_investigation_plan_supports_factual_mode_without_a_target() -> No
     assert plan.active_batch_id == "batch-1"
     assert [step.id for step in plan.steps] == ["collect-factual-evidence", "summarize-findings"]
     assert calls == []
+
+
+def test_build_investigation_plan_uses_question_ingress_to_resolve_target() -> None:
+    calls: list[str] = []
+
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(
+            namespace="default",
+            question="Investigate pod/api in namespace default",
+        ),
+        _deps(calls),
+    )
+
+    assert plan.mode == "targeted_rca"
+    assert plan.target is not None
+    assert plan.target.requested_target == "pod/api"
+    assert plan.target.target == "pod/api"
+    assert "canonical focus selected: pod/api" in plan.planning_notes
+    assert calls == []
+
+
+def test_build_investigation_plan_reraises_question_scope_errors_for_target_like_input() -> None:
+    deps = _deps([])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "resolve_cluster": lambda cluster: (_ for _ in ()).throw(ValueError(f"unknown cluster alias: {cluster}")),
+        }
+    )
+
+    with pytest.raises(ValueError, match="unknown cluster alias: typoed-cluster"):
+        build_investigation_plan(
+            BuildInvestigationPlanRequest(
+                question="Investigate pod/api in namespace default in cluster typoed-cluster",
+            ),
+            deps,
+        )
+
+
+def test_build_investigation_plan_rejects_unsupported_target_like_question_input() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: job"):
+        build_investigation_plan(
+            BuildInvestigationPlanRequest(
+                question="Investigate job/backup in namespace ops",
+            ),
+            _deps([]),
+        )
+
+
+def test_resolve_primary_target_normalizes_question_cluster_text_via_cluster_registry() -> None:
+    deps = _deps([])
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "resolve_cluster": lambda cluster: type(
+                "ResolvedCluster",
+                (),
+                {"alias": "current-context", "source": "legacy_current_context"},
+            )(),
+        }
+    )
+
+    target = resolve_primary_target(
+        InvestigationReportRequest(
+            namespace="default",
+            question="Investigate pod/api in namespace default in cluster current-context",
+        ),
+        deps,
+    )
+
+    assert target.cluster is None
+    assert target.target == "pod/api"
+
+
+def test_resolve_primary_target_requires_namespace_for_backend_targets() -> None:
+    with pytest.raises(ValueError, match="namespace is required for Backend targets"):
+        resolve_primary_target(
+            InvestigationReportRequest(target="Backend/api"),
+            _deps([]),
+        )
+
+
+def test_resolve_primary_target_requires_namespace_for_frontend_targets() -> None:
+    with pytest.raises(ValueError, match="namespace is required for Frontend targets"):
+        resolve_primary_target(
+            InvestigationReportRequest(target="Frontend/api"),
+            _deps([]),
+        )
 
 
 def test_execute_investigation_step_runs_single_targeted_evidence_batch() -> None:

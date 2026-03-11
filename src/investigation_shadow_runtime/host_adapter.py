@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import re
 
-from investigation_service.models import FindUnhealthyPodRequest, InvestigationReport, InvestigationReportRequest
+from investigation_service.models import InvestigationReport, InvestigationReportRequest
 from investigation_service.presentation import render_presentation_markdown
+from investigation_service.reporting import resolve_primary_target
 from investigation_service.settings import get_default_lookback_minutes
-from investigation_service.tools import find_unhealthy_pod
 
 _RESOURCE_PATTERN = re.compile(
-    r"(?P<kind>pod|deployment|statefulset|daemonset|job|service|backend|frontend|cluster|node)/(?P<name>[a-z0-9][a-z0-9-]*)",
+    r"(?P<kind>pod|deployment|statefulset|service|backend|frontend|cluster|node)/(?P<name>[a-z0-9][a-z0-9-]*)",
     re.IGNORECASE,
 )
 _NAMESPACE_PATTERN = re.compile(r"\bnamespace\s+(?P<namespace>[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)
@@ -87,27 +87,25 @@ def _parsed_json_request(task: str) -> InvestigationReportRequest | None:
     return InvestigationReportRequest.model_validate(payload)
 
 
-def _resolve_vague_target(task: str, *, cluster: str | None, namespace: str | None, target: str | None) -> str | None:
-    if target is not None or namespace is None:
-        return target
-    lowered = task.lower()
-    if "unhealthy pod" not in lowered and "unhealthy workload" not in lowered:
-        return target
-    response = find_unhealthy_pod(
-        FindUnhealthyPodRequest(
-            cluster=cluster,
-            namespace=namespace,
-        )
+def _canonicalize_request(request: InvestigationReportRequest) -> InvestigationReportRequest:
+    resolved = resolve_primary_target(request)
+
+    return request.model_copy(
+        update={
+            "cluster": resolved.cluster,
+            "namespace": resolved.namespace or request.namespace,
+            "target": resolved.target,
+            "profile": resolved.profile,
+            "service_name": resolved.service_name or request.service_name,
+            "node_name": resolved.node_name or request.node_name,
+        }
     )
-    if response.candidate is None:
-        raise ValueError(f"no unhealthy pod found in namespace {namespace}")
-    return response.candidate.target
 
 
 def parse_shadow_task(task: str) -> InvestigationReportRequest:
     parsed_json = _parsed_json_request(task)
     if parsed_json is not None:
-        return parsed_json
+        return _canonicalize_request(parsed_json)
 
     fields = _field_map(task)
     target = _explicit_target(task)
@@ -138,12 +136,11 @@ def parse_shadow_task(task: str) -> InvestigationReportRequest:
         if target is None and service_name is not None:
             target = f"service/{service_name}"
 
-    target = _resolve_vague_target(task, cluster=cluster, namespace=namespace, target=target)
-
-    return InvestigationReportRequest(
+    request = InvestigationReportRequest(
         cluster=cluster,
         namespace=namespace,
         target=target,
+        question=task,
         profile=profile,
         service_name=service_name,
         lookback_minutes=lookback_minutes,
@@ -155,6 +152,7 @@ def parse_shadow_task(task: str) -> InvestigationReportRequest:
         annotations={},
         node_name=node_name,
     )
+    return _canonicalize_request(request)
 
 
 def format_shadow_report(report: InvestigationReport) -> str:
