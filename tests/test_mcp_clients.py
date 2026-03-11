@@ -371,6 +371,56 @@ def test_collect_service_logs_builds_loki_query_from_matched_pods(monkeypatch) -
     assert snapshot.tool_path == ["loki-mcp-server", "loki_query"]
 
 
+def test_collect_service_logs_falls_back_to_selector_app_query_when_pod_query_is_empty(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        if tool_name != "loki_query":
+            raise AssertionError(f"unexpected tool {tool_name}")
+        if args["query"] == '{namespace="operator-smoke",pod=~"api\\-abc123"}':
+            return {"data": {"result": []}}
+        if args["query"] == '{namespace="operator-smoke",app="api"}':
+            return {"data": {"result": [{"values": [["1", "error: upstream returned 500"]]}]}}
+        raise AssertionError(f"unexpected query {args['query']}")
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="local-kind", loki_url=None),
+    )
+    monkeypatch.setattr(LokiMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_service_logs(
+        StepExecutionInputs(
+            request_kind="service_context",
+            namespace="operator-smoke",
+            target="service/api",
+            profile="service",
+            service_name="api",
+            lookback_minutes=15,
+        ),
+        target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        object_state={
+            "kind": "service",
+            "name": "api",
+            "selector": {"app.kubernetes.io/name": "api"},
+            "matchedPods": [{"name": "api-abc123"}],
+        },
+    )
+
+    assert [args["query"] for _tool_name, args in calls] == [
+        '{namespace="operator-smoke",pod=~"api\\-abc123"}',
+        '{namespace="operator-smoke",app="api"}',
+    ]
+    assert snapshot.log_excerpt == "error: upstream returned 500"
+    assert snapshot.tool_path == ["loki-mcp-server", "loki_query"]
+
+
 def test_collect_service_logs_rejects_remote_loki_routing_without_explicit_cluster(monkeypatch) -> None:
     client = LokiMcpClient(url="http://loki-mcp.example/mcp")
 
@@ -391,6 +441,33 @@ def test_collect_service_logs_rejects_remote_loki_routing_without_explicit_clust
                 target="service/api",
                 profile="service",
                 service_name="api",
+                lookback_minutes=15,
+            ),
+            target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        )
+
+
+def test_collect_service_logs_rejects_remote_loki_routing_when_remote_cluster_has_no_loki_url(monkeypatch) -> None:
+    client = LokiMcpClient(url="http://loki-mcp.example/mcp")
+
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="remote-a", loki_url=None),
+    )
+    monkeypatch.setattr(mcp_clients, "get_default_cluster_alias", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_cluster_name", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_loki_url", lambda: "http://local-loki:3100")
+
+    with pytest.raises(mcp_clients.PeerMcpError, match="multicluster loki routing"):
+        client.collect_service_logs(
+            StepExecutionInputs(
+                request_kind="service_context",
+                namespace="operator-smoke",
+                target="service/api",
+                profile="service",
+                service_name="api",
+                cluster="remote-a",
                 lookback_minutes=15,
             ),
             target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),

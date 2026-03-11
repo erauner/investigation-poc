@@ -233,12 +233,28 @@ def _service_loki_pod_candidates(object_state: dict[str, Any] | None, *, max_pod
     return tuple(names[:max_pods])
 
 
-def _build_service_loki_query(target: TargetRef, object_state: dict[str, Any] | None = None) -> str:
+def _service_loki_app_candidates(object_state: dict[str, Any] | None, target: TargetRef) -> tuple[str, ...]:
+    selector = (object_state or {}).get("selector") or {}
+    candidates: list[str] = []
+    for key in ("app.kubernetes.io/name", "app", "k8s-app"):
+        value = selector.get(key)
+        if isinstance(value, str) and value.strip():
+            candidates.append(value.strip())
+    if target.name:
+        candidates.append(target.name)
+    return tuple(dict.fromkeys(candidates))
+
+
+def _build_service_loki_queries(target: TargetRef, object_state: dict[str, Any] | None = None) -> tuple[str, ...]:
+    queries: list[str] = []
     pod_candidates = _service_loki_pod_candidates(object_state)
     if pod_candidates:
         escaped = "|".join(re.escape(name) for name in pod_candidates)
-        return f'{{namespace="{target.namespace}",pod=~"{escaped}"}}'
-    return f'{{namespace="{target.namespace}"}} |= "{target.name}"'
+        queries.append(f'{{namespace="{target.namespace}",pod=~"{escaped}"}}')
+    for app_candidate in _service_loki_app_candidates(object_state, target):
+        queries.append(f'{{namespace="{target.namespace}",app="{app_candidate}"}}')
+    queries.append(f'{{namespace="{target.namespace}"}} |= "{target.name}"')
+    return tuple(dict.fromkeys(queries))
 
 
 def _normalize_metric_value(raw: Any) -> float | None:
@@ -326,12 +342,11 @@ def _peer_prometheus_routing_unsupported(cluster, requested_cluster: str | None)
 
 
 def _peer_loki_routing_unsupported(cluster, requested_cluster: str | None) -> bool:
+    requested_alias = (requested_cluster or "").strip().lower() or None
     local_aliases = {
         alias for alias in (get_default_cluster_alias(), get_cluster_name(), "local-kind", "current-context") if alias
     }
-    if cluster.alias in local_aliases:
-        return False
-    if not cluster.loki_url or cluster.loki_url == get_loki_url():
+    if cluster.alias in local_aliases or requested_alias in local_aliases:
         return False
     return True
 
@@ -1200,16 +1215,26 @@ class LokiMcpClient:
             ):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
-                    raw = await self._call_tool(
-                        session,
-                        "loki_query",
-                        {
-                            "query": _build_service_loki_query(target, object_state),
-                            "start": _format_loki_window(inputs.lookback_minutes),
-                            "end": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                            "limit": get_log_tail_lines(),
-                        },
-                    )
+                    raw: Any = None
+                    for query in _build_service_loki_queries(target, object_state):
+                        raw = await self._call_tool(
+                            session,
+                            "loki_query",
+                            {
+                                "query": query,
+                                "start": _format_loki_window(inputs.lookback_minutes),
+                                "end": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                                "limit": get_log_tail_lines(),
+                            },
+                        )
+                        normalized = _normalize_loki_logs(raw)
+                        if normalized:
+                            return LokiLogsSnapshot(
+                                cluster_alias=cluster.alias,
+                                target=target,
+                                log_excerpt=normalized,
+                                tool_path=["loki-mcp-server", "loki_query"],
+                            )
                     return LokiLogsSnapshot(
                         cluster_alias=cluster.alias,
                         target=target,

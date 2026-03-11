@@ -108,13 +108,18 @@ def _resolve_registered_cluster(
             f"cluster alias {config.alias} requires kubeconfig context {config.kube_context}, "
             "but no kubeconfig is mounted"
         )
+    prometheus_url = config.prometheus_url
+    loki_url = config.loki_url
+    if use_in_cluster:
+        prometheus_url = prometheus_url or get_prometheus_url()
+        loki_url = loki_url or get_loki_url()
     return ResolvedCluster(
         alias=config.alias,
         kube_context=config.kube_context if kubeconfig_path else None,
         kubeconfig_path=kubeconfig_path,
         use_in_cluster=use_in_cluster,
-        prometheus_url=config.prometheus_url or get_prometheus_url(),
-        loki_url=config.loki_url or get_loki_url(),
+        prometheus_url=prometheus_url,
+        loki_url=loki_url,
         source=source,
         allowed_namespaces=config.allowed_namespaces,
     )

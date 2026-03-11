@@ -16,34 +16,10 @@ spec:
         app.kubernetes.io/name: loki-mcp-server
     spec:
       serviceAccountName: loki-mcp-server
-      initContainers:
-        - name: build-binary
-          image: golang:1.24-alpine
-          imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -ec
-            - |
-              apk add --no-cache git ca-certificates
-              git clone https://github.com/grafana/loki-mcp.git /src
-              cd /src
-              git checkout c8148563dd268126314e008fc1dc71930b6c7b61
-              CGO_ENABLED=0 GOOS=linux go build -o /work/loki-mcp-server ./cmd/server
-              chmod 0555 /work/loki-mcp-server
-          volumeMounts:
-            - name: app
-              mountPath: /work
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
       containers:
         - name: mcp
-          image: alpine:3.21
+          image: loki-mcp-server:local
           imagePullPolicy: IfNotPresent
-          command:
-            - /opt/mcp/loki-mcp-server
           env:
             - name: PORT
               value: "8080"
@@ -68,10 +44,6 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
-          volumeMounts:
-            - name: app
-              mountPath: /opt/mcp
-              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -82,6 +54,3 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
-      volumes:
-        - name: app
-          emptyDir: {}

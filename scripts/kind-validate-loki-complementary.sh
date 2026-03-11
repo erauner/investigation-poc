@@ -230,7 +230,11 @@ while time.time() < deadline:
         for item in stream.get("values", []):
             if len(item) >= 2:
                 lines.append(item[1])
-    if any("error: upstream returned 500" in line or "exception: synthetic upstream timeout" in line for line in lines):
+    if any(
+        ("stdout F error: upstream returned 500" in line)
+        or ("stdout F exception: synthetic upstream timeout" in line)
+        for line in lines
+    ):
         print(f"recovered {len(lines)} Loki log lines for {pod_name}")
         raise SystemExit(0)
     time.sleep(2)

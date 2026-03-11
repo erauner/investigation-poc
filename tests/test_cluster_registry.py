@@ -83,6 +83,30 @@ clusters:
     assert resolved.loki_url == "http://loki-a:3100"
 
 
+def test_resolve_remote_registered_cluster_does_not_inherit_local_observability_urls(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "clusters.yaml"
+    path.write_text(
+        """
+clusters:
+  remote-a:
+    kube_context: remote-a
+    default: true
+"""
+    )
+    monkeypatch.setenv("CLUSTER_REGISTRY_PATH", str(path))
+    kubeconfig = tmp_path / "multi-kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\nkind: Config\n")
+    monkeypatch.setenv("KUBECONFIG_PATH", str(kubeconfig))
+    monkeypatch.setenv("PROMETHEUS_URL", "http://local-prometheus:9090")
+    monkeypatch.setenv("LOKI_URL", "http://local-loki:3100")
+    monkeypatch.setenv("CLUSTER_NAME", "local-kind")
+
+    resolved = resolve_cluster("remote-a")
+
+    assert resolved.prometheus_url is None
+    assert resolved.loki_url is None
+
+
 def test_resolve_cluster_requires_alias_when_registry_has_no_default(monkeypatch, tmp_path) -> None:
     path = tmp_path / "clusters.yaml"
     path.write_text(

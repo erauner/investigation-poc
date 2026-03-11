@@ -26,8 +26,6 @@ spec:
           env:
             - name: METRICS_SCENARIO
               value: loki_complementary
-            - name: LOKI_PUSH_URL
-              value: http://loki.kagent.svc.cluster.local:3100/loki/api/v1/push
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:

@@ -37,6 +37,7 @@ SCENARIO = parse_metrics_scenario(os.getenv("METRICS_SCENARIO"))
 APP_START_MONOTONIC = time.monotonic()
 HIDE_AFTER_SECONDS = max(int(os.getenv("METRICS_HIDE_AFTER_SECONDS", "45")), 1)
 LOKI_PUSH_URL = os.getenv("LOKI_PUSH_URL", "").strip()
+ENABLE_LOKI_DIRECT_PUSH = os.getenv("ENABLE_LOKI_DIRECT_PUSH", "").strip().lower() in {"1", "true", "yes", "on"}
 POD_NAMESPACE = os.getenv("POD_NAMESPACE", "metrics-smoke").strip() or "metrics-smoke"
 POD_NAME = os.getenv("POD_NAME", "metrics-api").strip() or "metrics-api"
 SERVICE_NAME = os.getenv("SERVICE_NAME", "metrics-api").strip() or "metrics-api"
@@ -63,7 +64,7 @@ def metrics_registry_for_scenario(
 
 
 def loki_push_enabled_for_scenario(scenario: MetricsScenario) -> bool:
-    return scenario == MetricsScenario.LOKI_COMPLEMENTARY and bool(LOKI_PUSH_URL)
+    return scenario == MetricsScenario.LOKI_COMPLEMENTARY and ENABLE_LOKI_DIRECT_PUSH and bool(LOKI_PUSH_URL)
 
 
 def build_loki_push_payload(line: str, *, timestamp_ns: int | None = None) -> bytes:
