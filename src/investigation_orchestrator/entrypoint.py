@@ -1,3 +1,5 @@
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Literal
 
@@ -17,6 +19,7 @@ from .checkpointing import GraphCheckpointConfig, resolve_checkpoint_config
 from .evidence_runner import apply_pending_exploration_review, collect_external_steps
 from .graph import (
     get_investigation_graph_state,
+    get_investigation_graph_state_raw,
     invoke_investigation_graph,
     resume_investigation_graph,
     update_investigation_graph_state,
@@ -192,6 +195,12 @@ def _pending_review_or_raise(state: OrchestrationState) -> PendingExplorationRev
     return pending_review
 
 
+def _pending_review_fingerprint(review: PendingExplorationReview) -> str:
+    payload = review.model_dump(mode="json", exclude={"decision"})
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def _apply_exploration_review_decision(
     *,
     runtime: OrchestratorRuntimeConfig,
@@ -214,6 +223,17 @@ def _apply_exploration_review_decision(
     if not allow_exploration_review:
         raise ValueError("exploration review decisions require enable_exploration_review with checkpointing")
     latest_checkpoint_config = _latest_head_checkpoint_config(resolved_checkpoint_config)
+    requested_pending_review: PendingExplorationReview | None = None
+    if resolved_checkpoint_config.checkpoint_id:
+        requested_snapshot = get_investigation_graph_state_raw(
+            deps=_runtime_deps(allow_exploration_review=allow_exploration_review),
+            checkpointer=runtime.checkpointer,
+            checkpoint_config=resolved_checkpoint_config,
+            interrupt_before=runtime.interrupt_before,
+            interrupt_after=runtime.interrupt_after,
+            enable_exploration_review_interrupt=allow_exploration_review,
+        )
+        requested_pending_review = _pending_review_or_raise(requested_snapshot.values)
     current_snapshot = get_investigation_graph_state(
         deps=_runtime_deps(allow_exploration_review=allow_exploration_review),
         checkpointer=runtime.checkpointer,
@@ -223,6 +243,10 @@ def _apply_exploration_review_decision(
         enable_exploration_review_interrupt=allow_exploration_review,
     )
     pending_review = _pending_review_or_raise(current_snapshot.values)
+    if requested_pending_review is not None and _pending_review_fingerprint(
+        requested_pending_review
+    ) != _pending_review_fingerprint(pending_review):
+        raise ValueError("exploration review state has changed since the requested checkpoint_id")
     if pending_review.decision is not None:
         raise ValueError("exploration review decision has already been recorded for the requested thread_id")
     return update_investigation_graph_state(

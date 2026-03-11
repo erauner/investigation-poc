@@ -1,4 +1,6 @@
 from investigation_service.exploration import (
+    ScoutBudgetUsage,
+    build_bounded_scout_observation,
     build_baseline_evidence_summary,
     build_exploratory_scout_context,
 )
@@ -179,3 +181,32 @@ def test_build_exploratory_scout_context_returns_none_for_adequate_or_attempt_on
         )
         is None
     )
+
+
+def test_build_bounded_scout_observation_uses_context_and_budget() -> None:
+    context = build_exploratory_scout_context(
+        step=_step(capability="workload_evidence_plane", plane="workload", target="deployment/api"),
+        artifact=_artifact(
+            findings=[],
+            limitations=["logs unavailable"],
+        ),
+    )
+
+    observation = build_bounded_scout_observation(
+        context=context,
+        probe_kind="alternate_runtime_pod",
+        stop_reason="probe_failed",
+        budget_usage=ScoutBudgetUsage(
+            probe_runs_used=1,
+            additional_pods_used=1,
+        ),
+    )
+
+    assert observation.capability == "workload_evidence_plane"
+    assert observation.step_id == "collect-target-evidence"
+    assert observation.probe_kind == "alternate_runtime_pod"
+    assert observation.baseline_outcome == context.baseline_assessment.outcome
+    assert observation.baseline_reasons == tuple(context.baseline_assessment.reasons)
+    assert observation.stop_reason == "probe_failed"
+    assert observation.budget_usage.probe_runs_used == 1
+    assert observation.budget_usage.additional_pods_used == 1

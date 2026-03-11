@@ -4,11 +4,16 @@ from investigation_service.adequacy import (
     assessment_improves,
     bundle_improves_for_capability,
 )
-from investigation_service.exploration import ExploratoryScoutContext
+from investigation_service.exploration import (
+    ExploratoryScoutContext,
+    ScoutBudgetUsage,
+    build_bounded_scout_observation,
+)
 from investigation_service.models import ActualRoute, EvidenceStepContract, SubmittedStepArtifact
 from investigation_service.submission_materialization import materialize_node_submission
 
 from .mcp_clients import KubernetesMcpClient, NodePodSummarySnapshot, PeerMcpError
+from .runtime_logging import log_bounded_scout
 
 
 def _merged_contributing_routes(*route_groups: list[ActualRoute]) -> list[ActualRoute]:
@@ -90,6 +95,10 @@ def maybe_run_bounded_node_scout(
         return baseline_artifact
 
     baseline_assessment = scout_context.baseline_assessment
+    budget_usage = ScoutBudgetUsage(
+        probe_runs_used=1,
+        related_pods_requested=policy.max_related_pods,
+    )
 
     try:
         scout_snapshot = kubernetes_mcp_client.collect_node_top_pods(
@@ -97,6 +106,14 @@ def maybe_run_bounded_node_scout(
             limit=policy.max_related_pods,
         )
     except PeerMcpError as exc:
+        log_bounded_scout(
+            build_bounded_scout_observation(
+                context=scout_context,
+                probe_kind="node_top_pods",
+                stop_reason="probe_failed",
+                budget_usage=budget_usage,
+            )
+        )
         return baseline_artifact.model_copy(
             update={
                 "attempted_routes": [
@@ -130,8 +147,24 @@ def maybe_run_bounded_node_scout(
         baseline_artifact.evidence_bundle,
         scout_artifact.evidence_bundle,
     ):
+        log_bounded_scout(
+            build_bounded_scout_observation(
+                context=scout_context,
+                probe_kind="node_top_pods",
+                stop_reason="probe_improved_artifact",
+                budget_usage=budget_usage,
+            )
+        )
         return scout_artifact
 
+    log_bounded_scout(
+        build_bounded_scout_observation(
+            context=scout_context,
+            probe_kind="node_top_pods",
+            stop_reason="probe_not_improving",
+            budget_usage=budget_usage,
+        )
+    )
     return baseline_artifact.model_copy(
         update={"attempted_routes": [*baseline_artifact.attempted_routes, scout_artifact.actual_route]}
     )

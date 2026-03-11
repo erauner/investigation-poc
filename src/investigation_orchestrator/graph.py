@@ -321,6 +321,25 @@ def get_investigation_graph_state(
     interrupt_after: tuple[str, ...] | list[str] = (),
     enable_exploration_review_interrupt: bool = False,
 ) -> StateSnapshot:
+    return get_investigation_graph_state_raw(
+        deps=deps,
+        checkpointer=checkpointer,
+        checkpoint_config=_state_read_checkpoint_config(checkpoint_config),
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+        enable_exploration_review_interrupt=enable_exploration_review_interrupt,
+    )
+
+
+def get_investigation_graph_state_raw(
+    *,
+    deps: OrchestratorRuntimeDeps,
+    checkpointer: BaseCheckpointSaver,
+    checkpoint_config: GraphCheckpointConfig,
+    interrupt_before: tuple[str, ...] | list[str] = (),
+    interrupt_after: tuple[str, ...] | list[str] = (),
+    enable_exploration_review_interrupt: bool = False,
+) -> StateSnapshot:
     graph = build_investigation_graph(
         deps=deps,
         checkpointer=checkpointer,
@@ -329,7 +348,7 @@ def get_investigation_graph_state(
         interrupt_after=interrupt_after,
         enable_exploration_review_interrupt=enable_exploration_review_interrupt,
     )
-    return graph.get_state(build_graph_config(_state_read_checkpoint_config(checkpoint_config)))
+    return graph.get_state(build_graph_config(checkpoint_config))
 
 
 def update_investigation_graph_state(

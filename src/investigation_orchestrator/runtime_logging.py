@@ -3,6 +3,8 @@ import logging
 import hashlib
 from typing import Any
 
+from investigation_service.exploration import BoundedScoutObservation
+
 from .checkpointing import GraphCheckpointConfig
 from .state import OrchestrationState
 
@@ -37,6 +39,12 @@ def _checkpoint_summary(checkpoint_config: GraphCheckpointConfig | None) -> dict
     }
 
 
+def _identifier_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
 def summarize_graph_state(state: OrchestrationState | dict[str, Any] | None) -> dict[str, Any]:
     state = state or {}
     execution_context = state.get("execution_context")
@@ -47,16 +55,51 @@ def summarize_graph_state(state: OrchestrationState | dict[str, Any] | None) -> 
         "has_execution_context": execution_context is not None,
         "plan_has_active_batch": bool(execution_context.updated_plan.active_batch_id) if execution_context else False,
         "active_batch_present": active_batch is not None,
-        "active_batch_id": active_batch.batch_id if active_batch is not None else None,
+        "active_batch_id_token": _identifier_token(active_batch.batch_id) if active_batch is not None else None,
         "submitted_steps_count": len(state.get("submitted_steps") or []),
         "pending_exploration_review": pending_review is not None,
-        "pending_review_step_id": pending_review.step.step_id if pending_review is not None else None,
+        "pending_review_step_id_token": _identifier_token(pending_review.step.step_id) if pending_review is not None else None,
         "pending_review_capability": pending_review.capability if pending_review is not None else None,
         "pending_review_decision": pending_review.decision if pending_review is not None else None,
         "pending_review_adequacy_outcome": pending_review.adequacy_outcome if pending_review is not None else None,
+        "pending_review_probe_kind": pending_review.probe_kind if pending_review is not None else None,
+        "pending_review_stop_reason": (
+            "awaiting_review" if pending_review is not None and pending_review.decision is None else None
+        ),
         "remaining_batch_budget": state.get("remaining_batch_budget"),
         "has_final_report": final_report is not None,
     }
+
+
+def summarize_bounded_scout_observation(
+    observation: BoundedScoutObservation,
+    *,
+    batch_id: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "batch_id_token": _identifier_token(batch_id),
+        "capability": observation.capability,
+        "step_id_token": _identifier_token(observation.step_id),
+        "plane": observation.plane,
+        "probe_kind": observation.probe_kind,
+        "baseline_outcome": observation.baseline_outcome,
+        "baseline_reasons": list(observation.baseline_reasons),
+        "stop_reason": observation.stop_reason,
+        "probe_runs_used": observation.budget_usage.probe_runs_used,
+        "additional_pods_used": observation.budget_usage.additional_pods_used,
+        "metric_families_requested": observation.budget_usage.metric_families_requested,
+        "related_pods_requested": observation.budget_usage.related_pods_requested,
+    }
+
+
+def log_bounded_scout(
+    observation: BoundedScoutObservation,
+    *,
+    batch_id: str | None = None,
+) -> None:
+    logger = _ensure_logger()
+    encoded_summary = json.dumps(summarize_bounded_scout_observation(observation, batch_id=batch_id), sort_keys=True)
+    logger.info("orchestrator_bounded_scout summary=%s", encoded_summary)
 
 
 def log_graph_run(
