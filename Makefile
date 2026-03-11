@@ -155,7 +155,6 @@ kind-install-kagent:
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -k "$(K8S_OVERLAY)"
 	@kubectl apply -f k8s/modelconfig.yaml
-	@kubectl apply -f k8s/agent.yaml
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/investigation-mcp-server >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-controller --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-ui --timeout=180s

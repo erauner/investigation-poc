@@ -283,31 +283,29 @@ def _alert_identity_filters(inputs: StepExecutionInputs) -> dict[str, str]:
         raise PeerMcpError("alertmanager peer transport requires alertname")
     filters["alertname"] = inputs.alertname
     labels = inputs.labels or {}
-    allowed_keys = {
-        "namespace",
-        "kubernetes_namespace",
-        "exported_namespace",
-        "pod",
-        "pod_name",
-        "kubernetes_pod_name",
-        "service",
-        "service_name",
-        "deployment",
-        "deployment_name",
-        "kubernetes_deployment_name",
-        "statefulset",
-        "statefulset_name",
-        "kubernetes_statefulset_name",
-        "node",
-        "node_name",
-        "kubernetes_node",
-        "instance",
+    identity_groups = {
+        "namespace": ("namespace", "kubernetes_namespace", "exported_namespace"),
+        "pod": ("pod", "pod_name", "kubernetes_pod_name"),
+        "service": ("service", "service_name"),
+        "deployment": ("deployment", "deployment_name", "kubernetes_deployment_name"),
+        "statefulset": ("statefulset", "statefulset_name", "kubernetes_statefulset_name"),
+        "node": ("node", "node_name", "kubernetes_node", "instance"),
     }
+    allowed_keys = {alias for aliases in identity_groups.values() for alias in aliases}
     for key, value in labels.items():
         if key in allowed_keys and value:
             filters[key] = value
-    if inputs.namespace and not any(key in filters for key in {"namespace", "kubernetes_namespace", "exported_namespace"}):
+    if inputs.namespace and not any(key in filters for key in identity_groups["namespace"]):
         filters["namespace"] = inputs.namespace
+
+    def _has_identity(group: str) -> bool:
+        return any(alias in filters for alias in identity_groups[group])
+
+    if inputs.service_name and not _has_identity("service"):
+        filters["service"] = inputs.service_name
+    if inputs.node_name and not _has_identity("node"):
+        filters["node"] = inputs.node_name
+
     target_value = (inputs.target or "").strip()
     if "/" in target_value:
         target_kind, target_name = target_value.split("/", 1)
@@ -320,7 +318,7 @@ def _alert_identity_filters(inputs: StepExecutionInputs) -> dict[str, str]:
             "node": "node",
             "statefulset": "statefulset",
         }.get(target_kind)
-        if fallback_key and target_name and fallback_key not in filters:
+        if fallback_key and target_name and not _has_identity(fallback_key):
             filters[fallback_key] = target_name
     return filters
 
