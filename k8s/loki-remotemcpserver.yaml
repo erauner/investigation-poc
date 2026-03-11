@@ -1,8 +1,0 @@
-apiVersion: kagent.dev/v1alpha2
-kind: RemoteMCPServer
-metadata:
-  name: loki-mcp-server
-  namespace: kagent
-spec:
-  description: Loki MCP server for complementary log evidence gathering.
-  url: http://loki-mcp-server.kagent:8080/stream

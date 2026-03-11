@@ -249,6 +249,51 @@ if grep -Eq 'name:\s*(LOKI_PUSH_URL|LOKI_PUSH_ENDPOINT|OTEL_EXPORTER_OTLP_LOGS_E
 fi
 echo "direct push env vars absent from loki_complementary fixture"
 
+python3 - "${KIND_CONTEXT}" "${SMOKE_NAMESPACE}" <<'PY'
+import json
+import subprocess
+import sys
+
+context, namespace = sys.argv[1], sys.argv[2]
+banned = {
+    "LOKI_PUSH_URL",
+    "LOKI_PUSH_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+}
+
+result = subprocess.run(
+    [
+        "kubectl",
+        "--context",
+        context,
+        "-n",
+        namespace,
+        "get",
+        "deploy",
+        "metrics-api",
+        "-o",
+        "json",
+    ],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+payload = json.loads(result.stdout)
+containers = payload.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+present = sorted(
+    {
+        item.get("name")
+        for container in containers
+        for item in container.get("env", []) or []
+        if item.get("name") in banned
+    }
+)
+if present:
+    raise SystemExit(f"unexpected direct-push env vars present in live metrics-api deployment: {', '.join(present)}")
+print("direct push env vars absent from live metrics-api deployment")
+PY
+
 run_started_at="$(python3 - <<'PY'
 from datetime import datetime, timezone
 print(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))

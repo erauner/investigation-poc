@@ -236,12 +236,9 @@ def _service_loki_pod_candidates(object_state: dict[str, Any] | None, *, max_pod
 def _service_loki_app_candidates(object_state: dict[str, Any] | None, target: TargetRef) -> tuple[str, ...]:
     selector = (object_state or {}).get("selector") or {}
     candidates: list[str] = []
-    for key in ("app.kubernetes.io/name", "app", "k8s-app"):
-        value = selector.get(key)
-        if isinstance(value, str) and value.strip():
-            candidates.append(value.strip())
-    if target.name:
-        candidates.append(target.name)
+    value = selector.get("app.kubernetes.io/name")
+    if isinstance(value, str) and value.strip():
+        candidates.append(value.strip())
     return tuple(dict.fromkeys(candidates))
 
 
