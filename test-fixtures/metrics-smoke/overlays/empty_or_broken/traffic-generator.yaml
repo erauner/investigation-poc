@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-api-traffic
+  namespace: metrics-smoke
+  labels:
+    app.kubernetes.io/name: metrics-api-traffic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metrics-api-traffic
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: metrics-api-traffic
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.10.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              while true; do
+                for _ in $(seq 1 8); do
+                  curl -sS http://metrics-api:8080/ok >/dev/null || true
+                done
+                curl -sS http://metrics-api:8080/slow >/dev/null || true
+                curl -sS http://metrics-api:8080/fail >/dev/null || true
+                sleep 2
+              done
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi

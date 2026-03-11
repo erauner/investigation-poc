@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 import asyncio
 import json
@@ -839,13 +840,16 @@ class PrometheusMcpClient:
                     family_results: list[tuple[str, dict[str, float | None]]] = []
                     for family_id, queries in query_families:
                         family_metrics: dict[str, float | None] = {}
+                        end_time = datetime.now(timezone.utc)
+                        start_time = end_time - timedelta(minutes=max(inputs.lookback_minutes or 15, 1))
                         for label, query in queries.items():
                             raw = await self._call_tool(
                                 session,
                                 "execute_range_query",
                                 {
                                     "query": query,
-                                    "window": f"{max(inputs.lookback_minutes or 15, 1)}m",
+                                    "start": start_time.isoformat().replace("+00:00", "Z"),
+                                    "end": end_time.isoformat().replace("+00:00", "Z"),
                                     "step": "60s",
                                 },
                             )

@@ -110,7 +110,8 @@ def test_collect_service_range_metrics_parses_execute_range_query_payload(monkey
 
     assert len(calls) == 3
     assert all(tool_name == "execute_range_query" for tool_name, _args in calls)
-    assert all(args["window"] == "15m" for _tool_name, args in calls)
+    assert all(isinstance(args["start"], str) and args["start"] for _tool_name, args in calls)
+    assert all(isinstance(args["end"], str) and args["end"] for _tool_name, args in calls)
     assert all(args["step"] == "60s" for _tool_name, args in calls)
     assert snapshot.metrics["service_request_rate"] == 12.5
     assert snapshot.metrics["service_error_rate"] == 0.5
