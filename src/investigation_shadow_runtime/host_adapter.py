@@ -92,7 +92,7 @@ def _canonicalize_request(request: InvestigationReportRequest) -> InvestigationR
 
     return request.model_copy(
         update={
-            "cluster": resolved.cluster or request.cluster,
+            "cluster": resolved.cluster,
             "namespace": resolved.namespace or request.namespace,
             "target": resolved.target,
             "profile": resolved.profile,

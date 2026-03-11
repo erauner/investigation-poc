@@ -167,6 +167,30 @@ def test_cluster_service_profile_resolves_frontend_component_to_service() -> Non
     assert "resolved Frontend/landing to service/landing" in normalized.normalization_notes
 
 
+def test_cluster_resolution_preserves_statefulset_component_target() -> None:
+    deps = _deps(
+        resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "erauner-home"})(),
+        get_cluster_cr=lambda namespace, name, cluster=None: {
+            "status": {
+                "componentStatuses": [
+                    {"name": "newmetrics-db", "kind": "StatefulSet", "wave": 1, "phase": "Failed", "ready": False},
+                    {"name": "api", "kind": "Backend", "wave": 2, "phase": "Healthy", "ready": True},
+                ]
+            }
+        },
+    )
+
+    normalized = planner.resolve_cluster_convenience_target(
+        _seed_normalized(cluster="erauner-home", namespace="operator-smoke", target="Cluster/testapp"),
+        deps,
+    )
+
+    assert normalized.cluster == "erauner-home"
+    assert normalized.target == "statefulset/newmetrics-db"
+    assert "resolved Cluster/testapp to failing component StatefulSet/newmetrics-db" in normalized.normalization_notes
+    assert "resolved StatefulSet/newmetrics-db to statefulset/newmetrics-db" in normalized.normalization_notes
+
+
 def test_cluster_legacy_current_context_does_not_set_cluster_alias() -> None:
     deps = _deps(
         resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "current-context", "source": "legacy_current_context"})(),

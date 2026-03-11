@@ -110,6 +110,16 @@ def test_parse_shadow_task_rejects_unsupported_json_job_target_end_to_end() -> N
         parse_shadow_task('{"namespace":"ops","target":"job/backup-runner"}')
 
 
+def test_parse_shadow_task_rejects_unsupported_text_daemonset_target_end_to_end() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: daemonset"):
+        parse_shadow_task("Investigate daemonset/node-agent in namespace ops.")
+
+
+def test_parse_shadow_task_rejects_unsupported_json_daemonset_target_end_to_end() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: daemonset"):
+        parse_shadow_task('{"namespace":"ops","target":"daemonset/node-agent"}')
+
+
 def test_parse_shadow_task_rejects_backend_without_namespace_in_json() -> None:
     with pytest.raises(ValueError, match="namespace is required for Backend targets"):
         parse_shadow_task('{"target":"Backend/api"}')
