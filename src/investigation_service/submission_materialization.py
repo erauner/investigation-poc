@@ -19,6 +19,7 @@ def materialize_attempt_only_submission(
     return SubmittedStepArtifact(
         step_id=step.step_id,
         actual_route=actual_route,
+        contributing_routes=[actual_route],
         attempted_routes=list(attempted_routes or []),
         limitations=list(limitations),
     )
@@ -32,6 +33,7 @@ def materialize_workload_submission(
     events: list[str],
     log_excerpt: str,
     actual_route: ActualRoute,
+    contributing_routes: list[ActualRoute] | None = None,
     attempted_routes: list[ActualRoute] | None = None,
     cluster_alias: str | None = None,
     extra_limitations: list[str] | None = None,
@@ -61,6 +63,7 @@ def materialize_workload_submission(
         step_id=step.step_id,
         evidence_bundle=bundle,
         actual_route=actual_route,
+        contributing_routes=list(contributing_routes or [actual_route]),
         attempted_routes=list(attempted_routes or []),
     )
 
@@ -71,6 +74,7 @@ def materialize_service_submission(
     target,
     metrics: dict,
     actual_route: ActualRoute,
+    contributing_routes: list[ActualRoute] | None = None,
     attempted_routes: list[ActualRoute] | None = None,
     object_state: dict | None = None,
     events: list[str] | None = None,
@@ -97,6 +101,7 @@ def materialize_service_submission(
         step_id=step.step_id,
         evidence_bundle=bundle,
         actual_route=actual_route,
+        contributing_routes=list(contributing_routes or [actual_route]),
         attempted_routes=list(attempted_routes or []),
     )
 
@@ -107,6 +112,7 @@ def materialize_node_submission(
     target,
     metrics: dict,
     actual_route: ActualRoute,
+    contributing_routes: list[ActualRoute] | None = None,
     attempted_routes: list[ActualRoute] | None = None,
     object_state: dict | None = None,
     events: list[str] | None = None,
@@ -131,5 +137,6 @@ def materialize_node_submission(
         step_id=step.step_id,
         evidence_bundle=bundle,
         actual_route=actual_route,
+        contributing_routes=list(contributing_routes or [actual_route]),
         attempted_routes=list(attempted_routes or []),
     )

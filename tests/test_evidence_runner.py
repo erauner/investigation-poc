@@ -74,6 +74,7 @@ def _service_follow_up_step() -> EvidenceStepContract:
         update={
             "step_id": "collect-service-follow-up-evidence",
             "title": "Collect service follow-up evidence",
+            "exploration_intent": "follow_up",
         }
     )
 
@@ -1299,7 +1300,95 @@ def test_primary_service_step_never_invokes_bounded_range_scout(monkeypatch) -> 
     artifact = evidence_runner._submitted_artifact(step)
 
     assert range_calls == []
-    assert artifact.actual_route.tool_path == ["prometheus-mcp-server", "execute_query", "execute_query", "execute_query", "kubernetes-mcp-server", "resources_get", "events_list"]
+    assert artifact.actual_route.tool_path == [
+        "prometheus-mcp-server",
+        "execute_query",
+        "execute_query",
+        "execute_query",
+    ]
+    assert [route.tool_path for route in artifact.contributing_routes] == [
+        ["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+        ["kubernetes-mcp-server", "resources_get", "events_list"],
+    ]
+
+
+def test_service_follow_up_step_uses_exploration_intent_not_step_id(monkeypatch) -> None:
+    step = _service_follow_up_step().model_copy(
+        update={
+            "step_id": "collect-service-recovery-evidence",
+            "title": "Collect service recovery evidence",
+        }
+    )
+    range_calls: list[int] = []
+    monkeypatch.setattr(
+        evidence_runner,
+        "_prometheus_mcp_client",
+        type(
+            "PromClientStub",
+            (),
+            {
+                "collect_service_metrics": lambda _self, _inputs: ServiceMetricsSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    metrics={
+                        "service_request_rate": None,
+                        "service_error_rate": None,
+                        "service_latency_p95_seconds": None,
+                        "prometheus_available": False,
+                    },
+                    limitations=["prometheus unavailable or returned no usable results"],
+                    tool_path=["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+                ),
+                "collect_service_range_metrics": lambda _self, _inputs, max_metric_families=0: (
+                    range_calls.append(max_metric_families)
+                    or ServiceMetricsSnapshot(
+                        cluster_alias="erauner-home",
+                        target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                        metrics={
+                            "service_request_rate": 120.0,
+                            "service_error_rate": 0.5,
+                            "service_latency_p95_seconds": 0.8,
+                            "prometheus_available": True,
+                        },
+                        limitations=[],
+                        tool_path=["prometheus-mcp-server", "execute_range_query", "execute_range_query"],
+                    )
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        evidence_runner,
+        "_kubernetes_mcp_client",
+        type(
+            "KubeClientStub",
+            (),
+            {
+                "collect_service_runtime": lambda _self, _inputs: ServiceRuntimeSnapshot(
+                    cluster_alias="erauner-home",
+                    target=TargetRef(namespace="operator-smoke", kind="service", name="api"),
+                    object_state={"kind": "service", "name": "api"},
+                    events=["Warning Unhealthy service/api"],
+                    limitations=[],
+                    tool_path=["kubernetes-mcp-server", "resources_get", "events_list"],
+                )
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert range_calls == [2]
+    assert artifact.actual_route.tool_path == [
+        "prometheus-mcp-server",
+        "execute_range_query",
+        "execute_range_query",
+    ]
+    assert [route.tool_path for route in artifact.contributing_routes] == [
+        ["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+        ["kubernetes-mcp-server", "resources_get", "events_list"],
+        ["prometheus-mcp-server", "execute_range_query", "execute_range_query"],
+    ]
 
 
 def test_node_external_step_prefers_prometheus_with_kubernetes_enrichment(monkeypatch) -> None:
@@ -1463,6 +1552,9 @@ def test_node_external_step_uses_kubernetes_peer_when_prometheus_hard_fails(monk
 
     assert artifact.actual_route.mcp_server == "kubernetes-mcp-server"
     assert artifact.actual_route.tool_path == ["kubernetes-mcp-server", "resources_get", "events_list"]
+    assert [route.tool_path for route in artifact.contributing_routes] == [
+        ["kubernetes-mcp-server", "resources_get", "events_list"],
+    ]
     assert [route.tool_path for route in artifact.attempted_routes] == [
         ["prometheus-mcp-server"],
         ["kubernetes-mcp-server", "resources_list"],
@@ -1532,6 +1624,11 @@ def test_node_external_step_runs_bounded_node_scout_for_weak_saturation_signal(m
 
     assert scout_calls == [5]
     assert artifact.actual_route.tool_path == ["kubernetes-mcp-server", "resources_list"]
+    assert [route.tool_path for route in artifact.contributing_routes] == [
+        ["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+        ["kubernetes-mcp-server", "resources_get", "events_list"],
+        ["kubernetes-mcp-server", "resources_list"],
+    ]
     assert artifact.evidence_bundle is not None
     assert artifact.evidence_bundle.object_state["top_pods_by_memory_request"][0]["name"] == "api-0"
     assert artifact.attempted_routes[0].mcp_server == "prometheus-mcp-server"
@@ -1594,9 +1691,10 @@ def test_node_external_step_skips_bounded_node_scout_for_adequate_baseline(monke
         "execute_query",
         "execute_query",
         "execute_query",
-        "kubernetes-mcp-server",
-        "resources_get",
-        "events_list",
+    ]
+    assert [route.tool_path for route in artifact.contributing_routes] == [
+        ["prometheus-mcp-server", "execute_query", "execute_query", "execute_query"],
+        ["kubernetes-mcp-server", "resources_get", "events_list"],
     ]
 
 
@@ -1742,6 +1840,7 @@ def test_node_external_step_records_dual_peer_attempts_when_kubernetes_enrichmen
 
     assert artifact.evidence_bundle is None
     assert artifact.actual_route.tool_path == ["prometheus-mcp-server", "execute_query", "execute_range_query"]
+    assert artifact.contributing_routes == [artifact.actual_route]
     assert [route.mcp_server for route in artifact.attempted_routes] == [
         "prometheus-mcp-server",
         "kubernetes-mcp-server",

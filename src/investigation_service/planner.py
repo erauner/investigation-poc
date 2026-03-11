@@ -698,6 +698,7 @@ def get_active_evidence_batch_contract(req: GetActiveEvidenceBatchRequest) -> Ac
                 fallback_mcp_server=step.fallback_mcp_server,
                 fallback_tool_names=list(step.fallback_tool_names),
                 execution_mode=_execution_mode_for_step(step),
+                exploration_intent="follow_up" if step.id == "collect-service-follow-up-evidence" else None,
                 execution_inputs=_step_execution_inputs(step, target=target, incident=req.incident),
             )
             for step in pending_steps
@@ -717,6 +718,7 @@ def _step_artifact_from_submission(
         requested_capability=step.suggested_capability,
         route_satisfaction=_route_satisfaction(step, submission.actual_route),
         actual_route=submission.actual_route,
+        contributing_routes=list(submission.contributing_routes),
         attempted_routes=list(submission.attempted_routes),
     )
     if artifact_type == "change_candidates":

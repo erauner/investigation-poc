@@ -6,6 +6,7 @@ from investigation_service.models import (
     EvidenceStepContract,
     SubmittedStepArtifact,
 )
+from investigation_service.exploration import build_exploratory_scout_context
 from investigation_service.submission_materialization import (
     materialize_attempt_only_submission,
     materialize_node_submission,
@@ -55,6 +56,24 @@ def _planned_fallback_peer_route(step: EvidenceStepContract) -> ActualRoute:
     )
 
 
+def _merged_contributing_routes(*route_groups: list[ActualRoute]) -> list[ActualRoute]:
+    merged: list[ActualRoute] = []
+    seen: set[tuple[str, str | None, str | None, tuple[str, ...]]] = set()
+    for group in route_groups:
+        for route in group:
+            key = (
+                route.source_kind,
+                route.mcp_server,
+                route.tool_name,
+                tuple(route.tool_path),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(route)
+    return merged
+
+
 _kubernetes_mcp_client = KubernetesMcpClient()
 _prometheus_mcp_client = PrometheusMcpClient()
 
@@ -77,10 +96,12 @@ def _workload_submission_via_peer_mcp(
         step,
         snapshot,
     )
+    scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
     if allow_exploration_review and batch_id is not None:
         pending_review = maybe_plan_workload_exploration_review(
             step,
             batch_id=batch_id,
+            scout_context=scout_context,
             baseline_snapshot=snapshot,
             baseline_artifact=baseline_artifact,
         )
@@ -93,6 +114,7 @@ def _workload_submission_via_peer_mcp(
         submitted_steps=[
             maybe_run_bounded_workload_scout(
                 step,
+                scout_context=scout_context,
                 baseline_snapshot=snapshot,
                 baseline_artifact=baseline_artifact,
                 kubernetes_mcp_client=_kubernetes_mcp_client,
@@ -124,12 +146,15 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             object_state=runtime_snapshot.object_state,
             events=runtime_snapshot.events,
             actual_route=_peer_route(runtime_snapshot.tool_path),
+            contributing_routes=[_peer_route(runtime_snapshot.tool_path)],
             attempted_routes=[_planned_peer_route(step)],
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
         )
+        scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
         return maybe_run_bounded_service_follow_up_scout(
             step,
+            scout_context=scout_context,
             baseline_artifact=baseline_artifact,
             prometheus_mcp_client=_prometheus_mcp_client,
         )
@@ -149,6 +174,7 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
                 },
                 events=[],
                 actual_route=_peer_route(metrics_snapshot.tool_path),
+                contributing_routes=[_peer_route(metrics_snapshot.tool_path)],
                 attempted_routes=[
                     _peer_route(metrics_snapshot.tool_path),
                     _planned_fallback_peer_route(step),
@@ -156,8 +182,10 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
                 cluster_alias=metrics_snapshot.cluster_alias,
                 extra_limitations=[*metrics_snapshot.limitations, f"kubernetes peer fallback failed: {kube_exc}"],
             )
+            scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
             return maybe_run_bounded_service_follow_up_scout(
                 step,
+                scout_context=scout_context,
                 baseline_artifact=baseline_artifact,
                 prometheus_mcp_client=_prometheus_mcp_client,
             )
@@ -168,12 +196,18 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
             metrics=metrics_snapshot.metrics,
             object_state=runtime_snapshot.object_state,
             events=runtime_snapshot.events,
-            actual_route=_peer_route([*metrics_snapshot.tool_path, *runtime_snapshot.tool_path]),
+            actual_route=_peer_route(metrics_snapshot.tool_path),
+            contributing_routes=_merged_contributing_routes(
+                [_peer_route(metrics_snapshot.tool_path)],
+                [_peer_route(runtime_snapshot.tool_path)],
+            ),
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=limitations,
         )
+        scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
         return maybe_run_bounded_service_follow_up_scout(
             step,
+            scout_context=scout_context,
             baseline_artifact=baseline_artifact,
             prometheus_mcp_client=_prometheus_mcp_client,
         )
@@ -198,12 +232,18 @@ def _service_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedSte
         object_state=runtime_snapshot.object_state,
         events=runtime_snapshot.events,
         actual_route=_peer_route(runtime_snapshot.tool_path),
+        contributing_routes=_merged_contributing_routes(
+            [_peer_route(metrics_snapshot.tool_path)],
+            [_peer_route(runtime_snapshot.tool_path)],
+        ),
         attempted_routes=[_peer_route(metrics_snapshot.tool_path)],
         cluster_alias=runtime_snapshot.cluster_alias,
         extra_limitations=limitations,
     )
+    scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
     return maybe_run_bounded_service_follow_up_scout(
         step,
+        scout_context=scout_context,
         baseline_artifact=baseline_artifact,
         prometheus_mcp_client=_prometheus_mcp_client,
     )
@@ -232,12 +272,15 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
             object_state=runtime_snapshot.object_state,
             events=runtime_snapshot.events,
             actual_route=_peer_route(runtime_snapshot.tool_path),
+            contributing_routes=[_peer_route(runtime_snapshot.tool_path)],
             attempted_routes=[_planned_peer_route(step)],
             cluster_alias=runtime_snapshot.cluster_alias,
             extra_limitations=[f"prometheus peer failed: {prom_exc}", *runtime_snapshot.limitations],
         )
+        scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
         return maybe_run_bounded_node_scout(
             step,
+            scout_context=scout_context,
             baseline_artifact=baseline_artifact,
             kubernetes_mcp_client=_kubernetes_mcp_client,
         )
@@ -258,7 +301,7 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
     actual_route = (
         _peer_route(runtime_snapshot.tool_path)
         if not metrics_snapshot.metrics.get("prometheus_available")
-        else _peer_route([*metrics_snapshot.tool_path, *runtime_snapshot.tool_path])
+        else _peer_route(metrics_snapshot.tool_path)
     )
     baseline_artifact = materialize_node_submission(
         step,
@@ -267,12 +310,18 @@ def _node_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepAr
         object_state=runtime_snapshot.object_state,
         events=runtime_snapshot.events,
         actual_route=actual_route,
+        contributing_routes=_merged_contributing_routes(
+            [_peer_route(metrics_snapshot.tool_path)] if metrics_snapshot.metrics.get("prometheus_available") else [],
+            [_peer_route(runtime_snapshot.tool_path)],
+        ),
         attempted_routes=[] if metrics_snapshot.metrics.get("prometheus_available") else [_peer_route(metrics_snapshot.tool_path)],
         cluster_alias=runtime_snapshot.cluster_alias,
         extra_limitations=limitations,
     )
+    scout_context = build_exploratory_scout_context(step=step, artifact=baseline_artifact)
     return maybe_run_bounded_node_scout(
         step,
+        scout_context=scout_context,
         baseline_artifact=baseline_artifact,
         kubernetes_mcp_client=_kubernetes_mcp_client,
     )

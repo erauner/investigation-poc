@@ -1,15 +1,32 @@
 from investigation_service.adequacy import (
     EvidenceAdequacyAssessment,
-    assess_service_evidence_bundle,
+    assess_bundle_for_capability,
     assessment_improves,
-    is_scout_candidate,
-    service_bundle_improves,
+    bundle_improves_for_capability,
 )
-from investigation_service.execution_policy import bounded_exploration_policy_for_capability
+from investigation_service.exploration import ExploratoryScoutContext
 from investigation_service.models import ActualRoute, EvidenceStepContract, SubmittedStepArtifact
 from investigation_service.submission_materialization import materialize_service_submission
 
 from .mcp_clients import PeerMcpError, PrometheusMcpClient, ServiceMetricsSnapshot
+
+
+def _merged_contributing_routes(*route_groups: list[ActualRoute]) -> list[ActualRoute]:
+    merged: list[ActualRoute] = []
+    seen: set[tuple[str, str | None, str | None, tuple[str, ...]]] = set()
+    for group in route_groups:
+        for route in group:
+            key = (
+                route.source_kind,
+                route.mcp_server,
+                route.tool_name,
+                tuple(route.tool_path),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(route)
+    return merged
 
 
 def _peer_route(tool_path: list[str]) -> ActualRoute:
@@ -40,6 +57,10 @@ def materialize_service_metrics_snapshot(
         target=metrics_snapshot.target,
         metrics=metrics_snapshot.metrics,
         actual_route=_peer_route(metrics_snapshot.tool_path),
+        contributing_routes=_merged_contributing_routes(
+            baseline_artifact.contributing_routes,
+            [_peer_route(metrics_snapshot.tool_path)],
+        ),
         attempted_routes=attempted_routes,
         object_state=bundle.object_state,
         events=bundle.events,
@@ -68,27 +89,30 @@ def _retained_service_limitations(
 
 
 def assess_materialized_service_submission(artifact: SubmittedStepArtifact) -> EvidenceAdequacyAssessment:
-    return assess_service_evidence_bundle(bundle=artifact.evidence_bundle)
+    return assess_bundle_for_capability("service_evidence_plane", bundle=artifact.evidence_bundle)
 
 
 def maybe_run_bounded_service_follow_up_scout(
     step: EvidenceStepContract,
     *,
+    scout_context: ExploratoryScoutContext | None,
     baseline_artifact: SubmittedStepArtifact,
     prometheus_mcp_client: PrometheusMcpClient,
 ) -> SubmittedStepArtifact:
-    if step.step_id != "collect-service-follow-up-evidence":
+    if step.exploration_intent != "follow_up":
         return baseline_artifact
 
-    policy = bounded_exploration_policy_for_capability(step.requested_capability)
-    if policy is None or not policy.enabled or policy.max_additional_probe_runs < 1 or policy.max_metric_families < 1:
+    if scout_context is None:
+        return baseline_artifact
+    policy = scout_context.policy
+    if policy.max_additional_probe_runs < 1 or policy.max_metric_families < 1:
+        return baseline_artifact
+    if "service_range_metrics" not in policy.probe_kinds:
         return baseline_artifact
     if baseline_artifact.evidence_bundle is None:
         return baseline_artifact
 
-    baseline_assessment = assess_materialized_service_submission(baseline_artifact)
-    if not is_scout_candidate(baseline_assessment):
-        return baseline_artifact
+    baseline_assessment = scout_context.baseline_assessment
 
     try:
         metrics_snapshot = prometheus_mcp_client.collect_service_range_metrics(
@@ -124,7 +148,8 @@ def maybe_run_bounded_service_follow_up_scout(
         attempted_routes=[baseline_artifact.actual_route, *baseline_artifact.attempted_routes],
     )
     scout_assessment = assess_materialized_service_submission(scout_artifact)
-    if assessment_improves(baseline_assessment, scout_assessment) or service_bundle_improves(
+    if assessment_improves(baseline_assessment, scout_assessment) or bundle_improves_for_capability(
+        "service_evidence_plane",
         baseline_artifact.evidence_bundle,
         scout_artifact.evidence_bundle,
     ):
