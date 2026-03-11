@@ -43,39 +43,37 @@ These pieces are already in place and should be treated as migration foundations
 
 These are the main code-level gaps between current `main` and the updated ADR direction:
 
-1. Ingress still owns direct semantic collapse into an exact normalized request.
-   - `normalize_ingress_request(...)` builds `NormalizedInvestigationSubjectSet`
-   - `normalized_request_from_subject_set(...)` immediately forces that into `NormalizedInvestigationRequest`
-   - `_normalized_request_for_focus(...)` is still the eager-collapse core
+1. Ingress still owns one remaining runtime-style narrowing path.
+   - `_extract_candidate_refs(...)` still calls `find_unhealthy_pod(...)` for vague workload requests
+   - this turns semantic vague input directly into a concrete `pod/...` candidate inside ingress
    - `src/investigation_service/ingress.py`
 
-2. Ingress still depends on CR-backed operational rewriting.
+2. Ingress still depends on one runtime lookup it should no longer own.
    - `IngressDeps` still includes:
-     - `canonical_target`
-     - `scope_from_target`
-     - `get_backend_cr`
-     - `get_frontend_cr`
      - `get_cluster_cr`
      - `find_unhealthy_pod`
-   - this is broader than the ADR's intended "meaning first, bounded commitment later" seam
+   - `get_cluster_cr` is still justified for semantic related-subject enrichment
+   - `find_unhealthy_pod` is the remaining seam violation because it performs execution-focus narrowing
    - `src/investigation_service/ingress.py`
 
-3. Planner still has no first-class planner-seed seam.
-   - current flow is still effectively:
+3. Planner-seed is now real, but still intentionally hosts transitional single-focus collapse behavior.
+   - current flow is now:
      - ingress request
      - subject set
+     - subject context
+     - planner seed
      - normalized request
      - investigation target
-   - planner has a useful `_subject_set_and_normalized(...)` bridge, but that is not yet a true planner-seed model
+   - this is the correct seam, but planner-seed still centralizes old single-focus commitment logic for compatibility
    - `src/investigation_service/planner.py`
+   - `src/investigation_service/planner_seed.py`
 
-4. Legacy convenience collapsing still lives outside the new seam.
-   - examples:
-     - `resolve_backend_convenience_target(...)`
-     - frontend / cluster convenience resolution
-     - vague workload resolution
-   - these should eventually be either planner-seed responsibilities or deterministic narrowing steps
+4. Phase 3 should now simplify planner-seed/ingress interaction, not re-introduce the planner-seed seam.
+   - planner already routes through `apply_post_seed_normalization(...)`
+   - alert normalization already routes through the same post-seed helper
+   - the remaining work is to stop ingress from doing the last eager runtime-style narrowing before planner-seed
    - `src/investigation_service/planner.py`
+   - `src/investigation_service/tools.py`
 
 5. Scout code is still framed primarily around evidence expansion.
    - `ExploratoryScoutContext` currently carries:
@@ -110,7 +108,7 @@ It should be:
 
 - introduce a real planner-seed seam
 - route current collapse through it
-- then move eager-collapse logic out of ingress incrementally
+- then remove the remaining eager-collapse logic from ingress incrementally
 
 ## End-State Target
 
@@ -227,15 +225,25 @@ Current branch note:
 Goal:
 - ingress stops at meaning, not final operational commitment
 
+Status:
+- next
+
+Current focus:
+- remove ingress-time vague-workload runtime narrowing
+- keep concrete vague-workload resolution only in planner-seed post-normalization
+- avoid broadening this slice into scout or provenance work
+
 Primary files:
 - `src/investigation_service/ingress.py`
 - `src/investigation_service/planner.py`
-- any new planner-seed module
+- `src/investigation_service/tools.py`
 
 Deliverables:
-- reduce or remove `_normalized_request_for_focus(...)`
-- move CR-backed backend/frontend/cluster operational rewriting out of ingress
-- move profile promotion tied to exact target collapse out of ingress
+- replace ingress-time vague workload lookup with semantic `resource_hint` extraction
+- remove `find_unhealthy_pod` from `IngressDeps`
+- keep `get_cluster_cr` in ingress for semantic related-subject enrichment
+- keep all concrete vague-workload resolution in `apply_post_seed_normalization(...)`
+- preserve current downstream contracts and public route/tool shapes
 - keep in ingress:
   - scope resolution
   - candidate extraction
@@ -245,7 +253,8 @@ Deliverables:
 
 Explicit non-goal:
 - do not remove useful deterministic extraction from ingress
-- only remove early commitment behavior
+- do not reopen planner-seed seam introduction work that is already complete
+- only remove the remaining early commitment behavior still owned by ingress
 
 ### Phase 4: Align Scouts To The New Planner-Owned Narrowing Seam
 
@@ -364,9 +373,9 @@ Includes:
 ### PR 2: Ingress De-Eagering
 
 Includes:
-- route collapse through planner-seed
-- reduce ingress-local exact-target collapse
-- move CR-backed operational rewriting out of ingress
+- remove ingress-time vague-workload lookup
+- keep vague-workload resolution only in planner-seed post-normalization
+- preserve semantic related-ref enrichment in ingress
 
 ### PR 3: Scout Intent And Focus-Narrowing Alignment
 
