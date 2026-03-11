@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import inspect
 import json
 import zlib
 
@@ -11,7 +12,6 @@ from .analysis import (
     primary_hypothesis,
     rendered_evidence_from_hypothesis,
 )
-from .cluster_registry import resolve_cluster as resolve_cluster_impl
 from .correlation import collect_change_candidates, collect_correlated_changes_for_target
 from .event_fingerprints import canonicalize_event_fingerprint
 from .guidelines import guideline_context_from_analysis, load_guideline_rules, resolve_guidelines_for_context
@@ -58,10 +58,10 @@ def _is_empty_correlation_limitation(value: str) -> bool:
 def resolve_cluster(cluster, labels=None):
     from .tools import resolve_cluster as resolve_cluster_tools_impl
 
-    try:
+    signature = inspect.signature(resolve_cluster_tools_impl)
+    if len(signature.parameters) >= 2:
         return resolve_cluster_tools_impl(cluster, labels)
-    except TypeError:
-        return resolve_cluster_tools_impl(cluster)
+    return resolve_cluster_tools_impl(cluster)
 
 
 def get_backend_cr(namespace, name, cluster=None):

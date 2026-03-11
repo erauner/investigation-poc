@@ -287,6 +287,8 @@ def test_skill_and_desktop_extension_keep_shared_runtime_block_with_parse_only_a
         assert ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE in text.lower(), path
         assert ALERT_FIVE_SECTION_REQUIRED_PHRASE in text.lower(), path
         assert "If the target is vague or operator-backed, resolve it first with resolve_primary_target." in text, path
+        for phrase in BANNED_PROMPT_PHRASES:
+            assert phrase not in text, path
 
 
 def test_desktop_extension_emits_mode_specific_wrapper_content() -> None:

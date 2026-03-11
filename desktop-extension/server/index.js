@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -73,7 +74,8 @@ let remoteInitialized = false;
 const ENTRYPOINT_PREFIX = "[INVESTIGATION_ENTRYPOINT]=";
 const OPERATOR_TARGET_PREFIXES = ["Backend/", "Frontend/", "Cluster/"];
 const IS_MAIN_MODULE =
-  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+  process.argv[1] &&
+  realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
 
 function normalizeMode(rawMode) {
   const mode = typeof rawMode === "string" ? rawMode.trim().toLowerCase() : "auto";
