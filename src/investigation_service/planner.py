@@ -28,9 +28,11 @@ from .models import (
     ExecuteInvestigationStepRequest,
     FindUnhealthyPodRequest,
     GetActiveEvidenceBatchRequest,
+    InvestigationFocusProvenance,
     InvestigationSubject,
     InvestigationPlan,
     InvestigationPlannerSeed,
+    PlannerSeedExecutionFocus,
     InvestigationTarget,
     InvestigationMode,
     InvestigationReportRequest,
@@ -465,6 +467,51 @@ def _subject_from_incident(
         kind="question",
         summary=incident.question or "Investigate the reported issue",
         requested_target=target.requested_target if target else None,
+    )
+
+
+def _execution_focus_from_target(target: InvestigationTarget) -> PlannerSeedExecutionFocus:
+    return PlannerSeedExecutionFocus(
+        scope=target.scope,
+        target=target.target,
+        profile=target.profile,
+        node_name=target.node_name,
+        service_name=target.service_name,
+    )
+
+
+def _focus_reasons_from_target(target: InvestigationTarget) -> list[str]:
+    reasons: list[str] = []
+    for note in target.normalization_notes:
+        if note.startswith("canonical focus selected:"):
+            reasons.append(note)
+            continue
+        if note.startswith("resolved "):
+            reasons.append(note)
+            continue
+        if note.startswith("alert-derived "):
+            reasons.append(note)
+            continue
+        if note.startswith("profile promoted "):
+            reasons.append(note)
+            continue
+    return reasons or list(target.normalization_notes)
+
+
+def _seed_focus_provenance(target: InvestigationTarget | None) -> InvestigationFocusProvenance | None:
+    if target is None:
+        return None
+    subject_context = target.subject_context
+    execution_focus = _execution_focus_from_target(target)
+    return InvestigationFocusProvenance(
+        requested_subject=target.requested_target,
+        soft_primary_focus=subject_context.primary_subject.model_copy(deep=True) if subject_context and subject_context.primary_subject else None,
+        related_subjects_considered=[
+            subject.model_copy(deep=True) for subject in (subject_context.related_subjects if subject_context else [])
+        ],
+        initial_bounded_execution_focus=execution_focus,
+        current_bounded_execution_focus=execution_focus,
+        initial_focus_reasons=_focus_reasons_from_target(target),
     )
 
 
@@ -1075,6 +1122,7 @@ def _alert_plan(
         steps=steps,
         evidence_batches=batches,
         active_batch_id="batch-1",
+        focus_provenance=_seed_focus_provenance(target),
         planning_notes=list(target.normalization_notes),
     )
 
@@ -1143,6 +1191,7 @@ def _targeted_plan(req: BuildInvestigationPlanRequest, target: InvestigationTarg
         steps=steps,
         evidence_batches=batches,
         active_batch_id="batch-1",
+        focus_provenance=_seed_focus_provenance(target),
         planning_notes=list(target.normalization_notes),
     )
 
@@ -1198,6 +1247,7 @@ def _factual_plan(
         steps=steps,
         evidence_batches=batches,
         active_batch_id="batch-1",
+        focus_provenance=_seed_focus_provenance(target),
         planning_notes=notes,
     )
 

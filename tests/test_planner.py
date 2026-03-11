@@ -12,11 +12,13 @@ from investigation_service.models import (
     ExecuteInvestigationStepRequest,
     ExplorationOutcome,
     Finding,
+    InvestigationFocusProvenance,
     InvestigationPlan,
     InvestigationReportRequest,
     InvestigationSubjectContext,
     InvestigationSubjectRef,
     PlanStep,
+    PlannerSeedExecutionFocus,
     ResolvedIngressScope,
     SubmitEvidenceArtifactsRequest,
     StepRouteProvenance,
@@ -204,6 +206,43 @@ def test_build_investigation_plan_treats_vague_workload_question_without_candida
 
     assert plan.mode == "factual_analysis"
     assert plan.target is None
+
+
+def test_build_investigation_plan_seeds_focus_provenance_from_target() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="service/api", profile="service", service_name="api"),
+        _deps([]),
+    )
+
+    assert plan.focus_provenance is not None
+    assert plan.focus_provenance.requested_subject == "service/api"
+    assert plan.focus_provenance.soft_primary_focus == InvestigationSubjectRef(
+        kind="service",
+        name="api",
+        cluster=None,
+        namespace="default",
+        confidence="high",
+        sources=["explicit_target"],
+        relation="candidate",
+    )
+    assert plan.focus_provenance.related_subjects_considered == []
+    assert plan.focus_provenance.initial_bounded_execution_focus == PlannerSeedExecutionFocus(
+        scope="service",
+        target="service/api",
+        profile="service",
+        node_name=None,
+        service_name="api",
+    )
+    assert plan.focus_provenance.current_bounded_execution_focus == PlannerSeedExecutionFocus(
+        scope="service",
+        target="service/api",
+        profile="service",
+        node_name=None,
+        service_name="api",
+    )
+    assert plan.focus_provenance.initial_focus_reasons == ["canonical focus selected: service/api"]
+    assert plan.focus_provenance.latest_focus_change_reasons == []
+    assert plan.focus_provenance.latest_focus_change_source_step_id is None
 
 
 def test_resolve_primary_target_explicit_workload_shorthand_with_service_profile_still_resolves_workload() -> None:

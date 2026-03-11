@@ -14,6 +14,7 @@ from investigation_service.models import (
     Finding,
     Hypothesis,
     InvestigationAnalysis,
+    InvestigationFocusProvenance,
     InvestigationPlan,
     InvestigationReportingRequest,
     InvestigationReportRequest,
@@ -21,6 +22,7 @@ from investigation_service.models import (
     InvestigationSubjectRef,
     InvestigationTarget,
     PlanStep,
+    PlannerSeedExecutionFocus,
     ReportingExecutionContext,
     ResolvedIngressScope,
     StepRouteProvenance,
@@ -96,6 +98,41 @@ def _plan() -> InvestigationPlan:
         ],
         evidence_batches=[],
         active_batch_id="batch-1",
+        focus_provenance=InvestigationFocusProvenance(
+            requested_subject="service/api",
+            soft_primary_focus=InvestigationSubjectRef(
+                kind="service",
+                name="api",
+                cluster="artifact-cluster",
+                namespace="artifact-ns",
+                confidence="high",
+                sources=["explicit_target"],
+            ),
+            related_subjects_considered=[
+                InvestigationSubjectRef(
+                    kind="statefulset",
+                    name="api-db",
+                    cluster="artifact-cluster",
+                    namespace="artifact-ns",
+                    confidence="medium",
+                    sources=["express_enrichment"],
+                    relation="dependency",
+                )
+            ],
+            initial_bounded_execution_focus=PlannerSeedExecutionFocus(
+                scope="service",
+                target="service/api-resolved",
+                profile="service",
+                service_name="api-resolved",
+            ),
+            current_bounded_execution_focus=PlannerSeedExecutionFocus(
+                scope="service",
+                target="service/api-resolved",
+                profile="service",
+                service_name="api-resolved",
+            ),
+            initial_focus_reasons=["canonical focus selected: service/api"],
+        ),
         planning_notes=["artifact-note"],
     )
 
@@ -378,6 +415,12 @@ def test_render_investigation_report_uses_execution_artifacts_by_default(monkeyp
     assert report.tool_path_trace.step_provenance[0].provenance.requested_capability == "service_evidence_plane"
     assert report.tool_path_trace.step_provenance[0].provenance.route_satisfaction == "unmatched"
     assert report.tool_path_trace.step_provenance[0].provenance.actual_route.tool_name == "collect_service_evidence"
+    assert report.focus_provenance is not None
+    assert report.focus_provenance.requested_subject == "service/api"
+    assert report.focus_provenance.soft_primary_focus is not None
+    assert report.focus_provenance.soft_primary_focus.name == "api"
+    assert report.focus_provenance.current_bounded_execution_focus is not None
+    assert report.focus_provenance.current_bounded_execution_focus.target == "service/api-resolved"
 
 
 def test_render_investigation_report_reuses_executed_change_artifacts(monkeypatch) -> None:

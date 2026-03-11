@@ -1,4 +1,13 @@
-from investigation_service.models import CorrelatedChange, EvidenceItem, InvestigationReport, ResolvedGuideline, ToolPathTrace
+from investigation_service.models import (
+    CorrelatedChange,
+    EvidenceItem,
+    InvestigationFocusProvenance,
+    InvestigationReport,
+    InvestigationSubjectRef,
+    PlannerSeedExecutionFocus,
+    ResolvedGuideline,
+    ToolPathTrace,
+)
 from investigation_service.presentation import render_presentation_document, render_presentation_markdown
 
 
@@ -59,6 +68,39 @@ def _report() -> InvestigationReport:
             )
         ],
         normalization_notes=["target derived from alert text"],
+        focus_provenance=InvestigationFocusProvenance(
+            requested_subject="workload/crashy",
+            soft_primary_focus=InvestigationSubjectRef(
+                kind="deployment",
+                name="crashy",
+                cluster="erauner-home",
+                namespace="kagent-smoke",
+                confidence="high",
+                sources=["explicit_target"],
+            ),
+            related_subjects_considered=[
+                InvestigationSubjectRef(
+                    kind="service",
+                    name="api",
+                    cluster="erauner-home",
+                    namespace="kagent-smoke",
+                    confidence="medium",
+                    sources=["service_hint"],
+                    relation="related",
+                )
+            ],
+            initial_bounded_execution_focus=PlannerSeedExecutionFocus(
+                scope="workload",
+                target="deployment/crashy",
+                profile="workload",
+            ),
+            current_bounded_execution_focus=PlannerSeedExecutionFocus(
+                scope="workload",
+                target="deployment/crashy",
+                profile="workload",
+            ),
+            initial_focus_reasons=["canonical focus selected: deployment/crashy"],
+        ),
         tool_path_trace=ToolPathTrace(
             planner_path_used=True,
             source="investigation-mcp-server",
@@ -101,6 +143,10 @@ def test_debug_trace_includes_trace_notes_and_guidelines_without_changing_headli
     assert "CrashLoopBackOff" in rendered
     assert "k8s: Crash Loop Detected - container=app, waiting reason=CrashLoopBackOff, restarts=5" in rendered
     assert "recent events: Back-off restarting failed container crashy in pod crashy-abc123" in rendered
+    assert "Requested subject: workload/crashy" in rendered
+    assert "Soft primary focus: deployment:kagent-smoke/crashy [erauner-home]" in rendered
+    assert "Initial bounded focus: workload:deployment/crashy (workload)" in rendered
+    assert "Related subjects considered: service:kagent-smoke/api [erauner-home]" in rendered
     assert "Planner path used: True" in rendered
     assert "Executed steps: collect-target-evidence" in rendered
     assert "target derived from alert text" in rendered

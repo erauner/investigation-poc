@@ -527,6 +527,7 @@ def _render_investigation_report_from_analysis(
     recommended_next_step: str,
     suggested_follow_ups: list[str],
     guidelines: list[ResolvedGuideline],
+    focus_provenance=None,
     tool_path_trace=None,
 ) -> InvestigationReport:
     lead = primary_hypothesis(analysis)
@@ -547,6 +548,7 @@ def _render_investigation_report_from_analysis(
         suggested_follow_ups=_dedupe_preserving_order(suggested_follow_ups),
         guidelines=guidelines,
         normalization_notes=normalization_notes,
+        focus_provenance=focus_provenance,
         tool_path_trace=tool_path_trace,
     )
 
@@ -608,6 +610,7 @@ def render_investigation_report_from_state(
         recommended_next_step=recommended_next_step,
         suggested_follow_ups=suggested_follow_ups,
         guidelines=guidelines,
+        focus_provenance=state.focus_provenance,
         tool_path_trace=state.tool_path_trace,
     )
 
