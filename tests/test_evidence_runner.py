@@ -556,9 +556,11 @@ def test_collect_external_steps_returns_pending_workload_review_when_enabled(
     assert result.pending_exploration_review.baseline_runtime_pod_name == "crashy-a"
     assert result.pending_exploration_review.probe_kind == "alternate_runtime_pod"
     summary = _bounded_scout_summaries(caplog)[-1]
-    assert summary["batch_id"] == "batch-1"
+    assert summary["batch_id_token"] is not None
     assert summary["probe_kind"] == "alternate_runtime_pod"
     assert summary["stop_reason"] == "awaiting_review"
+    assert "batch-1" not in caplog.text
+    assert "collect-target-evidence" not in caplog.text
 
 
 def test_apply_pending_exploration_review_skip_keeps_baseline_with_review_note(
@@ -636,7 +638,10 @@ def test_apply_pending_exploration_review_skip_keeps_baseline_with_review_note(
 
     assert artifact.evidence_bundle is not None
     assert "bounded workload scout skipped by review decision" in artifact.evidence_bundle.limitations
-    assert _bounded_scout_summaries(caplog)[-1]["stop_reason"] == "review_skipped"
+    summary = _bounded_scout_summaries(caplog)[-1]
+    assert summary["stop_reason"] == "review_skipped"
+    assert summary["step_id_token"] is not None
+    assert "collect-target-evidence" not in caplog.text
 
 
 def test_collect_external_steps_stops_after_first_pending_review(monkeypatch) -> None:

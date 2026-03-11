@@ -1503,6 +1503,7 @@ def test_runtime_pauses_for_pending_workload_exploration_review(monkeypatch) -> 
     assert result.state["pending_exploration_review"].probe_kind == "alternate_runtime_pod"
     assert summarize_graph_state(result.state)["pending_review_probe_kind"] == "alternate_runtime_pod"
     assert summarize_graph_state(result.state)["pending_review_stop_reason"] == "awaiting_review"
+    assert summarize_graph_state(result.state)["pending_review_step_id_token"] is not None
 
     updated_state = entrypoint._apply_exploration_review_decision(
         runtime=entrypoint.OrchestratorRuntimeConfig(
@@ -1656,6 +1657,155 @@ def test_runtime_with_checkpointing_does_not_enable_review_without_flag(monkeypa
 
     assert result.status == "completed"
     assert result.next_nodes == ()
+
+
+def test_apply_review_decision_rejects_stale_review_fingerprint(monkeypatch) -> None:
+    incident = _incident()
+    checkpointer = create_in_memory_checkpointer()
+    step = EvidenceStepContract(
+        step_id="collect-target-evidence",
+        title="Collect workload evidence",
+        plane="workload",
+        artifact_type="evidence_bundle",
+        requested_capability="workload_evidence_plane",
+        preferred_mcp_server="kubernetes-mcp-server",
+        preferred_tool_names=["pods_log"],
+        fallback_mcp_server=None,
+        fallback_tool_names=[],
+        execution_mode="external_preferred",
+        execution_inputs=StepExecutionInputs(
+            request_kind="target_context",
+            cluster="erauner-home",
+            namespace="operator-smoke",
+            target="deployment/crashy",
+            profile="workload",
+            lookback_minutes=15,
+        ),
+    )
+    baseline_artifact = SubmittedStepArtifact(
+        step_id="collect-target-evidence",
+        actual_route={
+            "source_kind": "peer_mcp",
+            "mcp_server": "kubernetes-mcp-server",
+            "tool_name": "pods_log",
+            "tool_path": ["kubernetes-mcp-server", "pods_log"],
+        },
+        evidence_bundle={
+            "cluster": "erauner-home",
+            "target": {"namespace": "operator-smoke", "kind": "deployment", "name": "crashy"},
+            "object_state": {"kind": "deployment", "name": "crashy", "namespace": "operator-smoke"},
+            "events": [],
+            "log_excerpt": "",
+            "metrics": {},
+            "findings": [],
+            "limitations": ["logs unavailable"],
+            "enrichment_hints": [],
+        },
+    )
+
+    monkeypatch.setattr(entrypoint, "find_unhealthy_pod", lambda _req: type("UnhealthyPodResponseStub", (), {"candidate": None})())
+    monkeypatch.setattr(entrypoint, "seed_context", lambda *_args, **_kwargs: _context())
+    monkeypatch.setattr(
+        entrypoint,
+        "get_active_batch",
+        lambda *_args, **_kwargs: ActiveEvidenceBatchContract(
+            batch_id="batch-1",
+            title="Initial evidence",
+            intent="Collect workload evidence",
+            subject=InvestigationSubject(
+                source="alert",
+                kind="alert",
+                summary="Investigate PodCrashLooping",
+                requested_target="pod/crashy",
+                alertname="PodCrashLooping",
+            ),
+            canonical_target=InvestigationTarget(
+                source="alert",
+                scope="workload",
+                cluster="erauner-home",
+                namespace="operator-smoke",
+                requested_target="pod/crashy",
+                target="deployment/crashy",
+                service_name=None,
+                node_name=None,
+                profile="workload",
+                lookback_minutes=15,
+                normalization_notes=[],
+            ),
+            steps=[step],
+        ),
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "collect_external_steps",
+        lambda _batch, allow_exploration_review=False: _external_steps_result(
+            pending_exploration_review=PendingExplorationReview(
+                batch_id="batch-1",
+                step=step,
+                capability="workload_evidence_plane",
+                baseline_artifact=baseline_artifact,
+                baseline_runtime_pod_name="crashy-a",
+                adequacy_outcome="weak",
+                adequacy_reasons=["logs unavailable"],
+                proposed_probe="Probe one additional runtime pod for deployment/crashy excluding crashy-a.",
+                probe_kind="alternate_runtime_pod",
+            )
+        ),
+    )
+    monkeypatch.setattr(entrypoint, "render_report", lambda *_args, **_kwargs: _report())
+
+    result = entrypoint.run_orchestrated_investigation_runtime(
+        InvestigationReportRequest(
+            cluster=incident.cluster,
+            namespace=incident.namespace,
+            target=incident.target,
+            profile=incident.profile,
+            lookback_minutes=incident.lookback_minutes,
+            alertname=incident.alertname,
+            labels=incident.labels,
+            annotations=incident.annotations,
+        ),
+        runtime=entrypoint.OrchestratorRuntimeConfig(
+            checkpointer=checkpointer,
+            thread_id="stale-review-thread",
+            enable_exploration_review=True,
+        ),
+    )
+    assert result.status == "interrupted"
+
+    stale_snapshot = get_investigation_graph_state(
+        deps=entrypoint._runtime_deps(allow_exploration_review=True),
+        checkpointer=checkpointer,
+        checkpoint_config=GraphCheckpointConfig(thread_id="stale-review-thread"),
+        enable_exploration_review_interrupt=True,
+    )
+    stale_checkpoint_id = stale_snapshot.config["configurable"]["checkpoint_id"]
+    pending_review = stale_snapshot.values["pending_exploration_review"]
+    assert pending_review is not None
+
+    update_investigation_graph_state(
+        deps=entrypoint._runtime_deps(allow_exploration_review=True),
+        checkpointer=checkpointer,
+        checkpoint_config=GraphCheckpointConfig(thread_id="stale-review-thread"),
+        values={
+            "pending_exploration_review": pending_review.model_copy(
+                update={"proposed_probe": "Probe one additional runtime pod for deployment/crashy excluding crashy-b."}
+            )
+        },
+        as_node="prepare_exploration_review",
+        enable_exploration_review_interrupt=True,
+    )
+
+    with pytest.raises(ValueError, match="state has changed"):
+        entrypoint._apply_exploration_review_decision(
+            runtime=entrypoint.OrchestratorRuntimeConfig(
+                checkpointer=checkpointer,
+                thread_id="stale-review-thread",
+                checkpoint_id=stale_checkpoint_id,
+                enable_exploration_review=True,
+            ),
+            decision="skip",
+        )
 
 
 def test_resume_before_review_decision_fails_clearly(monkeypatch) -> None:
@@ -2607,6 +2757,8 @@ def test_orchestrator_runtime_logs_are_redacted(monkeypatch, caplog) -> None:
     assert "log-thread" not in caplog.text
     assert "operator-smoke" not in caplog.text
     assert "PodCrashLooping" not in caplog.text
+    assert "batch-1" not in caplog.text
+    assert "collect-target-evidence" not in caplog.text
 
 
 def test_summarize_graph_state_handles_pending_review_without_probe_kind() -> None:
