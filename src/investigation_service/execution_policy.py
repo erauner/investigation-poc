@@ -30,7 +30,9 @@ class BoundedExplorationPolicy:
 _POLICIES: dict[str, CapabilityPolicy] = {
     "alert_evidence_plane": CapabilityPolicy(
         capability="alert_evidence_plane",
-        notes="Alert extraction and alert-shaped context remain internal product-owned control-plane behavior before peer evidence-plane drill-down.",
+        preferred_mcp_server="alertmanager-mcp-server",
+        preferred_tool_names=("alertmanager_list_alerts",),
+        notes="Use Alertmanager as corroborating alert-state evidence only; preserve alert payload fidelity without replacing runtime workload or service diagnosis planes.",
     ),
     "workload_evidence_plane": CapabilityPolicy(
         capability="workload_evidence_plane",

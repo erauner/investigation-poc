@@ -20,6 +20,10 @@ spec:
           value: ""
         - name: LOKI_MCP_URL
           value: ""
+        - name: ALERTMANAGER_URL
+          value: ""
+        - name: ALERTMANAGER_MCP_URL
+          value: ""
         - name: PROMETHEUS_MCP_URL
           value: http://prometheus-mcp-server.kagent:8080/mcp
         - name: PROMETHEUS_URL

@@ -20,8 +20,10 @@ from .models import (
     FindUnhealthyWorkloadsRequest,
     CollectedContextResponse,
     EvidenceBundle,
+    Finding,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
+    TargetRef,
     ScopeType,
     UnhealthyPodResponse,
     UnhealthyWorkloadsResponse,
@@ -269,6 +271,100 @@ def materialize_node_evidence(
         findings=findings,
         limitations=sorted(set(limitations)),
         enrichment_hints=sorted(set(enrichment_hints)),
+    )
+
+
+def _target_ref_from_canonical_target(target: str, namespace: str | None) -> TargetRef:
+    kind, _, name = target.partition("/")
+    if not kind or not name:
+        raise ValueError(f"invalid canonical target: {target}")
+    target_namespace = None if kind == "node" else namespace
+    return TargetRef(namespace=target_namespace, kind=kind, name=name)
+
+
+def materialize_alert_state_evidence(
+    req: CollectAlertContextRequest,
+    *,
+    matched_alerts: list[dict[str, object]] | None,
+    cluster_alias: str,
+    extra_limitations: list[str] | None = None,
+) -> EvidenceBundle:
+    normalized = normalize_alert_input(req)
+    target = _target_ref_from_canonical_target(normalized.target, normalized.namespace)
+    limitations = [*(extra_limitations or [])]
+    metrics = {
+        "alertmanager_available": matched_alerts is not None,
+        "matched_alert_count": len(matched_alerts or []),
+    }
+    findings: list[Finding]
+    if matched_alerts is None:
+        findings = [
+            Finding(
+                severity="info",
+                source="heuristic",
+                title="Alert Payload Preserved Without Live Corroboration",
+                evidence="Alert identity and payload were preserved, but live Alertmanager corroboration was not available.",
+            )
+        ]
+    elif not matched_alerts:
+        limitations.append("no matching active Alertmanager alert found for the supplied alert identity")
+        findings = [
+            Finding(
+                severity="warning",
+                source="heuristic",
+                title="No Matching Active Alertmanager Alert",
+                evidence="Alertmanager query succeeded, but no active alert matched the supplied alert identity.",
+            )
+        ]
+    elif len(matched_alerts) == 1:
+        findings = [
+            Finding(
+                severity="info",
+                source="heuristic",
+                title="Active Alertmanager Alert Corroborated",
+                evidence="Alertmanager returned one active alert matching the supplied alert identity.",
+            )
+        ]
+    else:
+        limitations.append("multiple active Alertmanager alerts matched the supplied alert identity")
+        findings = [
+            Finding(
+                severity="warning",
+                source="heuristic",
+                title="Multiple Active Alertmanager Alerts Matched",
+                evidence="Alertmanager returned multiple active alerts for the supplied alert identity.",
+            )
+        ]
+
+    object_state = {
+        "kind": "alert",
+        "alertname": req.alertname,
+        "labels": dict(req.labels),
+        "annotations": dict(req.annotations),
+        "requestedTarget": req.target,
+        "resolvedTarget": normalized.target,
+        "matchedAlerts": list(matched_alerts or []),
+    }
+
+    return EvidenceBundle(
+        cluster=cluster_alias,
+        target=target,
+        object_state=object_state,
+        events=[],
+        log_excerpt="",
+        metrics=metrics,
+        findings=findings,
+        limitations=sorted(set(limitations)),
+        enrichment_hints=[],
+    )
+
+
+def collect_alert_state_evidence(req: CollectAlertContextRequest) -> EvidenceBundle:
+    cluster = resolve_cluster(req.cluster, labels=req.labels)
+    return materialize_alert_state_evidence(
+        req,
+        matched_alerts=None,
+        cluster_alias=cluster.alias,
     )
 
 

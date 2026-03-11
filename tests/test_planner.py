@@ -330,7 +330,7 @@ def test_build_investigation_plan_sets_metrics_first_policy_for_service_targets(
     assert target_step.fallback_tool_names == ["resources_get", "events_list", "pods_list_in_namespace"]
 
 
-def test_build_investigation_plan_keeps_alert_step_internal_only_in_public_metadata() -> None:
+def test_build_investigation_plan_exposes_alertmanager_preferred_route_for_alert_step() -> None:
     deps = _deps([])
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(
@@ -344,10 +344,38 @@ def test_build_investigation_plan_keeps_alert_step_internal_only_in_public_metad
     alert_step = next(step for step in plan.steps if step.id == "collect-alert-evidence")
 
     assert alert_step.suggested_capability == "alert_evidence_plane"
-    assert alert_step.preferred_mcp_server is None
-    assert alert_step.preferred_tool_names == []
+    assert alert_step.preferred_mcp_server == "alertmanager-mcp-server"
+    assert alert_step.preferred_tool_names == ["alertmanager_list_alerts"]
     assert alert_step.fallback_mcp_server is None
     assert alert_step.fallback_tool_names == []
+
+
+def test_get_active_evidence_batch_contract_preserves_original_alert_target_in_alert_step_inputs() -> None:
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(
+            alertname="PodCrashLooping",
+            namespace="default",
+            target="pod/crashy",
+            labels={"pod": "crashy"},
+        ),
+        _deps([]),
+    )
+
+    contract = get_active_evidence_batch_contract(
+        GetActiveEvidenceBatchRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(
+                alertname="PodCrashLooping",
+                namespace="default",
+                target="pod/crashy",
+                labels={"pod": "crashy"},
+            ),
+        )
+    )
+
+    alert_step = next(step for step in contract.steps if step.step_id == "collect-alert-evidence")
+    assert alert_step.execution_mode == "external_preferred"
+    assert alert_step.execution_inputs.target == "pod/crashy"
 
 
 def test_build_investigation_plan_resolves_convenience_targets_before_plan_construction() -> None:
@@ -600,7 +628,7 @@ def test_execute_investigation_step_runs_alert_batch_from_alert_input() -> None:
     ]
     assert execution.artifacts[0].route_provenance is not None
     assert execution.artifacts[0].route_provenance.requested_capability == "alert_evidence_plane"
-    assert execution.artifacts[0].route_provenance.route_satisfaction == "not_applicable"
+    assert execution.artifacts[0].route_provenance.route_satisfaction == "unmatched"
     assert execution.artifacts[0].route_provenance.actual_route.tool_name == "collect_alert_evidence"
     assert execution.artifacts[1].route_provenance is not None
     assert execution.artifacts[1].route_provenance.requested_capability == "workload_evidence_plane"
@@ -977,6 +1005,16 @@ def test_advance_active_evidence_batch_keeps_alert_evidence_planner_owned() -> N
             labels={"namespace": "default", "pod": "api-123"},
         ),
         submitted_steps=[
+            SubmittedStepArtifact(
+                step_id="collect-alert-evidence",
+                actual_route=ActualRoute(
+                    source_kind="peer_mcp",
+                    mcp_server="alertmanager-mcp-server",
+                    tool_name=None,
+                    tool_path=["alertmanager-mcp-server"],
+                ),
+                limitations=["peer alertmanager MCP attempt failed: down"],
+            ),
             SubmittedStepArtifact(
                 step_id="collect-target-evidence",
                 evidence_bundle=_bundle(name="api-123"),

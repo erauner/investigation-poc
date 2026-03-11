@@ -23,6 +23,16 @@ def get_loki_mcp_url() -> str | None:
     return value or None
 
 
+def get_alertmanager_url() -> str | None:
+    value = os.getenv("ALERTMANAGER_URL", "").strip()
+    return value or None
+
+
+def get_alertmanager_mcp_url() -> str | None:
+    value = os.getenv("ALERTMANAGER_MCP_URL", "").strip()
+    return value or None
+
+
 def get_peer_mcp_timeout_seconds() -> float:
     raw = os.getenv("PEER_MCP_TIMEOUT_SECONDS", "10").strip()
     try:

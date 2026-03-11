@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: investigation-service-config
+  namespace: kagent
+data:
+  ALERTMANAGER_URL: http://alertmanager.kagent.svc.cluster.local:9093
+  ALERTMANAGER_MCP_URL: http://alertmanager-mcp-server.kagent:8080/stream
