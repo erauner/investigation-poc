@@ -290,6 +290,16 @@ def test_build_investigation_plan_reraises_question_scope_errors_for_target_like
         )
 
 
+def test_build_investigation_plan_rejects_unsupported_target_like_question_input() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: job"):
+        build_investigation_plan(
+            BuildInvestigationPlanRequest(
+                question="Investigate job/backup in namespace ops",
+            ),
+            _deps([]),
+        )
+
+
 def test_resolve_primary_target_normalizes_question_cluster_text_via_cluster_registry() -> None:
     deps = _deps([])
     deps = PlannerDeps(
@@ -313,6 +323,22 @@ def test_resolve_primary_target_normalizes_question_cluster_text_via_cluster_reg
 
     assert target.cluster is None
     assert target.target == "pod/api"
+
+
+def test_resolve_primary_target_requires_namespace_for_backend_targets() -> None:
+    with pytest.raises(ValueError, match="namespace is required for Backend targets"):
+        resolve_primary_target(
+            InvestigationReportRequest(target="Backend/api"),
+            _deps([]),
+        )
+
+
+def test_resolve_primary_target_requires_namespace_for_frontend_targets() -> None:
+    with pytest.raises(ValueError, match="namespace is required for Frontend targets"):
+        resolve_primary_target(
+            InvestigationReportRequest(target="Frontend/api"),
+            _deps([]),
+        )
 
 
 def test_execute_investigation_step_runs_single_targeted_evidence_batch() -> None:

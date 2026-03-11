@@ -23,6 +23,10 @@ _RESOURCE_REF_PATTERN = re.compile(
     r"(?P<kind>pod|deployment|statefulset|service|backend|frontend|cluster|node)/(?P<name>[a-z0-9][a-z0-9\-\.]*)",
     re.IGNORECASE,
 )
+_UNSUPPORTED_RESOURCE_REF_PATTERN = re.compile(
+    r"(?P<kind>daemonset|job)/(?P<name>[a-z0-9][a-z0-9\-\.]*)",
+    re.IGNORECASE,
+)
 _NAMESPACE_PATTERN = re.compile(r"\bnamespace\s+(?P<namespace>[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)
 _IN_CLUSTER_PATTERN = re.compile(r"\bin\s+cluster\s+(?P<cluster>[a-z0-9][a-z0-9-]*)\b", re.IGNORECASE)
 _FIELD_PATTERN = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9 _-]*):\s*(?P<value>.+)$")
@@ -252,6 +256,7 @@ def _extract_candidate_refs(
     deps: IngressDeps,
     notes: list[str],
 ) -> list[InvestigationSubjectRef]:
+    _raise_for_unsupported_resource_like_input(req)
     refs: list[InvestigationSubjectRef] = []
     if req.target:
         refs.append(_subject_ref_from_string(req.target, scope, source="explicit_target", confidence="high"))
@@ -453,6 +458,8 @@ def _normalized_request_for_focus(
         scope = "node"
         node_name = focus.name
     elif focus.kind == "backend":
+        if not subject_set.scope.namespace:
+            raise ValueError("namespace is required for Backend targets")
         cluster = _resolve_cluster(deps, subject_set.scope.cluster, {})
         backend = deps.get_backend_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
         target = f"deployment/{focus.name}"
@@ -462,6 +469,8 @@ def _normalized_request_for_focus(
         if backend.get("error"):
             notes.append("backend lookup failed; using deployment fallback")
     elif focus.kind == "frontend":
+        if not subject_set.scope.namespace:
+            raise ValueError("namespace is required for Frontend targets")
         cluster = _resolve_cluster(deps, subject_set.scope.cluster, {})
         frontend = deps.get_frontend_cr(subject_set.scope.namespace, focus.name, cluster=cluster)
         if profile == "service" and "explicit_target" not in focus.sources:
@@ -644,6 +653,16 @@ def _subject_ref_string(ref: InvestigationSubjectRef) -> str:
 
 def _resource_refs_from_text(text: str) -> list[tuple[str, str]]:
     return [(match.group("kind"), match.group("name")) for match in _RESOURCE_REF_PATTERN.finditer(text or "")]
+
+
+def _raise_for_unsupported_resource_like_input(req: InvestigationIngressRequest) -> None:
+    values = [req.target, *req.explicit_refs, req.raw_text, req.question]
+    for value in values:
+        if not value:
+            continue
+        match = _UNSUPPORTED_RESOURCE_REF_PATTERN.search(value)
+        if match is not None:
+            raise ValueError(f"unsupported investigation subject kind: {match.group('kind').lower()}")
 
 
 def _field_map(text: str) -> dict[str, str]:

@@ -137,6 +137,9 @@ def resolve_cluster(requested_cluster: str | None, labels: dict[str, str] | None
     if configured_legacy_alias:
         legacy_aliases.add(configured_legacy_alias)
 
+    if requested_alias in legacy_aliases:
+        return _legacy_cluster()
+
     if not registry.clusters:
         if requested_alias is None or requested_alias in legacy_aliases:
             return _legacy_cluster()
