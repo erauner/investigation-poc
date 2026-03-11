@@ -253,7 +253,6 @@ def _build_service_loki_queries(target: TargetRef, object_state: dict[str, Any] 
         queries.append(f'{{namespace="{target.namespace}",pod=~"{escaped}"}}')
     for app_candidate in _service_loki_app_candidates(object_state, target):
         queries.append(f'{{namespace="{target.namespace}",app="{app_candidate}"}}')
-    queries.append(f'{{namespace="{target.namespace}"}} |= "{target.name}"')
     return tuple(dict.fromkeys(queries))
 
 

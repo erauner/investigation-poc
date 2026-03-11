@@ -5,8 +5,6 @@ metadata:
   namespace: kagent
 data:
   CLUSTER_NAME: local-kind
-  LOKI_URL: ""
-  LOKI_MCP_URL: ""
   PROMETHEUS_URL: http://prometheus:9090
   LOG_TAIL_LINES: "200"
   CLUSTER_REGISTRY_PATH: /etc/investigation/clusters.yaml

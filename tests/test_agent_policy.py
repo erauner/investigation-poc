@@ -134,9 +134,6 @@ def test_k8s_kustomization_includes_agent_manifest() -> None:
     manifest = _load_yaml("k8s/kustomization.yaml")
 
     assert "agent.yaml" in manifest["resources"]
-    assert "loki-remotemcpserver.yaml" in manifest["resources"]
-    assert "loki-mcp-deployment.yaml" in manifest["resources"]
-    assert "loki-mcp-service.yaml" in manifest["resources"]
 
 
 def test_shadow_agent_manifest_uses_byo_lane() -> None:
@@ -165,16 +162,9 @@ def test_agent_manifest_uses_narrow_planner_led_tool_catalog() -> None:
         for item in tools
         if item["type"] == "McpServer" and item["mcpServer"]["name"] == "prometheus-mcp-server"
     )
-    loki_tools = next(
-        item["mcpServer"]["toolNames"]
-        for item in tools
-        if item["type"] == "McpServer" and item["mcpServer"]["name"] == "loki-mcp-server"
-    )
-
     assert set(investigation_tools) == EXPECTED_INVESTIGATION_AGENT_TOOLS
     assert set(kubernetes_tools) == EXPECTED_KUBERNETES_MCP_TOOLS
     assert set(prometheus_tools) == EXPECTED_PROMETHEUS_MCP_TOOLS
-    assert set(loki_tools) == EXPECTED_LOKI_MCP_TOOLS
     assert not (set(investigation_tools) & BANNED_AGENT_TOOLS)
 
 
@@ -223,6 +213,14 @@ def test_execution_policy_preferred_tool_names_are_backed_by_manifest_catalogs()
     assert alert_policy.preferred_tool_names == ()
     assert alert_policy.fallback_mcp_server is None
     assert alert_policy.fallback_tool_names == ()
+
+
+def test_optional_loki_overlay_adds_manifest_and_tool_catalog() -> None:
+    manifest = _load_yaml("k8s-overlays/local-kind-optional-loki/kustomization.yaml")
+
+    assert "../../k8s/optional-loki-mcp" in manifest["resources"]
+    patch_targets = [item.get("target", {}) for item in manifest["patches"] if isinstance(item, dict)]
+    assert any(target.get("kind") == "Agent" and target.get("name") == "incident-triage" for target in patch_targets)
 
 
 def test_skill_configmap_stops_teaching_report_first_or_hidden_tools() -> None:

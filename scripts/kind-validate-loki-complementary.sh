@@ -241,6 +241,14 @@ while time.time() < deadline:
 raise SystemExit("expected Loki error logs were not recovered")
 PY
 
+echo "==> Verifying direct push path is not configured"
+fixture_path="${ROOT_DIR}/test-fixtures/metrics-smoke/overlays/loki_complementary/metrics-api.yaml"
+if grep -Eq 'name:\s*(LOKI_PUSH_URL|LOKI_PUSH_ENDPOINT|OTEL_EXPORTER_OTLP_LOGS_ENDPOINT|OTEL_EXPORTER_OTLP_ENDPOINT)\b' "${fixture_path}"; then
+  echo "unexpected direct-push env vars configured in ${fixture_path}" >&2
+  exit 1
+fi
+echo "direct push env vars absent from loki_complementary fixture"
+
 run_started_at="$(python3 - <<'PY'
 from datetime import datetime, timezone
 print(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))

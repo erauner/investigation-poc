@@ -13,7 +13,6 @@ resources:
   - investigation-remotemcpserver.yaml
   - kubernetes-remotemcpserver.yaml
   - prometheus-remotemcpserver.yaml
-  - loki-remotemcpserver.yaml
   - kubernetes-mcp-serviceaccount.yaml
   - kubernetes-mcp-clusterrole.yaml
   - kubernetes-mcp-clusterrolebinding.yaml
@@ -22,8 +21,5 @@ resources:
   - prometheus-mcp-serviceaccount.yaml
   - prometheus-mcp-deployment.yaml
   - prometheus-mcp-service.yaml
-  - loki-mcp-serviceaccount.yaml
-  - loki-mcp-deployment.yaml
-  - loki-mcp-service.yaml
   - mcp-deployment.yaml
   - mcp-service.yaml

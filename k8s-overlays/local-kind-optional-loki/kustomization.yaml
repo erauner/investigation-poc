@@ -4,6 +4,14 @@ kind: Kustomization
 resources:
   - ../local-kind
   - ../../k8s/optional-loki
+  - ../../k8s/optional-loki-mcp
 
 patches:
   - path: patch-configmap.yaml
+  - target:
+      group: kagent.dev
+      version: v1alpha2
+      kind: Agent
+      name: incident-triage
+      namespace: kagent
+    path: patch-agent-loki-tool.yaml
