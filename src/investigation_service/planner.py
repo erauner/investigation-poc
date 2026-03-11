@@ -55,7 +55,6 @@ from .planner_seed import (
 
 @dataclass(frozen=True)
 class PlannerDeps:
-    normalize_alert_input: Callable[[CollectAlertContextRequest], NormalizedInvestigationRequest]
     canonical_target: Callable[[str, str, str | None], str]
     scope_from_target: Callable[[str, str], str]
     resolve_cluster: Callable[[str | None], Any]

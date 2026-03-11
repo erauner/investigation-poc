@@ -362,7 +362,7 @@ def normalize_alert_input(req: CollectAlertContextRequest) -> NormalizedInvestig
     ingress_req = ingress_request_from_alert_request(req)
     deps = IngressDeps(
         resolve_cluster=resolve_cluster,
-        get_cluster_cr=lambda *args, **kwargs: {},
+        get_cluster_cr=get_cluster_cr,
         find_unhealthy_pod=find_unhealthy_pod,
     )
     subject_set = normalize_ingress_request(ingress_req, deps)

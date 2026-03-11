@@ -247,12 +247,12 @@ def test_backend_explicit_current_context_resolves_in_legacy_mode() -> None:
     )
 
     normalized = _normalized_from_target(
-        cluster=None,
+        cluster="current-context",
         namespace="operator-smoke",
         target="Backend/crashy",
         deps=deps,
     )
 
-    assert normalized.cluster is None
+    assert normalized.cluster == "current-context"
     assert normalized.target == "deployment/crashy"
     assert normalized.service_name == "crashy"

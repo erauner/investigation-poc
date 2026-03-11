@@ -999,6 +999,35 @@ def test_normalize_alert_input_raises_on_explicit_cluster_target_lookup_failure(
         )
 
 
+def test_normalize_alert_input_preserves_cluster_related_subject_enrichment(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "get_cluster_cr",
+        lambda namespace, name, cluster=None: {
+            "status": {
+                "componentStatuses": [
+                    {"kind": "Backend", "name": f"{name}-be", "phase": "Failed"},
+                    {"kind": "StatefulSet", "name": f"{name}-db", "phase": "Ready"},
+                ]
+            }
+        },
+    )
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="ClusterAlert",
+            namespace="operator-smoke",
+            target="Cluster/tenant",
+        )
+    )
+
+    assert normalized.subject_context is not None
+    assert {(ref.kind, ref.name, ref.relation) for ref in normalized.subject_context.related_subjects} >= {
+        ("backend", "tenant-be", "member"),
+        ("statefulset", "tenant-db", "dependency"),
+    }
+
+
 def test_normalize_alert_input_preserves_explicit_current_context_for_backend_lookup(monkeypatch) -> None:
     seen: dict[str, object] = {}
     monkeypatch.setattr(

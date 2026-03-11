@@ -736,7 +736,6 @@ def test_handoff_active_evidence_batch_auto_advances_planner_owned_batch(monkeyp
         reporting,
         "_planner_deps",
         lambda: reporting.PlannerDeps(
-            normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError("unexpected alert normalization")),
             canonical_target=lambda target, profile, service_name: target,
             scope_from_target=lambda target, profile: "workload",
             resolve_cluster=lambda cluster: type("ResolvedCluster", (), {"alias": "artifact-cluster"})(),
@@ -998,6 +997,52 @@ def test_build_investigation_state_rejects_mismatched_execution_context_incident
                 ),
             )
         )
+
+
+def test_build_investigation_state_accepts_explicit_current_context_against_normalized_plan(monkeypatch) -> None:
+    monkeypatch.setattr(
+        reporting,
+        "resolve_cluster",
+        lambda cluster: type(
+            "ResolvedCluster",
+            (),
+            {"alias": "current-context", "source": "legacy_current_context"},
+        )(),
+    )
+    plan = _plan().model_copy(
+        update={
+            "active_batch_id": None,
+            "target": _target().model_copy(
+                update={
+                    "cluster": None,
+                    "subject_context": _target().subject_context.model_copy(
+                        update={
+                            "scope": _target().subject_context.scope.model_copy(update={"cluster": None}),
+                            "primary_subject": _target().subject_context.primary_subject.model_copy(update={"cluster": None}),
+                            "related_subjects": [
+                                ref.model_copy(update={"cluster": None})
+                                for ref in _target().subject_context.related_subjects
+                            ],
+                        }
+                    ),
+                }
+            ),
+        }
+    )
+
+    state = reporting.build_investigation_state(
+        InvestigationReportingRequest(
+            cluster="current-context",
+            namespace="artifact-ns",
+            target="service/api",
+            profile="service",
+            execution_context=ReportingExecutionContext(updated_plan=plan, executions=[_execution()]),
+        )
+    )
+
+    assert state.target is not None
+    assert state.target.subject_context is not None
+    assert state.target.subject_context.scope.cluster is None
 
 
 def test_build_investigation_state_preserves_subject_context_when_target_aligns() -> None:

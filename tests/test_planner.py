@@ -14,7 +14,6 @@ from investigation_service.models import (
     InvestigationReportRequest,
     InvestigationSubjectContext,
     InvestigationSubjectRef,
-    NormalizedInvestigationRequest,
     PlanStep,
     ResolvedIngressScope,
     SubmitEvidenceArtifactsRequest,
@@ -69,7 +68,6 @@ def _changes(limitations: list[str] | None = None) -> CorrelatedChangesResponse:
 def _deps(calls: list[str] | None = None) -> PlannerDeps:
     calls = calls if calls is not None else []
     return PlannerDeps(
-        normalize_alert_input=lambda req: (_ for _ in ()).throw(AssertionError(f"unexpected alert normalization: {req}")),
         canonical_target=lambda target, profile, service_name: calls.append("canonical_target") or target,
         scope_from_target=lambda target, profile: calls.append("scope_from_target") or "workload",
         resolve_cluster=lambda cluster: calls.append("resolve_cluster")
@@ -218,21 +216,6 @@ def test_build_investigation_plan_sets_metrics_first_policy_for_service_targets(
 
 def test_build_investigation_plan_keeps_alert_step_internal_only_in_public_metadata() -> None:
     deps = _deps([])
-    deps = PlannerDeps(
-        **{
-            **deps.__dict__,
-            "normalize_alert_input": lambda req: NormalizedInvestigationRequest(
-                source="alert",
-                scope="workload",
-                cluster="erauner-home",
-                namespace=req.namespace,
-                target=req.target or "pod/api",
-                profile=req.profile,
-                lookback_minutes=req.lookback_minutes,
-                normalization_notes=["alertname=PodCrashLooping"],
-            ),
-        }
-    )
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(
             alertname="PodCrashLooping",
@@ -475,23 +458,6 @@ def test_execute_investigation_step_runs_single_targeted_evidence_batch() -> Non
 def test_execute_investigation_step_runs_alert_batch_from_alert_input() -> None:
     calls: list[str] = []
     deps = _deps(calls)
-    deps = PlannerDeps(
-        **{
-            **deps.__dict__,
-            "normalize_alert_input": lambda req: NormalizedInvestigationRequest(
-                source="alert",
-                scope="workload",
-                cluster=req.cluster,
-                namespace=req.labels.get("namespace"),
-                target=f"pod/{req.labels['pod']}",
-                node_name=None,
-                service_name=None,
-                profile="workload",
-                lookback_minutes=req.lookback_minutes,
-                normalization_notes=["alert normalized"],
-            ),
-        }
-    )
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(
             alertname="PodCrashLooping",
@@ -880,23 +846,6 @@ def test_advance_active_evidence_batch_still_rejects_workload_batch_without_atte
 def test_advance_active_evidence_batch_keeps_alert_evidence_planner_owned() -> None:
     calls: list[str] = []
     deps = _deps(calls)
-    deps = PlannerDeps(
-        **{
-            **deps.__dict__,
-            "normalize_alert_input": lambda req: NormalizedInvestigationRequest(
-                source="alert",
-                scope="workload",
-                cluster=req.cluster,
-                namespace=req.labels.get("namespace"),
-                target=f"pod/{req.labels['pod']}",
-                node_name=None,
-                service_name=None,
-                profile="workload",
-                lookback_minutes=req.lookback_minutes,
-                normalization_notes=["alert normalized"],
-            ),
-        }
-    )
     plan = build_investigation_plan(
         BuildInvestigationPlanRequest(
             alertname="PodCrashLooping",
