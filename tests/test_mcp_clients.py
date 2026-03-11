@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 from investigation_orchestrator import mcp_clients
-from investigation_orchestrator.mcp_clients import KubernetesMcpClient, LokiMcpClient, PrometheusMcpClient
+from investigation_orchestrator.mcp_clients import AlertmanagerMcpClient, KubernetesMcpClient, LokiMcpClient, PrometheusMcpClient
 from investigation_service.models import StepExecutionInputs
 import pytest
 import re
@@ -545,4 +545,226 @@ def test_collect_service_logs_rejects_remote_loki_routing_when_remote_cluster_ha
                 lookback_minutes=15,
             ),
             target=mcp_clients.TargetRef(namespace="operator-smoke", kind="service", name="api"),
+        )
+
+
+def test_collect_alert_state_builds_alertmanager_filters_and_normalizes_payload(monkeypatch) -> None:
+    client = AlertmanagerMcpClient(url="http://alertmanager-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        if tool_name != "alertmanager_list_alerts":
+            raise AssertionError(f"unexpected tool {tool_name}")
+        return {
+            "alerts": [
+                {
+                    "fingerprint": "abc",
+                    "status": {"state": "active"},
+                    "labels": {"alertname": "PodCrashLooping", "namespace": "operator-smoke", "pod": "crashy"},
+                    "annotations": {"summary": "CrashLoop"},
+                    "startsAt": "2026-03-11T10:00:00Z",
+                    "endsAt": "2026-03-11T11:00:00Z",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster, labels=None: SimpleNamespace(alias="local-kind", alertmanager_url=None),
+    )
+    monkeypatch.setattr(AlertmanagerMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_alert_state(
+        StepExecutionInputs(
+            request_kind="alert_context",
+            namespace="operator-smoke",
+            target="pod/crashy",
+            profile="workload",
+            alertname="PodCrashLooping",
+            labels={"pod": "crashy"},
+        )
+    )
+
+    assert calls == [
+        (
+            "alertmanager_list_alerts",
+            {
+                "labelFilters": {"alertname": "PodCrashLooping", "pod": "crashy", "namespace": "operator-smoke"},
+                "active": True,
+                "silenced": False,
+                "inhibited": False,
+                "unprocessed": False,
+            },
+        )
+    ]
+    assert snapshot.alerts[0]["fingerprint"] == "abc"
+    assert snapshot.tool_path == ["alertmanager-mcp-server", "alertmanager_list_alerts"]
+
+
+def test_collect_alert_state_uses_explicit_target_as_identity_fallback(monkeypatch) -> None:
+    client = AlertmanagerMcpClient(url="http://alertmanager-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        return {"alerts": []}
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster, labels=None: SimpleNamespace(alias="local-kind", alertmanager_url=None),
+    )
+    monkeypatch.setattr(AlertmanagerMcpClient, "_call_tool", _call_tool)
+
+    client.collect_alert_state(
+        StepExecutionInputs(
+            request_kind="alert_context",
+            namespace="operator-smoke",
+            target="deployment/crashy",
+            profile="workload",
+            alertname="PodCrashLooping",
+            labels={},
+        )
+    )
+
+    assert calls == [
+        (
+            "alertmanager_list_alerts",
+            {
+                "labelFilters": {
+                    "alertname": "PodCrashLooping",
+                    "namespace": "operator-smoke",
+                    "deployment": "crashy",
+                },
+                "active": True,
+                "silenced": False,
+                "inhibited": False,
+                "unprocessed": False,
+            },
+        )
+    ]
+
+
+def test_collect_alert_state_does_not_duplicate_alias_identity_with_explicit_target(monkeypatch) -> None:
+    client = AlertmanagerMcpClient(url="http://alertmanager-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        return {"alerts": []}
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster, labels=None: SimpleNamespace(alias="local-kind", alertmanager_url=None),
+    )
+    monkeypatch.setattr(AlertmanagerMcpClient, "_call_tool", _call_tool)
+
+    client.collect_alert_state(
+        StepExecutionInputs(
+            request_kind="alert_context",
+            namespace="operator-smoke",
+            target="pod/crashy",
+            profile="workload",
+            alertname="PodCrashLooping",
+            labels={"pod_name": "crashy"},
+        )
+    )
+
+    assert calls == [
+        (
+            "alertmanager_list_alerts",
+            {
+                "labelFilters": {
+                    "alertname": "PodCrashLooping",
+                    "namespace": "operator-smoke",
+                    "pod_name": "crashy",
+                },
+                "active": True,
+                "silenced": False,
+                "inhibited": False,
+                "unprocessed": False,
+            },
+        )
+    ]
+
+
+def test_collect_alert_state_uses_structured_service_name_when_target_is_absent(monkeypatch) -> None:
+    client = AlertmanagerMcpClient(url="http://alertmanager-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        return {"alerts": []}
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster, labels=None: SimpleNamespace(alias="local-kind", alertmanager_url=None),
+    )
+    monkeypatch.setattr(AlertmanagerMcpClient, "_call_tool", _call_tool)
+
+    client.collect_alert_state(
+        StepExecutionInputs(
+            request_kind="alert_context",
+            namespace="operator-smoke",
+            profile="service",
+            alertname="EnvoyHighErrorRate",
+            service_name="api",
+            labels={},
+        )
+    )
+
+    assert calls == [
+        (
+            "alertmanager_list_alerts",
+            {
+                "labelFilters": {
+                    "alertname": "EnvoyHighErrorRate",
+                    "namespace": "operator-smoke",
+                    "service": "api",
+                },
+                "active": True,
+                "silenced": False,
+                "inhibited": False,
+                "unprocessed": False,
+            },
+        )
+    ]
+
+
+def test_collect_alert_state_rejects_remote_alertmanager_routing(monkeypatch) -> None:
+    client = AlertmanagerMcpClient(url="http://alertmanager-mcp.example/mcp")
+
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster, labels=None: SimpleNamespace(alias="remote-a", alertmanager_url="http://remote-alertmanager:9093"),
+    )
+    monkeypatch.setattr(mcp_clients, "get_default_cluster_alias", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_cluster_name", lambda: "local-kind")
+    monkeypatch.setattr(mcp_clients, "get_alertmanager_url", lambda: "http://local-alertmanager:9093")
+
+    with pytest.raises(mcp_clients.PeerMcpError, match="multicluster alertmanager routing"):
+        client.collect_alert_state(
+            StepExecutionInputs(
+                request_kind="alert_context",
+                namespace="operator-smoke",
+                alertname="PodCrashLooping",
+                labels={"pod": "crashy"},
+            )
         )

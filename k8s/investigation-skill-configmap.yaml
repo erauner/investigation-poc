@@ -52,6 +52,7 @@ data:
     - Cluster/<name> is an operator orchestration object for one tenant, not an independent workload. Treat it as a request to investigate the most relevant component behind that tenant and let resolve_primary_target or render_investigation_report resolve it to the failing Backend or Frontend component.
     - If the user asks for "the unhealthy pod" or another vague unhealthy workload in a namespace without naming the target, use resolve_primary_target before rendering a final report.
     - Treat the Kubernetes MCP server and Prometheus MCP server as first-class evidence planes.
+    - Treat Alertmanager MCP as corroborating alert-state evidence only. It can confirm active alert identity and payload fidelity, but it must not replace workload or service runtime evidence as the primary diagnosis basis.
     - Prefer Kubernetes MCP tools for direct runtime evidence such as pod logs, pod and workload inspection, events, and namespace-scoped resource lookup.
     - Prefer Prometheus MCP tools for metrics, alert, rule, target, and exemplar evidence.
     - For explicit service latency, error-rate, throughput, saturation, node capacity, or alert-driven metrics investigations, use a metrics-first path:

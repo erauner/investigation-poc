@@ -413,8 +413,8 @@ def _runtime_spec(step: PlanStep) -> StepRuntimeSpec:
     if step.id == "collect-alert-evidence":
         return StepRuntimeSpec(
             artifact_type="evidence_bundle",
-            execution_mode="control_plane_only",
-            external_submission_allowed=False,
+            execution_mode="external_preferred",
+            external_submission_allowed=True,
         )
     if step.suggested_capability in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}:
         return StepRuntimeSpec(
@@ -519,7 +519,7 @@ def _step_execution_inputs(
             request_kind="alert_context",
             cluster=target.cluster,
             namespace=target.namespace or incident.namespace,
-            target=target.target,
+            target=incident.target,
             profile=target.profile,
             service_name=target.service_name,
             node_name=target.node_name or incident.node_name,
@@ -670,7 +670,7 @@ def _attempt_only_peer_submission(
     step: PlanStep,
     submission: SubmittedStepArtifact,
 ) -> bool:
-    if step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}:
+    if step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane", "alert_evidence_plane"}:
         return False
     allowed_servers = {
         server
@@ -844,7 +844,7 @@ def advance_active_evidence_batch(
         for step in remaining_steps
         if _runtime_spec(step).execution_mode != "control_plane_only"
         and (
-            step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane"}
+            step.suggested_capability not in {"workload_evidence_plane", "service_evidence_plane", "node_evidence_plane", "alert_evidence_plane"}
             or step.id not in attempted_peer_submissions
         )
     ]
@@ -914,7 +914,7 @@ def _execute_step(
                 cluster=target.cluster,
                 namespace=target.namespace or incident.namespace,
                 node_name=target.node_name or incident.node_name,
-                target=target.target,
+                target=incident.target,
                 profile=target.profile,
                 service_name=target.service_name,
                 lookback_minutes=target.lookback_minutes,

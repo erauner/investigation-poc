@@ -4,6 +4,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from .settings import (
+    get_alertmanager_url,
     get_cluster_name,
     get_cluster_registry_path,
     get_default_cluster_alias,
@@ -18,6 +19,7 @@ class ClusterConfig(BaseModel):
     kube_context: str | None = None
     prometheus_url: str | None = None
     loki_url: str | None = None
+    alertmanager_url: str | None = None
     label_aliases: list[str] = Field(default_factory=list)
     default: bool = False
     allowed_namespaces: list[str] | None = None
@@ -30,6 +32,7 @@ class ResolvedCluster(BaseModel):
     use_in_cluster: bool = False
     prometheus_url: str | None = None
     loki_url: str | None = None
+    alertmanager_url: str | None = None
     source: str
     allowed_namespaces: list[str] | None = None
 
@@ -110,9 +113,11 @@ def _resolve_registered_cluster(
         )
     prometheus_url = config.prometheus_url
     loki_url = config.loki_url
+    alertmanager_url = config.alertmanager_url
     if use_in_cluster:
         prometheus_url = prometheus_url or get_prometheus_url()
         loki_url = loki_url or get_loki_url()
+        alertmanager_url = alertmanager_url or get_alertmanager_url()
     return ResolvedCluster(
         alias=config.alias,
         kube_context=config.kube_context if kubeconfig_path else None,
@@ -120,6 +125,7 @@ def _resolve_registered_cluster(
         use_in_cluster=use_in_cluster,
         prometheus_url=prometheus_url,
         loki_url=loki_url,
+        alertmanager_url=alertmanager_url,
         source=source,
         allowed_namespaces=config.allowed_namespaces,
     )
@@ -134,6 +140,7 @@ def _legacy_cluster() -> ResolvedCluster:
         use_in_cluster=not kubeconfig_path,
         prometheus_url=get_prometheus_url(),
         loki_url=get_loki_url(),
+        alertmanager_url=get_alertmanager_url(),
         source="legacy_current_context",
         allowed_namespaces=None,
     )

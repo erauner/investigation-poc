@@ -9,12 +9,13 @@ from investigation_service.models import (
 )
 from investigation_service.exploration import build_exploratory_scout_context
 from investigation_service.submission_materialization import (
+    materialize_alert_submission,
     materialize_attempt_only_submission,
     materialize_node_submission,
     materialize_service_submission,
     materialize_workload_submission,
 )
-from .mcp_clients import KubernetesMcpClient, LokiMcpClient, PeerMcpError, PrometheusMcpClient
+from .mcp_clients import AlertmanagerMcpClient, KubernetesMcpClient, LokiMcpClient, PeerMcpError, PrometheusMcpClient
 from .node_scout import maybe_run_bounded_node_scout
 from .service_scout import maybe_run_bounded_service_evidence_expansion_scout
 from .state import PendingExplorationReview
@@ -79,6 +80,7 @@ def _merged_contributing_routes(*route_groups: list[ActualRoute]) -> list[Actual
 _kubernetes_mcp_client = KubernetesMcpClient()
 _loki_mcp_client = LokiMcpClient()
 _prometheus_mcp_client = PrometheusMcpClient()
+_alertmanager_mcp_client = AlertmanagerMcpClient()
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,15 @@ def _planned_loki_route() -> ActualRoute:
         mcp_server="loki-mcp-server",
         tool_name=None,
         tool_path=["loki-mcp-server"],
+    )
+
+
+def _planned_alertmanager_route() -> ActualRoute:
+    return ActualRoute(
+        source_kind="peer_mcp",
+        mcp_server="alertmanager-mcp-server",
+        tool_name=None,
+        tool_path=["alertmanager-mcp-server"],
     )
 
 
@@ -250,6 +261,30 @@ def _workload_submission_via_peer_mcp(
     return ExternalStepCollectionResult(
         submitted_steps=[artifact],
         exploration_outcomes=((exploration_outcome,) if exploration_outcome is not None else ()),
+    )
+
+
+def _alert_submission_via_peer_mcp(step: EvidenceStepContract) -> SubmittedStepArtifact:
+    if not _alertmanager_mcp_client.is_configured():
+        return materialize_attempt_only_submission(
+            step,
+            actual_route=_planned_alertmanager_route(),
+            limitations=["alertmanager peer transport is not configured"],
+        )
+    try:
+        snapshot = _alertmanager_mcp_client.collect_alert_state(step.execution_inputs)
+    except PeerMcpError as exc:
+        return materialize_attempt_only_submission(
+            step,
+            actual_route=_planned_alertmanager_route(),
+            limitations=[f"peer alertmanager MCP attempt failed: {exc}"],
+        )
+    return materialize_alert_submission(
+        step,
+        matched_alerts=snapshot.alerts,
+        actual_route=_peer_route(snapshot.tool_path),
+        cluster_alias=snapshot.cluster_alias,
+        extra_limitations=snapshot.limitations,
     )
 
 
@@ -464,6 +499,8 @@ def _node_submission_via_peer_mcp(
 def _submitted_artifact_and_outcome(
     step: EvidenceStepContract,
 ) -> tuple[SubmittedStepArtifact | None, ExplorationOutcome | None]:
+    if step.requested_capability == "alert_evidence_plane":
+        return _alert_submission_via_peer_mcp(step), None
     if step.requested_capability == "workload_evidence_plane":
         try:
             result = _workload_submission_via_peer_mcp(step)

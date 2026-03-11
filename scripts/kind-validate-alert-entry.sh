@@ -7,8 +7,17 @@ KEEP_SMOKE="${KEEP_SMOKE:-0}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-0}"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-investigation}"
 KIND_CONTEXT="${KIND_CONTEXT:-kind-${KIND_CLUSTER_NAME}}"
-ALERT_PROMPT="${ALERT_PROMPT:-Investigate alert PodCrashLooping for pod crashy in namespace ${SMOKE_NAMESPACE}. Preserve alertname=PodCrashLooping and the original alert-derived target string pod/crashy explicitly. If the target still needs clarification, resolve it first. Prefer run_orchestrated_investigation as the default end-to-end runtime path. Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, advance_investigation_runtime, execute_investigation_step, and update_investigation_plan as lower-level debug or fallback seams rather than the primary path. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
+HTTP_PORT="${HTTP_PORT:-18080}"
+ALERTMANAGER_PORT="${ALERTMANAGER_PORT:-19093}"
+ALERT_PROMPT="${ALERT_PROMPT:-Investigate alert PodCrashLooping for target pod/crashy in namespace ${SMOKE_NAMESPACE}. Preserve alertname=PodCrashLooping and the original alert-derived target string pod/crashy explicitly. If the target still needs clarification, resolve it first. Prefer run_orchestrated_investigation as the default end-to-end runtime path. Treat handoff_active_evidence_batch, get_active_evidence_batch, submit_evidence_step_artifacts, advance_investigation_runtime, execute_investigation_step, and update_investigation_plan as lower-level debug or fallback seams rather than the primary path. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.}"
 CLUSTER_PREEXISTED=0
+HTTP_URL="http://127.0.0.1:${HTTP_PORT}"
+ALERTMANAGER_URL="http://127.0.0.1:${ALERTMANAGER_PORT}"
+REPORT_PATH="/tmp/kind-validate-alert-entry-report.json"
+RUNTIME_LOG_PATH="/tmp/kind-validate-alert-entry-runtime.log"
+ALERTMANAGER_LOG_PATH="/tmp/kind-validate-alert-entry-alertmanager.log"
+ALERTMANAGER_MCP_LOG_PATH="/tmp/kind-validate-alert-entry-alertmanager-mcp.log"
+ALERT_PORT_FORWARD_LOG_PATH="/tmp/kind-validate-alert-entry-alertmanager-portforward.log"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
@@ -71,6 +80,45 @@ wait_for_unhealthy_pod() {
   echo "Timed out waiting for an unhealthy pod in namespace ${namespace}" >&2
   kubectl -n "${namespace}" get pods >&2 || true
   exit 1
+}
+
+wait_for_http_ready() {
+  local attempts="${1:-45}"
+  local sleep_seconds="${2:-2}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    if curl -fsS "${HTTP_URL}/healthz" >/dev/null; then
+      return 0
+    fi
+    sleep "${sleep_seconds}"
+  done
+
+  echo "Timed out waiting for investigation HTTP endpoint readiness" >&2
+  exit 1
+}
+
+wait_for_alertmanager_ready() {
+  local attempts="${1:-45}"
+  local sleep_seconds="${2:-2}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    if curl -fsS "${ALERTMANAGER_URL}/-/ready" >/dev/null; then
+      return 0
+    fi
+    sleep "${sleep_seconds}"
+  done
+
+  echo "Timed out waiting for Alertmanager readiness" >&2
+  exit 1
+}
+
+start_alertmanager_port_forward() {
+  if [[ -n "${alertmanager_port_forward_pid:-}" ]]; then
+    kill "${alertmanager_port_forward_pid}" >/dev/null 2>&1 || true
+    wait "${alertmanager_port_forward_pid}" 2>/dev/null || true
+  fi
+  kubectl --context "${KIND_CONTEXT}" -n kagent port-forward svc/alertmanager "${ALERTMANAGER_PORT}:9093" >"${ALERT_PORT_FORWARD_LOG_PATH}" 2>&1 &
+  alertmanager_port_forward_pid=$!
 }
 
 wait_for_namespace_ready() {
@@ -175,12 +223,39 @@ PY
 }
 
 cleanup() {
+  status=$?
+  if kubectl --context "${KIND_CONTEXT}" -n kagent get deploy/investigation-service >/dev/null 2>&1; then
+    kubectl --context "${KIND_CONTEXT}" -n kagent logs deploy/investigation-service >"${RUNTIME_LOG_PATH}" 2>&1 || true
+  fi
+  if kubectl --context "${KIND_CONTEXT}" -n kagent get deploy/alertmanager >/dev/null 2>&1; then
+    kubectl --context "${KIND_CONTEXT}" -n kagent logs deploy/alertmanager >"${ALERTMANAGER_LOG_PATH}" 2>&1 || true
+  fi
+  if kubectl --context "${KIND_CONTEXT}" -n kagent get deploy/alertmanager-mcp-server >/dev/null 2>&1; then
+    kubectl --context "${KIND_CONTEXT}" -n kagent logs deploy/alertmanager-mcp-server >"${ALERTMANAGER_MCP_LOG_PATH}" 2>&1 || true
+  fi
+  if [[ $status -ne 0 ]]; then
+    echo "Alert entry validation failed. Debug artifacts:"
+    echo "  report: ${REPORT_PATH}"
+    echo "  runtime logs: ${RUNTIME_LOG_PATH}"
+    echo "  alertmanager logs: ${ALERTMANAGER_LOG_PATH}"
+    echo "  alertmanager MCP logs: ${ALERTMANAGER_MCP_LOG_PATH}"
+    echo "  alertmanager port-forward log: ${ALERT_PORT_FORWARD_LOG_PATH}"
+  fi
+  if [[ -n "${http_port_forward_pid:-}" ]]; then
+    kill "${http_port_forward_pid}" >/dev/null 2>&1 || true
+    wait "${http_port_forward_pid}" 2>/dev/null || true
+  fi
+  if [[ -n "${alertmanager_port_forward_pid:-}" ]]; then
+    kill "${alertmanager_port_forward_pid}" >/dev/null 2>&1 || true
+    wait "${alertmanager_port_forward_pid}" 2>/dev/null || true
+  fi
   if [[ "${KEEP_SMOKE}" != "1" ]]; then
     run_make operator-smoke-clean >/dev/null 2>&1 || true
   fi
   if [[ "${KEEP_CLUSTER}" == "0" && "${CLUSTER_PREEXISTED}" == "0" ]]; then
     run_make kind-down >/dev/null 2>&1 || true
   fi
+  return $status
 }
 trap cleanup EXIT
 
@@ -191,6 +266,7 @@ need_cmd kagent
 need_cmd docker
 need_cmd go
 need_cmd python3
+need_cmd curl
 
 if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   echo "OPENAI_API_KEY is required" >&2
@@ -198,8 +274,19 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
 fi
 
 ensure_kind_stack
+echo "==> Enabling HTTP validation overlay"
+run_make kind-enable-http-debug
+echo "==> Enabling Alertmanager overlay"
+run_make kind-enable-alertmanager-debug
 ensure_operator_stack
 wait_for_namespace_ready "${SMOKE_NAMESPACE}"
+
+echo "==> Port-forwarding investigation service and Alertmanager"
+kubectl --context "${KIND_CONTEXT}" -n kagent port-forward svc/investigation-service "${HTTP_PORT}:8080" >/tmp/kind-validate-alert-entry-http.log 2>&1 &
+http_port_forward_pid=$!
+start_alertmanager_port_forward
+wait_for_http_ready
+wait_for_alertmanager_ready
 
 echo "==> Applying operator smoke workload"
 run_make operator-smoke-apply
@@ -217,6 +304,47 @@ wait_for_crashloop_evidence "${SMOKE_NAMESPACE}" "${crashy_pod}"
 tmp_dir="$(mktemp -d)"
 alert_raw="${tmp_dir}/alert.raw"
 alert_output="${tmp_dir}/alert.md"
+
+echo "==> Resetting Alertmanager and injecting a synthetic active alert"
+kubectl --context "${KIND_CONTEXT}" -n kagent rollout restart deploy/alertmanager >/dev/null
+kubectl --context "${KIND_CONTEXT}" -n kagent rollout status deploy/alertmanager --timeout=180s
+start_alertmanager_port_forward
+wait_for_alertmanager_ready
+python3 - "${ALERTMANAGER_URL}" "${SMOKE_NAMESPACE}" <<'PY'
+import json
+import sys
+import urllib.request
+from datetime import datetime, timedelta, timezone
+
+base_url, namespace = sys.argv[1], sys.argv[2]
+now = datetime.now(timezone.utc)
+payload = [
+    {
+        "labels": {
+            "alertname": "PodCrashLooping",
+            "namespace": namespace,
+            "pod": "crashy",
+            "severity": "critical",
+        },
+        "annotations": {
+            "summary": "Synthetic PodCrashLooping alert for deterministic local validation",
+            "description": "The alert preserves the original target as pod/crashy while runtime resolution may land on a concrete replica pod.",
+        },
+        "startsAt": (now - timedelta(minutes=2)).isoformat().replace("+00:00", "Z"),
+        "endsAt": (now + timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+        "generatorURL": "http://synthetic.local/alerts/PodCrashLooping",
+    }
+]
+req = urllib.request.Request(
+    f"{base_url.rstrip('/')}/api/v2/alerts",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(req, timeout=10) as response:
+    if response.status not in (200, 202):
+        raise SystemExit(f"unexpected alert injection status: {response.status}")
+PY
 
 echo "==> Running planner-led alert prompt through the agent path"
 run_make kagent-smoke-test TASK="${ALERT_PROMPT}" >"${alert_raw}"
@@ -266,6 +394,117 @@ if pod_name not in body:
     raise AssertionError("expected resolved crashy pod context in final output")
 if "BackOff" not in body and "CrashLoopBackOff" not in body and "crash loop" not in body.lower():
     raise AssertionError("expected crash-loop evidence in alert output")
+PY
+
+echo "==> Verifying structured provenance with a matching active alert"
+python3 - "${HTTP_URL}" "${SMOKE_NAMESPACE}" "${REPORT_PATH}" <<'PY'
+import json
+import sys
+import urllib.request
+
+http_url, namespace, report_path = sys.argv[1], sys.argv[2], sys.argv[3]
+payload = {
+    "namespace": namespace,
+    "alertname": "PodCrashLooping",
+    "labels": {
+        "namespace": namespace,
+        "pod": "crashy",
+        "severity": "critical",
+    },
+    "annotations": {
+        "summary": "Synthetic PodCrashLooping alert for deterministic local validation",
+        "description": "The alert preserves the original target as pod/crashy while runtime resolution may land on a concrete replica pod.",
+    },
+    "lookback_minutes": 15,
+    "include_related_data": False,
+}
+req = urllib.request.Request(
+    f"{http_url.rstrip('/')}/tools/run_orchestrated_investigation",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(req, timeout=60) as response:
+    report = json.loads(response.read().decode("utf-8"))
+
+with open(report_path, "w", encoding="utf-8") as handle:
+    json.dump(report, handle, indent=2, sort_keys=True)
+
+trace = report.get("tool_path_trace") or {}
+assert trace.get("planner_path_used") is True, report
+step_provenance = trace.get("step_provenance") or []
+alert_steps = [item for item in step_provenance if item.get("step_id") == "collect-alert-evidence"]
+assert alert_steps, report
+alert_provenance = alert_steps[0]["provenance"]
+alert_route = alert_provenance.get("actual_route") or {}
+assert alert_route.get("mcp_server") == "alertmanager-mcp-server", alert_provenance
+assert alert_route.get("tool_name") == "alertmanager_list_alerts", alert_provenance
+
+target_steps = [item for item in step_provenance if item.get("step_id") == "collect-target-evidence"]
+assert target_steps, report
+target_route = (target_steps[0]["provenance"].get("actual_route") or {})
+assert target_route.get("mcp_server") != "alertmanager-mcp-server", target_steps[0]
+print("structured active-alert provenance verified")
+PY
+
+echo "==> Resetting Alertmanager to verify the no-match path"
+kubectl --context "${KIND_CONTEXT}" -n kagent rollout restart deploy/alertmanager >/dev/null
+kubectl --context "${KIND_CONTEXT}" -n kagent rollout status deploy/alertmanager --timeout=180s
+start_alertmanager_port_forward
+wait_for_alertmanager_ready
+
+python3 - "${HTTP_URL}" "${SMOKE_NAMESPACE}" "${REPORT_PATH}" <<'PY'
+import json
+import sys
+import urllib.request
+
+http_url, namespace, report_path = sys.argv[1], sys.argv[2], sys.argv[3]
+payload = {
+    "namespace": namespace,
+    "alertname": "PodCrashLooping",
+    "labels": {
+        "namespace": namespace,
+        "pod": "crashy",
+        "severity": "critical",
+    },
+    "annotations": {
+        "summary": "Synthetic PodCrashLooping alert for deterministic local validation",
+        "description": "The alert preserves the original target as pod/crashy while runtime resolution may land on a concrete replica pod.",
+    },
+    "lookback_minutes": 15,
+    "include_related_data": False,
+}
+req = urllib.request.Request(
+    f"{http_url.rstrip('/')}/tools/run_orchestrated_investigation",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(req, timeout=60) as response:
+    report = json.loads(response.read().decode("utf-8"))
+
+with open(report_path, "w", encoding="utf-8") as handle:
+    json.dump(report, handle, indent=2, sort_keys=True)
+
+trace = report.get("tool_path_trace") or {}
+assert trace.get("planner_path_used") is True, report
+step_provenance = trace.get("step_provenance") or []
+alert_steps = [item for item in step_provenance if item.get("step_id") == "collect-alert-evidence"]
+assert alert_steps, report
+alert_provenance = alert_steps[0]["provenance"]
+alert_route = alert_provenance.get("actual_route") or {}
+assert alert_route.get("mcp_server") == "alertmanager-mcp-server", alert_provenance
+assert alert_route.get("tool_name") == "alertmanager_list_alerts", alert_provenance
+
+limitations = report.get("limitations") or []
+expected = "no matching active Alertmanager alert found for the supplied alert identity"
+assert expected in limitations, limitations
+
+target_steps = [item for item in step_provenance if item.get("step_id") == "collect-target-evidence"]
+assert target_steps, report
+target_route = (target_steps[0]["provenance"].get("actual_route") or {})
+assert target_route.get("mcp_server") != "alertmanager-mcp-server", target_steps[0]
+print("structured no-match alert provenance verified")
 PY
 
 echo "==> Planner-led alert validation passed"

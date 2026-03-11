@@ -91,7 +91,7 @@ def _planner_deps() -> PlannerDeps:
         get_frontend_cr=get_frontend_cr,
         get_cluster_cr=get_cluster_cr,
         find_unhealthy_pod=find_unhealthy_pod,
-        collect_alert_evidence=collect_alert_evidence,
+        collect_alert_evidence=collect_alert_state_evidence,
         collect_node_evidence=collect_node_evidence,
         collect_service_evidence=collect_service_evidence,
         collect_workload_evidence=collect_workload_evidence,
@@ -103,6 +103,12 @@ def collect_alert_evidence(req):
     from .tools import collect_alert_evidence as collect_alert_evidence_impl
 
     return collect_alert_evidence_impl(req)
+
+
+def collect_alert_state_evidence(req):
+    from .tools import collect_alert_state_evidence as collect_alert_state_evidence_impl
+
+    return collect_alert_state_evidence_impl(req)
 
 
 def collect_workload_evidence(req):

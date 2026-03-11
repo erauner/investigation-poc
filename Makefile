@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp validate-loki-phase1 validate-loki-phase1-deterministic kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-build-loki-mcp-image kind-load-loki-mcp-image kind-enable-http-debug kind-enable-loki-debug kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-loki-complementary kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
+.PHONY: install test run run-mcp validate-loki-phase1 validate-loki-phase1-deterministic kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-build-loki-mcp-image kind-load-loki-mcp-image kind-build-alertmanager-mcp-image kind-load-alertmanager-mcp-image kind-enable-http-debug kind-enable-loki-debug kind-enable-alertmanager-debug kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-loki-complementary kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -12,6 +12,7 @@ INVESTIGATION_IMAGE ?= investigation-poc:local
 SHADOW_IMAGE ?= investigation-shadow-runtime:local
 METRICS_SMOKE_IMAGE ?= metrics-smoke-app:local
 LOKI_MCP_IMAGE ?= loki-mcp-server:local
+ALERTMANAGER_MCP_IMAGE ?= alertmanager-mcp-server:local
 HOMELAB_OPERATOR_DIR ?= ../homelab-operator
 OPERATOR_IMAGE ?= homelab-operator:local
 
@@ -85,6 +86,12 @@ kind-build-loki-mcp-image:
 kind-load-loki-mcp-image:
 	@kind load docker-image "$(LOKI_MCP_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
 
+kind-build-alertmanager-mcp-image:
+	@docker build -f Dockerfile.alertmanager-mcp -t "$(ALERTMANAGER_MCP_IMAGE)" .
+
+kind-load-alertmanager-mcp-image:
+	@kind load docker-image "$(ALERTMANAGER_MCP_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
+
 kagent-smoke-apply:
 	@./scripts/smoke-workload.sh apply
 
@@ -148,7 +155,6 @@ kind-install-kagent:
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -k "$(K8S_OVERLAY)"
 	@kubectl apply -f k8s/modelconfig.yaml
-	@kubectl apply -f k8s/agent.yaml
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/investigation-mcp-server >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-controller --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-ui --timeout=180s
@@ -189,6 +195,16 @@ kind-enable-loki-debug:
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status daemonset/promtail --timeout=240s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/loki-mcp-server >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/loki-mcp-server --timeout=240s
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/investigation-service >/dev/null 2>&1 || true
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-service --timeout=180s
+
+kind-enable-alertmanager-debug:
+	@$(MAKE) kind-build-alertmanager-mcp-image
+	@$(MAKE) kind-load-alertmanager-mcp-image
+	@kubectl apply -k k8s-overlays/local-kind-optional-alertmanager
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/alertmanager --timeout=180s
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/alertmanager-mcp-server >/dev/null 2>&1 || true
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/alertmanager-mcp-server --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/investigation-service >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-service --timeout=180s
 

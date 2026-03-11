@@ -3,6 +3,7 @@ import logging
 
 from investigation_orchestrator import evidence_runner
 from investigation_orchestrator.mcp_clients import (
+    AlertmanagerAlertSnapshot,
     NodePodSummarySnapshot,
     NodeMetricsSnapshot,
     NodeRuntimeSnapshot,
@@ -120,6 +121,32 @@ def _node_step() -> EvidenceStepContract:
     )
 
 
+def _alert_step() -> EvidenceStepContract:
+    return EvidenceStepContract(
+        step_id="collect-alert-evidence",
+        title="Collect alert evidence",
+        plane="alert",
+        artifact_type="evidence_bundle",
+        requested_capability="alert_evidence_plane",
+        preferred_mcp_server="alertmanager-mcp-server",
+        preferred_tool_names=["alertmanager_list_alerts"],
+        fallback_mcp_server=None,
+        fallback_tool_names=[],
+        execution_mode="external_preferred",
+        execution_inputs=StepExecutionInputs(
+            request_kind="alert_context",
+            cluster=None,
+            namespace="operator-smoke",
+            target="pod/crashy",
+            profile="workload",
+            alertname="PodCrashLooping",
+            labels={"pod": "crashy"},
+            annotations={"summary": "CrashLoop"},
+            lookback_minutes=15,
+        ),
+    )
+
+
 def test_workload_external_step_prefers_peer_mcp(monkeypatch) -> None:
     step = _workload_step()
 
@@ -156,8 +183,62 @@ def test_workload_external_step_prefers_peer_mcp(monkeypatch) -> None:
         "events_list",
         "pods_log",
     ]
+
+
+def test_alert_external_step_uses_alertmanager_peer_and_materializes_alert_state(monkeypatch) -> None:
+    step = _alert_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_alertmanager_mcp_client",
+        type(
+            "AlertmanagerStub",
+            (),
+            {
+                "is_configured": lambda _self: True,
+                "collect_alert_state": lambda _self, _inputs: AlertmanagerAlertSnapshot(
+                    cluster_alias="erauner-home",
+                    alerts=[
+                        {
+                            "fingerprint": "abc",
+                            "labels": {"alertname": "PodCrashLooping", "pod": "crashy"},
+                            "annotations": {"summary": "CrashLoop"},
+                        }
+                    ],
+                    tool_path=["alertmanager-mcp-server", "alertmanager_list_alerts"],
+                ),
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.actual_route.mcp_server == "alertmanager-mcp-server"
+    assert artifact.actual_route.tool_name == "alertmanager_list_alerts"
     assert artifact.evidence_bundle is not None
-    assert "peer partial: events only from namespace scope" in artifact.evidence_bundle.limitations
+    assert artifact.evidence_bundle.object_state["matchedAlerts"][0]["fingerprint"] == "abc"
+    assert artifact.evidence_bundle.metrics["matched_alert_count"] == 1
+
+
+def test_alert_external_step_records_attempt_only_when_alertmanager_fails(monkeypatch) -> None:
+    step = _alert_step()
+    monkeypatch.setattr(
+        evidence_runner,
+        "_alertmanager_mcp_client",
+        type(
+            "AlertmanagerStub",
+            (),
+            {
+                "is_configured": lambda _self: True,
+                "collect_alert_state": lambda _self, _inputs: (_ for _ in ()).throw(PeerMcpError("alertmanager down")),
+            },
+        )(),
+    )
+
+    artifact = evidence_runner._submitted_artifact(step)
+
+    assert artifact.evidence_bundle is None
+    assert artifact.actual_route.mcp_server == "alertmanager-mcp-server"
+    assert "peer alertmanager MCP attempt failed: alertmanager down" in artifact.limitations
 
 
 def test_workload_external_step_records_failed_peer_attempt_for_downstream_fallback(monkeypatch) -> None:

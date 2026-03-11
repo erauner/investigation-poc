@@ -29,6 +29,8 @@ from investigation_service.prom_adapter import (
     service_metric_range_query_families,
 )
 from investigation_service.settings import (
+    get_alertmanager_mcp_url,
+    get_alertmanager_url,
     get_cluster_name,
     get_default_cluster_alias,
     get_kubernetes_mcp_url,
@@ -92,6 +94,14 @@ class LokiLogsSnapshot:
     cluster_alias: str
     target: TargetRef
     log_excerpt: str
+    limitations: list[str] = field(default_factory=list)
+    tool_path: list[str] = field(default_factory=list)
+
+
+@dataclass
+class AlertmanagerAlertSnapshot:
+    cluster_alias: str
+    alerts: list[dict[str, Any]]
     limitations: list[str] = field(default_factory=list)
     tool_path: list[str] = field(default_factory=list)
 
@@ -217,8 +227,113 @@ def _format_loki_window(minutes: int | None) -> str:
     ).isoformat().replace("+00:00", "Z")
 
 
+def _format_window_end() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _build_workload_loki_query(target: TargetRef, runtime_pod_name: str) -> str:
     return f'{{namespace="{target.namespace}",pod="{runtime_pod_name}"}}'
+
+
+def _normalize_alertmanager_alerts(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, dict):
+        raw = raw.get("alerts", raw.get("data", raw))
+    if not isinstance(raw, list):
+        raise PeerMcpError("alertmanager_list_alerts returned malformed payload")
+    normalized: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        labels = item.get("labels") or {}
+        annotations = item.get("annotations") or {}
+        if not isinstance(labels, dict) or not isinstance(annotations, dict):
+            continue
+        fingerprint = item.get("fingerprint")
+        starts_at = item.get("startsAt")
+        ends_at = item.get("endsAt")
+        key = (
+            fingerprint,
+            tuple(sorted((str(k), str(v)) for k, v in labels.items())),
+            starts_at,
+            ends_at,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(
+            {
+                "fingerprint": fingerprint,
+                "status": item.get("status") or {},
+                "labels": {str(k): str(v) for k, v in labels.items()},
+                "annotations": {str(k): str(v) for k, v in annotations.items()},
+                "startsAt": starts_at,
+                "endsAt": ends_at,
+                "updatedAt": item.get("updatedAt"),
+                "generatorURL": item.get("generatorURL"),
+            }
+        )
+    normalized.sort(key=lambda item: (item.get("startsAt") or "", item.get("fingerprint") or ""), reverse=True)
+    return normalized
+
+
+def _alert_identity_filters(inputs: StepExecutionInputs) -> dict[str, str]:
+    filters: dict[str, str] = {}
+    if not inputs.alertname:
+        raise PeerMcpError("alertmanager peer transport requires alertname")
+    filters["alertname"] = inputs.alertname
+    labels = inputs.labels or {}
+    identity_groups = {
+        "namespace": ("namespace", "kubernetes_namespace", "exported_namespace"),
+        "pod": ("pod", "pod_name", "kubernetes_pod_name"),
+        "service": ("service", "service_name"),
+        "deployment": ("deployment", "deployment_name", "kubernetes_deployment_name"),
+        "statefulset": ("statefulset", "statefulset_name", "kubernetes_statefulset_name"),
+        "node": ("node", "node_name", "kubernetes_node", "instance"),
+    }
+    allowed_keys = {alias for aliases in identity_groups.values() for alias in aliases}
+    for key, value in labels.items():
+        if key in allowed_keys and value:
+            filters[key] = value
+    if inputs.namespace and not any(key in filters for key in identity_groups["namespace"]):
+        filters["namespace"] = inputs.namespace
+
+    def _has_identity(group: str) -> bool:
+        return any(alias in filters for alias in identity_groups[group])
+
+    if inputs.service_name and not _has_identity("service"):
+        filters["service"] = inputs.service_name
+    if inputs.node_name and not _has_identity("node"):
+        filters["node"] = inputs.node_name
+
+    target_value = (inputs.target or "").strip()
+    if "/" in target_value:
+        target_kind, target_name = target_value.split("/", 1)
+        target_kind = target_kind.strip().lower()
+        target_name = target_name.strip()
+        fallback_key = {
+            "pod": "pod",
+            "deployment": "deployment",
+            "service": "service",
+            "node": "node",
+            "statefulset": "statefulset",
+        }.get(target_kind)
+        if fallback_key and target_name and not _has_identity(fallback_key):
+            filters[fallback_key] = target_name
+    return filters
+
+
+def _peer_alertmanager_routing_unsupported(cluster, requested_cluster: str | None) -> bool:
+    requested_alias = (requested_cluster or "").strip().lower() or None
+    local_aliases = {
+        alias.strip().lower()
+        for alias in (get_default_cluster_alias(), get_cluster_name(), "local-kind", "current-context")
+        if alias
+    }
+    resolved_alias = (cluster.alias or "").strip().lower()
+    if resolved_alias in local_aliases or (requested_alias and requested_alias in local_aliases):
+        return False
+    return bool(cluster.alertmanager_url and cluster.alertmanager_url != get_alertmanager_url()) or resolved_alias not in local_aliases
 
 
 def _service_loki_pod_candidates(object_state: dict[str, Any] | None, *, max_pods: int = 5) -> tuple[str, ...]:
@@ -1339,6 +1454,89 @@ class LokiMcpClient:
                     object_state=object_state,
                 )
             )
+        except PeerMcpError:
+            raise
+        except Exception as exc:
+            raise PeerMcpError(_peer_error_message(exc)) from exc
+
+
+class AlertmanagerMcpClient:
+    def __init__(self, *, url: str | None = None, timeout_seconds: float | None = None):
+        self.url = url if url is not None else get_alertmanager_mcp_url()
+        self.timeout_seconds = timeout_seconds or get_peer_mcp_timeout_seconds()
+
+    def is_configured(self) -> bool:
+        return bool(self.url)
+
+    async def _call_tool(self, session: ClientSession, tool_name: str, arguments: dict[str, Any]) -> Any:
+        result = await session.call_tool(tool_name, arguments)
+        if getattr(result, "isError", False):
+            raise PeerMcpError(f"{tool_name} returned MCP error")
+        return _extract_content(result)
+
+    async def _collect_async(self, inputs: StepExecutionInputs) -> AlertmanagerAlertSnapshot:
+        if not self.url:
+            raise PeerMcpError("alertmanager peer transport is not configured")
+        cluster = resolve_cluster(inputs.cluster, labels=inputs.labels)
+        if _peer_alertmanager_routing_unsupported(cluster, inputs.cluster):
+            raise PeerMcpError("peer Alertmanager transport does not yet support multicluster alertmanager routing")
+        filters = _alert_identity_filters(inputs)
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout_seconds)) as http_client:
+            async with streamable_http_client(self.url, http_client=http_client) as (
+                read_stream,
+                write_stream,
+                _get_session_id,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    raw = await self._call_tool(
+                        session,
+                        "alertmanager_list_alerts",
+                        {
+                            "labelFilters": filters,
+                            "active": True,
+                            "silenced": False,
+                            "inhibited": False,
+                            "unprocessed": False,
+                        },
+                    )
+                    return AlertmanagerAlertSnapshot(
+                        cluster_alias=cluster.alias,
+                        alerts=_normalize_alertmanager_alerts(raw),
+                        tool_path=["alertmanager-mcp-server", "alertmanager_list_alerts"],
+                    )
+
+    def collect_alert_state(self, inputs: StepExecutionInputs) -> AlertmanagerAlertSnapshot:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = False
+        else:
+            running_loop = True
+
+        if running_loop:
+            result: dict[str, AlertmanagerAlertSnapshot] = {}
+            error: dict[str, Exception] = {}
+
+            def _runner() -> None:
+                try:
+                    result["snapshot"] = anyio.run(lambda: self._collect_async(inputs))
+                except Exception as exc:  # pragma: no cover
+                    error["exception"] = exc
+
+            thread = threading.Thread(target=_runner, daemon=True)
+            thread.start()
+            thread.join()
+            if "exception" in error:
+                exc = error["exception"]
+                if isinstance(exc, PeerMcpError):
+                    raise exc
+                raise PeerMcpError(_peer_error_message(exc)) from exc
+            return result["snapshot"]
+
+        try:
+            return anyio.run(lambda: self._collect_async(inputs))
         except PeerMcpError:
             raise
         except Exception as exc:

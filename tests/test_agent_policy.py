@@ -209,8 +209,8 @@ def test_execution_policy_preferred_tool_names_are_backed_by_manifest_catalogs()
     assert set(service_policy.preferred_tool_names) <= prometheus_tools
     assert set(node_policy.preferred_tool_names) <= prometheus_tools
     assert alert_policy is not None
-    assert alert_policy.preferred_mcp_server is None
-    assert alert_policy.preferred_tool_names == ()
+    assert alert_policy.preferred_mcp_server == "alertmanager-mcp-server"
+    assert alert_policy.preferred_tool_names == ("alertmanager_list_alerts",)
     assert alert_policy.fallback_mcp_server is None
     assert alert_policy.fallback_tool_names == ()
 
@@ -219,6 +219,12 @@ def test_optional_loki_overlay_adds_manifest_and_tool_catalog() -> None:
     manifest = _load_yaml("k8s-overlays/local-kind-optional-loki/kustomization.yaml")
 
     assert "../../k8s/optional-loki-mcp" in manifest["resources"]
+
+
+def test_optional_alertmanager_overlay_adds_manifest_and_tool_catalog() -> None:
+    manifest = _load_yaml("k8s-overlays/local-kind-optional-alertmanager/kustomization.yaml")
+
+    assert "../../k8s/optional-alertmanager-mcp" in manifest["resources"]
     patch_targets = [item.get("target", {}) for item in manifest["patches"] if isinstance(item, dict)]
     assert any(target.get("kind") == "Agent" and target.get("name") == "incident-triage" for target in patch_targets)
 
