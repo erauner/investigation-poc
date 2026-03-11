@@ -100,6 +100,26 @@ def test_parse_shadow_task_does_not_accept_unsupported_job_or_daemonset_targets(
     assert captured["request"].target is None
 
 
+def test_parse_shadow_task_rejects_unsupported_text_job_target_end_to_end() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: job"):
+        parse_shadow_task("Investigate job/backup-runner in namespace ops.")
+
+
+def test_parse_shadow_task_rejects_unsupported_json_job_target_end_to_end() -> None:
+    with pytest.raises(ValueError, match="unsupported investigation subject kind: job"):
+        parse_shadow_task('{"namespace":"ops","target":"job/backup-runner"}')
+
+
+def test_parse_shadow_task_rejects_backend_without_namespace_in_json() -> None:
+    with pytest.raises(ValueError, match="namespace is required for Backend targets"):
+        parse_shadow_task('{"target":"Backend/api"}')
+
+
+def test_parse_shadow_task_rejects_frontend_without_namespace_in_json() -> None:
+    with pytest.raises(ValueError, match="namespace is required for Frontend targets"):
+        parse_shadow_task('{"target":"Frontend/api"}')
+
+
 def test_format_shadow_report_uses_fixed_sections() -> None:
     report = InvestigationReport(
         cluster="erauner-home",

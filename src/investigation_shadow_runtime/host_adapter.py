@@ -87,10 +87,25 @@ def _parsed_json_request(task: str) -> InvestigationReportRequest | None:
     return InvestigationReportRequest.model_validate(payload)
 
 
+def _canonicalize_request(request: InvestigationReportRequest) -> InvestigationReportRequest:
+    resolved = resolve_primary_target(request)
+
+    return request.model_copy(
+        update={
+            "cluster": resolved.cluster or request.cluster,
+            "namespace": resolved.namespace or request.namespace,
+            "target": resolved.target,
+            "profile": resolved.profile,
+            "service_name": resolved.service_name or request.service_name,
+            "node_name": resolved.node_name or request.node_name,
+        }
+    )
+
+
 def parse_shadow_task(task: str) -> InvestigationReportRequest:
     parsed_json = _parsed_json_request(task)
     if parsed_json is not None:
-        return parsed_json
+        return _canonicalize_request(parsed_json)
 
     fields = _field_map(task)
     target = _explicit_target(task)
@@ -137,18 +152,7 @@ def parse_shadow_task(task: str) -> InvestigationReportRequest:
         annotations={},
         node_name=node_name,
     )
-    resolved = resolve_primary_target(request)
-
-    return request.model_copy(
-        update={
-            "cluster": resolved.cluster or request.cluster,
-            "namespace": resolved.namespace or request.namespace,
-            "target": resolved.target,
-            "profile": resolved.profile,
-            "service_name": resolved.service_name or request.service_name,
-            "node_name": resolved.node_name or request.node_name,
-        }
-    )
+    return _canonicalize_request(request)
 
 
 def format_shadow_report(report: InvestigationReport) -> str:

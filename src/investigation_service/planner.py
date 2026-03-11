@@ -302,7 +302,7 @@ def component_target(kind: str, name: str, profile: str) -> tuple[str, str, str,
     if lowered == "service":
         return (f"service/{name}", "service", "service", name)
     if lowered == "statefulset":
-        return (f"deployment/{name}", "workload", "workload", None)
+        return (f"statefulset/{name}", "workload", "workload", None)
     raise ValueError(f"unsupported cluster component kind for investigation: {kind}")
 
 
