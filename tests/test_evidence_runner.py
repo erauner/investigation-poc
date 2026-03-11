@@ -90,7 +90,7 @@ def _service_follow_up_step() -> EvidenceStepContract:
         update={
             "step_id": "collect-service-follow-up-evidence",
             "title": "Collect service follow-up evidence",
-            "exploration_intent": "follow_up",
+            "exploration_intent": "evidence_expansion",
         }
     )
 
@@ -1939,8 +1939,8 @@ def test_external_steps_still_require_non_workload_submission(monkeypatch) -> No
 
     monkeypatch.setattr(
         evidence_runner,
-        "_submitted_artifact",
-        lambda _step: None,
+        "_submitted_artifact_and_outcome",
+        lambda _step: (None, None),
     )
 
     try:

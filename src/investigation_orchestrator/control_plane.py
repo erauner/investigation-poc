@@ -3,6 +3,7 @@ from investigation_service.models import (
     AdvanceInvestigationRuntimeRequest,
     AdvanceInvestigationRuntimeResponse,
     BuildInvestigationPlanRequest,
+    ExplorationOutcome,
     GetActiveEvidenceBatchRequest,
     InvestigationReport,
     InvestigationReportingRequest,
@@ -50,6 +51,7 @@ def advance_batch(
     execution_context: ReportingExecutionContext,
     *,
     submitted_steps: list[SubmittedStepArtifact],
+    exploration_outcomes: list[ExplorationOutcome] | None = None,
     batch_id: str | None = None,
 ) -> AdvanceInvestigationRuntimeResponse:
     return reporting.advance_investigation_runtime(
@@ -58,7 +60,8 @@ def advance_batch(
             execution_context=execution_context,
             submitted_steps=submitted_steps,
             batch_id=batch_id,
-        )
+        ),
+        exploration_outcomes=exploration_outcomes,
     )
 
 

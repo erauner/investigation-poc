@@ -11,7 +11,12 @@ from investigation_service.exploration import (
     build_bounded_scout_observation,
     build_exploratory_scout_context,
 )
-from investigation_service.models import ActualRoute, EvidenceStepContract, SubmittedStepArtifact
+from investigation_service.models import (
+    ActualRoute,
+    EvidenceStepContract,
+    ExplorationOutcome,
+    SubmittedStepArtifact,
+)
 from investigation_service.submission_materialization import materialize_workload_submission
 
 from .mcp_clients import KubernetesMcpClient, PeerMcpError, WorkloadRuntimeSnapshot
@@ -103,6 +108,7 @@ def maybe_plan_workload_exploration_review(
         adequacy_outcome=baseline_assessment.outcome,
         adequacy_reasons=list(baseline_assessment.reasons),
         proposed_probe=f"Probe one additional runtime pod for {target} excluding {runtime_pod_name}.",
+        intent=scout_context.intent,
         probe_kind="alternate_runtime_pod",
     )
     log_bounded_scout(
@@ -151,7 +157,7 @@ def execute_workload_exploration_review(
     review: PendingExplorationReview,
     *,
     kubernetes_mcp_client: KubernetesMcpClient,
-) -> SubmittedStepArtifact:
+) -> tuple[SubmittedStepArtifact, ExplorationOutcome]:
     if review.decision != "approve":
         raise ValueError("approved workload exploration review is required before executing scout")
 
@@ -172,8 +178,8 @@ def execute_workload_exploration_review(
             batch_id=review.batch_id,
         )
         if baseline_artifact.evidence_bundle is None:
-            return baseline_artifact
-        return baseline_artifact.model_copy(
+            return baseline_artifact, _no_useful_change_outcome(review, note="review_context_not_applicable")
+        artifact = baseline_artifact.model_copy(
             update={
                 "evidence_bundle": baseline_artifact.evidence_bundle.model_copy(
                     update={
@@ -189,6 +195,7 @@ def execute_workload_exploration_review(
                 )
             }
         )
+        return artifact, _no_useful_change_outcome(review, note="review_context_not_applicable")
     budget_usage = ScoutBudgetUsage(
         probe_runs_used=1,
         additional_pods_used=1,
@@ -208,11 +215,12 @@ def execute_workload_exploration_review(
             ),
             batch_id=review.batch_id,
         )
-        return _failed_scout_artifact(
+        artifact = _failed_scout_artifact(
             review.step,
             baseline_artifact=baseline_artifact,
             error_message=f"bounded workload scout failed: {exc}",
         )
+        return artifact, _no_useful_change_outcome(review, note="probe_failed")
 
     scout_artifact = materialize_workload_snapshot(
         review.step,
@@ -235,10 +243,10 @@ def execute_workload_exploration_review(
             ),
             batch_id=review.batch_id,
         )
-        return scout_artifact
+        return scout_artifact, _evidence_delta_outcome(review, note="probe_improved_artifact")
 
     if baseline_artifact.evidence_bundle is None:
-        return baseline_artifact
+        return baseline_artifact, _no_useful_change_outcome(review, note="probe_not_improving")
     log_bounded_scout(
         build_bounded_scout_observation(
             context=scout_context,
@@ -248,14 +256,15 @@ def execute_workload_exploration_review(
         ),
         batch_id=review.batch_id,
     )
-    return baseline_artifact.model_copy(
+    artifact = baseline_artifact.model_copy(
         update={
             "attempted_routes": [*baseline_artifact.attempted_routes, scout_artifact.actual_route],
         }
     )
+    return artifact, _no_useful_change_outcome(review, note="probe_not_improving")
 
 
-def skip_workload_exploration_review(review: PendingExplorationReview) -> SubmittedStepArtifact:
+def skip_workload_exploration_review(review: PendingExplorationReview) -> tuple[SubmittedStepArtifact, ExplorationOutcome]:
     if review.decision != "skip":
         raise ValueError("skip decision is required before skipping workload exploration review")
 
@@ -272,9 +281,9 @@ def skip_workload_exploration_review(review: PendingExplorationReview) -> Submit
             batch_id=review.batch_id,
         )
     if baseline_artifact.evidence_bundle is None:
-        return baseline_artifact
+        return baseline_artifact, _no_useful_change_outcome(review, note="review_skipped")
     note = "bounded workload scout skipped by review decision"
-    return baseline_artifact.model_copy(
+    artifact = baseline_artifact.model_copy(
         update={
             "evidence_bundle": baseline_artifact.evidence_bundle.model_copy(
                 update={
@@ -283,6 +292,7 @@ def skip_workload_exploration_review(review: PendingExplorationReview) -> Submit
             )
         }
     )
+    return artifact, _no_useful_change_outcome(review, note="review_skipped")
 
 
 def maybe_run_bounded_workload_scout(
@@ -292,13 +302,13 @@ def maybe_run_bounded_workload_scout(
     baseline_snapshot: WorkloadRuntimeSnapshot,
     baseline_artifact: SubmittedStepArtifact,
     kubernetes_mcp_client: KubernetesMcpClient,
-) -> SubmittedStepArtifact:
+) -> tuple[SubmittedStepArtifact, ExplorationOutcome | None]:
     review_context = _scout_context(
         scout_context,
         baseline_snapshot=baseline_snapshot,
     )
     if review_context is None:
-        return baseline_artifact
+        return baseline_artifact, None
     baseline_assessment, runtime_pod_name = review_context
     return execute_workload_exploration_review(
         PendingExplorationReview(
@@ -310,8 +320,31 @@ def maybe_run_bounded_workload_scout(
             adequacy_outcome=baseline_assessment.outcome,
             adequacy_reasons=list(baseline_assessment.reasons),
             proposed_probe="auto-approved bounded workload scout",
+            intent=scout_context.intent,
             probe_kind="alternate_runtime_pod",
             decision="approve",
         ),
         kubernetes_mcp_client=kubernetes_mcp_client,
+    )
+
+
+def _evidence_delta_outcome(review: PendingExplorationReview, *, note: str) -> ExplorationOutcome:
+    return ExplorationOutcome(
+        step_id=review.step.step_id,
+        capability=review.capability,
+        intent=review.intent,
+        outcome="evidence_delta",
+        probe_kind=review.probe_kind,
+        notes=[note],
+    )
+
+
+def _no_useful_change_outcome(review: PendingExplorationReview, *, note: str) -> ExplorationOutcome:
+    return ExplorationOutcome(
+        step_id=review.step.step_id,
+        capability=review.capability,
+        intent=review.intent,
+        outcome="no_useful_change",
+        probe_kind=review.probe_kind,
+        notes=[note],
     )

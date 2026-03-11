@@ -1,13 +1,6 @@
 from dataclasses import dataclass
-from typing import Literal
 
-from .models import AdequacyOutcome
-
-ProbeKind = Literal[
-    "alternate_runtime_pod",
-    "service_range_metrics",
-    "node_top_pods",
-]
+from .models import AdequacyOutcome, ProbeKind, ScoutIntent
 
 
 @dataclass(frozen=True)
@@ -24,6 +17,7 @@ class CapabilityPolicy:
 class BoundedExplorationPolicy:
     capability: str
     enabled: bool = False
+    supported_intents: tuple[ScoutIntent, ...] = ("evidence_expansion",)
     max_additional_pods: int = 0
     max_additional_probe_runs: int = 0
     max_metric_families: int = 0
@@ -89,6 +83,7 @@ _BOUNDED_EXPLORATION_POLICIES: dict[str, BoundedExplorationPolicy] = {
         max_additional_probe_runs=1,
         human_review_enabled=True,
         human_review_outcomes=("weak", "contradictory", "blocked"),
+        supported_intents=("evidence_expansion",),
         probe_kinds=("alternate_runtime_pod",),
     ),
     "service_evidence_plane": BoundedExplorationPolicy(
@@ -96,6 +91,7 @@ _BOUNDED_EXPLORATION_POLICIES: dict[str, BoundedExplorationPolicy] = {
         enabled=True,
         max_additional_probe_runs=1,
         max_metric_families=2,
+        supported_intents=("evidence_expansion",),
         probe_kinds=("service_range_metrics",),
     ),
     "node_evidence_plane": BoundedExplorationPolicy(
@@ -103,6 +99,7 @@ _BOUNDED_EXPLORATION_POLICIES: dict[str, BoundedExplorationPolicy] = {
         enabled=True,
         max_additional_probe_runs=1,
         max_related_pods=5,
+        supported_intents=("evidence_expansion",),
         probe_kinds=("node_top_pods",),
     ),
 }

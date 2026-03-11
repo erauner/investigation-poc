@@ -8,8 +8,18 @@ from .adequacy import (
     assess_bundle_for_capability,
     is_scout_candidate,
 )
-from .execution_policy import BoundedExplorationPolicy, ProbeKind, bounded_exploration_policy_for_capability
-from .models import EvidenceBundle, EvidenceStepContract, StepExecutionInputs, SubmittedStepArtifact, TargetRef
+from .execution_policy import BoundedExplorationPolicy, bounded_exploration_policy_for_capability
+from .models import (
+    EvidenceBundle,
+    EvidenceStepContract,
+    InvestigationSubjectRef,
+    PlannerSeedExecutionFocus,
+    ProbeKind,
+    ScoutIntent,
+    StepExecutionInputs,
+    SubmittedStepArtifact,
+    TargetRef,
+)
 
 _METRIC_BOOKKEEPING_KEYS = {
     "profile",
@@ -46,7 +56,11 @@ class ExploratoryScoutContext:
     capability: str
     step_id: str
     plane: str
+    intent: ScoutIntent
     execution_inputs: StepExecutionInputs
+    execution_focus: PlannerSeedExecutionFocus
+    primary_subject: InvestigationSubjectRef | None
+    related_subjects: tuple[InvestigationSubjectRef, ...]
     policy: BoundedExplorationPolicy
     baseline_assessment: EvidenceAdequacyAssessment
     baseline_summary: BaselineEvidenceSummary
@@ -129,6 +143,15 @@ def build_exploratory_scout_context(
     policy = bounded_exploration_policy_for_capability(capability)
     if capability is None or policy is None or not policy.enabled:
         return None
+    intent = step.exploration_intent or "evidence_expansion"
+    if intent == "follow_up":
+        intent = "evidence_expansion"
+    if step.exploration_intent is not None and intent not in policy.supported_intents:
+        raise ValueError(
+            f"exploration intent {step.exploration_intent} is not supported for capability {capability}"
+        )
+    if step.exploration_intent is None and intent not in policy.supported_intents:
+        return None
     bundle = artifact.evidence_bundle
     if bundle is None:
         return None
@@ -145,11 +168,43 @@ def build_exploratory_scout_context(
         capability=capability,
         step_id=step.step_id,
         plane=step.plane,
+        intent=intent,
         execution_inputs=step.execution_inputs,
+        execution_focus=_execution_focus_from_step_inputs(step),
+        primary_subject=step.execution_inputs.primary_subject,
+        related_subjects=tuple(step.execution_inputs.related_subjects),
         policy=policy,
         baseline_assessment=assessment,
         baseline_summary=summary,
         hints=hints,
+    )
+
+
+def _execution_focus_from_step_inputs(step: EvidenceStepContract) -> PlannerSeedExecutionFocus:
+    inputs = step.execution_inputs
+    target = inputs.target
+    if not target:
+        raise ValueError(f"external exploratory step {step.step_id} is missing execution target")
+
+    scope = "workload"
+    if inputs.request_kind == "service_context":
+        scope = "service"
+    elif step.plane == "node" or inputs.node_name:
+        scope = "node"
+
+    profile = inputs.profile
+    if profile is None:
+        if inputs.request_kind == "service_context":
+            profile = "service"
+        else:
+            profile = "workload"
+
+    return PlannerSeedExecutionFocus(
+        scope=scope,
+        target=target,
+        profile=profile,
+        node_name=inputs.node_name,
+        service_name=inputs.service_name,
     )
 
 
