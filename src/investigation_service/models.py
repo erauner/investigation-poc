@@ -54,6 +54,7 @@ class NormalizedInvestigationRequest(BaseModel):
     profile: ProfileType = Field(default="workload", description="Investigation profile")
     lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
     normalization_notes: list[str] = Field(default_factory=list)
+    subject_context: "InvestigationSubjectContext | None" = None
 
 
 class InvestigationTarget(BaseModel):
@@ -68,6 +69,7 @@ class InvestigationTarget(BaseModel):
     profile: ProfileType = Field(default="workload", description="Investigation profile")
     lookback_minutes: int = Field(default=15, ge=1, le=240, description="Metric lookback window in minutes")
     normalization_notes: list[str] = Field(default_factory=list)
+    subject_context: "InvestigationSubjectContext | None" = None
 
 
 class InvestigationIngressRequest(BaseModel):
@@ -137,6 +139,20 @@ class NormalizedInvestigationSubjectSet(BaseModel):
     canonical_focus: InvestigationSubjectRef | None = None
     related_refs: list[InvestigationSubjectRef] = Field(default_factory=list)
     normalization_notes: list[str] = Field(default_factory=list)
+
+
+class InvestigationSubjectContext(BaseModel):
+    resolution_status: Literal[
+        "resolved",
+        "ambiguous_scope",
+        "ambiguous_subject",
+        "unresolved",
+    ]
+    scope: ResolvedIngressScope
+    primary_subject: InvestigationSubjectRef | None = None
+    related_subjects: list[InvestigationSubjectRef] = Field(default_factory=list)
+    competing_subjects: list[InvestigationSubjectRef] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class EvidenceBundle(BaseModel):
@@ -224,6 +240,8 @@ class StepExecutionInputs(BaseModel):
     annotations: dict[str, str] = Field(default_factory=dict)
     anchor_timestamp: str | None = None
     limit: int | None = None
+    primary_subject: InvestigationSubjectRef | None = None
+    related_subjects: list[InvestigationSubjectRef] = Field(default_factory=list)
 
 
 class EvidenceStepContract(BaseModel):

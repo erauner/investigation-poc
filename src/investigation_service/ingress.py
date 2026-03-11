@@ -12,6 +12,7 @@ from .models import (
     FindUnhealthyPodRequest,
     InvestigationIngressRequest,
     InvestigationReportRequest,
+    InvestigationSubjectContext,
     InvestigationSubjectRef,
     NormalizedInvestigationRequest,
     NormalizedInvestigationSubjectSet,
@@ -151,16 +152,24 @@ def normalized_request_from_subject_set(
     subject_set: NormalizedInvestigationSubjectSet,
     deps: IngressDeps,
 ) -> NormalizedInvestigationRequest:
-    if subject_set.scope.ambiguous_clusters:
+    subject_context = subject_context_from_subject_set(subject_set)
+    if subject_context.resolution_status == "ambiguous_scope":
+        if subject_set.scope.ambiguous_clusters:
+            raise ValueError(
+                "bounded ingress ambiguity: cluster scope candidates="
+                + ", ".join(subject_set.scope.ambiguous_clusters)
+            )
         raise ValueError(
-            "cluster scope is ambiguous: " + ", ".join(subject_set.scope.ambiguous_clusters)
-        )
-    if subject_set.scope.ambiguous_namespaces:
-        raise ValueError(
-            "namespace scope is ambiguous: " + ", ".join(subject_set.scope.ambiguous_namespaces)
+            "bounded ingress ambiguity: namespace scope candidates="
+            + ", ".join(subject_set.scope.ambiguous_namespaces)
         )
     focus = subject_set.canonical_focus
     if focus is None:
+        if subject_context.resolution_status == "ambiguous_subject":
+            raise ValueError(
+                "bounded ingress ambiguity: competing primary subjects="
+                + ", ".join(_subject_ref_string(ref) for ref in subject_context.competing_subjects)
+            )
         raise ValueError("no canonical investigation subject could be resolved from ingress input")
 
     normalized = _normalized_request_for_focus(subject_set, focus, deps)
@@ -173,7 +182,8 @@ def normalized_request_from_subject_set(
                 f"{_subject_ref_string(ref)} ({ref.relation})" for ref in subject_set.related_refs
             )
         )
-    return normalized.model_copy(update={"normalization_notes": notes})
+    subject_context = subject_context.model_copy(update={"notes": list(notes)})
+    return normalized.model_copy(update={"normalization_notes": notes, "subject_context": subject_context})
 
 
 def canonical_focus_ref(
@@ -186,6 +196,36 @@ def canonical_focus_ref(
     if focus is None:
         return None
     return _subject_ref_string(focus)
+
+
+def subject_context_from_subject_set(
+    subject_set: NormalizedInvestigationSubjectSet,
+) -> InvestigationSubjectContext:
+    if subject_set.scope.ambiguous_clusters or subject_set.scope.ambiguous_namespaces:
+        status = "ambiguous_scope"
+    elif subject_set.canonical_focus is not None:
+        status = "resolved"
+    else:
+        competing = _competing_subjects(subject_set)
+        status = "ambiguous_subject" if competing else "unresolved"
+    return InvestigationSubjectContext(
+        resolution_status=status,
+        scope=subject_set.scope.model_copy(deep=True),
+        primary_subject=subject_set.canonical_focus.model_copy(deep=True) if subject_set.canonical_focus else None,
+        related_subjects=[ref.model_copy(deep=True) for ref in subject_set.related_refs],
+        competing_subjects=[ref.model_copy(deep=True) for ref in _competing_subjects(subject_set)],
+        notes=list(subject_set.normalization_notes),
+    )
+
+
+def _competing_subjects(
+    subject_set: NormalizedInvestigationSubjectSet,
+) -> list[InvestigationSubjectRef]:
+    if subject_set.scope.ambiguous_clusters or subject_set.scope.ambiguous_namespaces:
+        return []
+    if subject_set.canonical_focus is not None:
+        return []
+    return [ref for ref in subject_set.candidate_refs if ref.kind != "alert"]
 
 
 def _resolve_scope(
@@ -217,6 +257,9 @@ def _resolve_scope(
         scope.namespace_source = "explicit"
     elif field_values.get("namespace"):
         scope.namespace = field_values["namespace"]
+        scope.namespace_source = "question_text"
+    elif _match_group(_NAMESPACE_PATTERN, req.raw_text or req.question or "", "namespace"):
+        scope.namespace = _match_group(_NAMESPACE_PATTERN, req.raw_text or req.question or "", "namespace")
         scope.namespace_source = "question_text"
     elif _label_value(req.labels, "namespace", "kubernetes_namespace", "exported_namespace"):
         scope.namespace = _label_value(req.labels, "namespace", "kubernetes_namespace", "exported_namespace")
@@ -409,16 +452,40 @@ def _select_canonical_focus(
         }
         if all((ref.kind, ref.name) in allowed for ref in same_scope):
             return express_ref
-
-    return sorted(
+    ranked = sorted(
         operational,
         key=lambda ref: (
             min(_SOURCE_PRIORITY.get(source, 99) for source in ref.sources) if ref.sources else 99,
+            -_CONFIDENCE_PRIORITY.get(ref.confidence, 0),
+            _RELATION_PRIORITY.get(ref.relation, 99),
             _KIND_PRIORITY.get(ref.kind, 99),
             ref.namespace or "",
             ref.name,
         ),
-    )[0]
+    )
+    if len(ranked) > 1:
+        top = ranked[0]
+        second = ranked[1]
+        top_source = min(_SOURCE_PRIORITY.get(source, 99) for source in top.sources) if top.sources else 99
+        second_source = min(_SOURCE_PRIORITY.get(source, 99) for source in second.sources) if second.sources else 99
+        top_kind = _KIND_PRIORITY.get(top.kind, 99)
+        second_kind = _KIND_PRIORITY.get(second.kind, 99)
+        if (
+            top_source == second_source
+            and _CONFIDENCE_PRIORITY.get(top.confidence, 0) == _CONFIDENCE_PRIORITY.get(second.confidence, 0)
+            and top_kind == second_kind
+            and (top.kind, top.name) != (second.kind, second.name)
+        ):
+            return None
+        if (
+            top_source == second_source
+            and "question_text" in top.sources
+            and "question_text" in second.sources
+            and top.relation == second.relation == "candidate"
+            and (top.kind, top.name) != (second.kind, second.name)
+        ):
+            return None
+    return ranked[0]
 
 
 def _normalized_request_for_focus(

@@ -12,8 +12,11 @@ from investigation_service.models import (
     Finding,
     InvestigationPlan,
     InvestigationReportRequest,
+    InvestigationSubjectContext,
+    InvestigationSubjectRef,
     NormalizedInvestigationRequest,
     PlanStep,
+    ResolvedIngressScope,
     SubmitEvidenceArtifactsRequest,
     StepRouteProvenance,
     TargetRef,
@@ -268,8 +271,24 @@ def test_build_investigation_plan_uses_question_ingress_to_resolve_target() -> N
     assert plan.target is not None
     assert plan.target.requested_target == "pod/api"
     assert plan.target.target == "pod/api"
+    assert plan.target.subject_context is not None
+    assert plan.target.subject_context.resolution_status == "resolved"
+    assert plan.target.subject_context.primary_subject is not None
+    assert plan.target.subject_context.primary_subject.kind == "pod"
+    assert plan.target.subject_context.primary_subject.name == "api"
     assert "canonical focus selected: pod/api" in plan.planning_notes
     assert calls == []
+
+
+def test_build_investigation_plan_rejects_ambiguous_question_subjects_instead_of_downgrading_to_factual() -> None:
+    with pytest.raises(ValueError, match="bounded ingress ambiguity: competing primary subjects="):
+        build_investigation_plan(
+            BuildInvestigationPlanRequest(
+                namespace="default",
+                question="Investigate deployment/api and service/payments in namespace default",
+            ),
+            _deps([]),
+        )
 
 
 def test_build_investigation_plan_reraises_question_scope_errors_for_target_like_input() -> None:
@@ -288,6 +307,18 @@ def test_build_investigation_plan_reraises_question_scope_errors_for_target_like
             ),
             deps,
         )
+
+
+def test_build_investigation_plan_resolves_namespace_from_namespace_phrase() -> None:
+    target = resolve_primary_target(
+        InvestigationReportRequest(
+            question="Investigate Backend/api in namespace tenant-a",
+        ),
+        _deps([]),
+    )
+
+    assert target.namespace == "tenant-a"
+    assert target.target == "deployment/api"
 
 
 def test_build_investigation_plan_rejects_unsupported_target_like_question_input() -> None:
@@ -514,8 +545,59 @@ def test_get_active_evidence_batch_contract_exposes_execution_inputs() -> None:
     assert contract.steps[0].execution_mode == "external_preferred"
     assert contract.steps[0].execution_inputs.request_kind == "target_context"
     assert contract.steps[0].execution_inputs.target == "deployment/api"
+    assert contract.steps[0].execution_inputs.primary_subject is not None
+    assert contract.steps[0].execution_inputs.primary_subject.kind == "deployment"
+    assert contract.steps[0].execution_inputs.primary_subject.name == "api"
+    assert contract.steps[0].execution_inputs.related_subjects == []
     assert contract.steps[1].execution_mode == "control_plane_only"
     assert contract.steps[1].execution_inputs.request_kind == "change_candidates"
+
+
+def test_get_active_evidence_batch_contract_propagates_related_subjects_from_subject_context() -> None:
+    calls: list[str] = []
+    deps = _deps(calls)
+    deps = PlannerDeps(
+        **{
+            **deps.__dict__,
+            "get_cluster_cr": lambda *args, **kwargs: {
+                "status": {
+                    "componentStatuses": [
+                        {"kind": "StatefulSet", "name": "tenant-db", "phase": "Failed", "ready": False},
+                        {"kind": "Backend", "name": "tenant-be", "phase": "Running", "ready": True},
+                        {"kind": "Frontend", "name": "tenant-fe1", "phase": "Running", "ready": True},
+                    ]
+                }
+            },
+        }
+    )
+
+    plan = build_investigation_plan(
+        BuildInvestigationPlanRequest(namespace="default", target="Cluster/tenant"),
+        deps,
+    )
+
+    contract = get_active_evidence_batch_contract(
+        GetActiveEvidenceBatchRequest(
+            plan=plan,
+            incident=BuildInvestigationPlanRequest(namespace="default", target="Cluster/tenant"),
+        )
+    )
+
+    assert contract.canonical_target is not None
+    assert contract.canonical_target.subject_context is not None
+    assert contract.canonical_target.subject_context.primary_subject is not None
+    assert contract.canonical_target.subject_context.primary_subject.kind == "express_cluster"
+    assert contract.canonical_target.subject_context.primary_subject.name == "tenant"
+    assert {(ref.kind, ref.name) for ref in contract.canonical_target.subject_context.related_subjects} == {
+        ("statefulset", "tenant-db"),
+        ("backend", "tenant-be"),
+        ("frontend", "tenant-fe1"),
+    }
+    assert {(ref.kind, ref.name) for ref in contract.steps[0].execution_inputs.related_subjects} == {
+        ("statefulset", "tenant-db"),
+        ("backend", "tenant-be"),
+        ("frontend", "tenant-fe1"),
+    }
 
 
 def test_get_active_evidence_batch_contract_uses_service_context_for_service_targets() -> None:

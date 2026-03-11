@@ -16,9 +16,12 @@ from investigation_service.models import (
     InvestigationPlan,
     InvestigationReportingRequest,
     InvestigationReportRequest,
+    InvestigationSubjectContext,
+    InvestigationSubjectRef,
     InvestigationTarget,
     PlanStep,
     ReportingExecutionContext,
+    ResolvedIngressScope,
     StepRouteProvenance,
     StepArtifact,
     SubmittedStepArtifact,
@@ -40,6 +43,30 @@ def _target() -> InvestigationTarget:
         profile="service",
         lookback_minutes=15,
         normalization_notes=["artifact-note"],
+        subject_context=InvestigationSubjectContext(
+            resolution_status="resolved",
+            scope=ResolvedIngressScope(cluster="artifact-cluster", namespace="artifact-ns"),
+            primary_subject=InvestigationSubjectRef(
+                kind="service",
+                name="api",
+                cluster="artifact-cluster",
+                namespace="artifact-ns",
+                confidence="high",
+                sources=["explicit_target"],
+            ),
+            related_subjects=[
+                InvestigationSubjectRef(
+                    kind="statefulset",
+                    name="api-db",
+                    cluster="artifact-cluster",
+                    namespace="artifact-ns",
+                    confidence="medium",
+                    sources=["express_enrichment"],
+                    relation="dependency",
+                )
+            ],
+            notes=["artifact-note"],
+        ),
     )
 
 
@@ -921,6 +948,23 @@ def test_handoff_active_evidence_batch_accepts_handoff_token_on_follow_up(monkey
     ]
 
 
+def test_handoff_token_round_trip_preserves_target_subject_context() -> None:
+    incident = BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service")
+    context = ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[])
+
+    token = reporting._encode_handoff_token(incident=incident, context=context)
+    decoded = reporting._decode_handoff_token(incident=incident, token=token)
+
+    assert decoded.updated_plan.target is not None
+    assert decoded.updated_plan.target.subject_context is not None
+    assert decoded.updated_plan.target.subject_context.primary_subject is not None
+    assert decoded.updated_plan.target.subject_context.primary_subject.kind == "service"
+    assert decoded.updated_plan.target.subject_context.primary_subject.name == "api"
+    assert [(ref.kind, ref.name) for ref in decoded.updated_plan.target.subject_context.related_subjects] == [
+        ("statefulset", "api-db")
+    ]
+
+
 def test_handoff_active_evidence_batch_rejects_token_and_execution_context_together(monkeypatch) -> None:
     monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _runtime_plan())
 
@@ -936,6 +980,57 @@ def test_handoff_active_evidence_batch_rejects_token_and_execution_context_toget
                 incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/api", profile="service"),
                 handoff_token=first.handoff_token,
                 execution_context=first.execution_context,
+            )
+        )
+
+
+def test_build_investigation_state_rejects_mismatched_execution_context_incident(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _plan())
+
+    with pytest.raises(ValueError, match="execution_context does not match the supplied incident"):
+        reporting.build_investigation_state(
+            InvestigationReportingRequest(
+                target="service/other",
+                profile="service",
+                execution_context=ReportingExecutionContext(
+                    updated_plan=_plan().model_copy(update={"active_batch_id": None}),
+                    executions=[],
+                ),
+            )
+        )
+
+
+def test_build_investigation_state_preserves_subject_context_when_target_aligns() -> None:
+    state = reporting.build_investigation_state(
+        InvestigationReportingRequest(
+            target="service/api",
+            profile="service",
+            execution_context=ReportingExecutionContext(
+                updated_plan=_plan().model_copy(update={"active_batch_id": None}),
+                executions=[_execution()],
+            ),
+        )
+    )
+
+    assert state.target is not None
+    assert state.target.target == "service/api-resolved"
+    assert state.target.subject_context is not None
+    assert state.target.subject_context.primary_subject is not None
+    assert state.target.subject_context.primary_subject.kind == "service"
+    assert state.target.subject_context.primary_subject.name == "api"
+    assert [(ref.kind, ref.name) for ref in state.target.subject_context.related_subjects] == [
+        ("statefulset", "api-db")
+    ]
+
+
+def test_handoff_active_evidence_batch_rejects_mismatched_execution_context_incident(monkeypatch) -> None:
+    monkeypatch.setattr(reporting, "build_investigation_plan", lambda _req: _runtime_plan())
+
+    with pytest.raises(ValueError, match="execution_context does not match the supplied incident"):
+        reporting.handoff_active_evidence_batch(
+            HandoffActiveEvidenceBatchRequest(
+                incident=BuildInvestigationPlanRequest(namespace="artifact-ns", target="service/other", profile="service"),
+                execution_context=ReportingExecutionContext(updated_plan=_runtime_plan(), executions=[]),
             )
         )
 

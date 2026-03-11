@@ -161,6 +161,22 @@ def test_build_investigation_plan_route_returns_plan(monkeypatch) -> None:
                 service_name="api",
                 profile="service",
                 normalization_notes=["normalized"],
+                subject_context={
+                    "resolution_status": "resolved",
+                    "scope": {"cluster": "erauner-home", "namespace": "default"},
+                    "primary_subject": {
+                        "kind": "service",
+                        "name": "api",
+                        "cluster": "erauner-home",
+                        "namespace": "default",
+                        "confidence": "high",
+                        "sources": ["explicit_target"],
+                        "relation": "candidate",
+                    },
+                    "related_subjects": [],
+                    "competing_subjects": [],
+                    "notes": ["normalized"],
+                },
             ),
             steps=[],
             evidence_batches=[],
@@ -179,6 +195,7 @@ def test_build_investigation_plan_route_returns_plan(monkeypatch) -> None:
     body = response.json()
     assert body["mode"] == "targeted_rca"
     assert body["target"]["target"] == "service/api"
+    assert body["target"]["subject_context"]["primary_subject"]["kind"] == "service"
     assert body["active_batch_id"] == "batch-1"
     assert body["planning_notes"] == ["normalized"]
 
@@ -274,6 +291,32 @@ def test_get_active_evidence_batch_route_returns_execution_contract(monkeypatch)
                 "profile": "service",
                 "lookback_minutes": 15,
                 "normalization_notes": [],
+                "subject_context": {
+                    "resolution_status": "resolved",
+                    "scope": {"cluster": "erauner-home", "namespace": "default"},
+                    "primary_subject": {
+                        "kind": "service",
+                        "name": "api",
+                        "cluster": "erauner-home",
+                        "namespace": "default",
+                        "confidence": "high",
+                        "sources": ["explicit_target"],
+                        "relation": "candidate",
+                    },
+                    "related_subjects": [
+                        {
+                            "kind": "statefulset",
+                            "name": "api-db",
+                            "cluster": "erauner-home",
+                            "namespace": "default",
+                            "confidence": "medium",
+                            "sources": ["express_enrichment"],
+                            "relation": "dependency",
+                        }
+                    ],
+                    "competing_subjects": [],
+                    "notes": ["normalized"],
+                },
             },
             "steps": [
                 {
@@ -301,6 +344,26 @@ def test_get_active_evidence_batch_route_returns_execution_contract(monkeypatch)
                         "anchor_timestamp": None,
                         "limit": None,
                         "alertname": None,
+                        "primary_subject": {
+                            "kind": "service",
+                            "name": "api",
+                            "cluster": "erauner-home",
+                            "namespace": "default",
+                            "confidence": "high",
+                            "sources": ["explicit_target"],
+                            "relation": "candidate",
+                        },
+                        "related_subjects": [
+                            {
+                                "kind": "statefulset",
+                                "name": "api-db",
+                                "cluster": "erauner-home",
+                                "namespace": "default",
+                                "confidence": "medium",
+                                "sources": ["express_enrichment"],
+                                "relation": "dependency",
+                            }
+                        ],
                     },
                 }
             ],
@@ -341,6 +404,9 @@ def test_get_active_evidence_batch_route_returns_execution_contract(monkeypatch)
     assert body["subject"]["kind"] == "target"
     assert body["steps"][0]["execution_mode"] == "external_preferred"
     assert body["steps"][0]["execution_inputs"]["request_kind"] == "target_context"
+    assert body["canonical_target"]["subject_context"]["primary_subject"]["kind"] == "service"
+    assert body["steps"][0]["execution_inputs"]["primary_subject"]["name"] == "api"
+    assert body["steps"][0]["execution_inputs"]["related_subjects"][0]["name"] == "api-db"
 
 
 def test_submit_evidence_step_artifacts_route_returns_execution_and_updated_plan(monkeypatch) -> None:
