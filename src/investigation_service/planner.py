@@ -10,6 +10,7 @@ from .ingress import (
     ingress_request_from_report_request,
     normalized_request_from_subject_set,
     normalize_ingress_request,
+    subject_context_from_subject_set,
 )
 from .models import (
     ActiveEvidenceBatchContract,
@@ -34,6 +35,7 @@ from .models import (
     InvestigationMode,
     InvestigationReportRequest,
     NormalizedInvestigationRequest,
+    NormalizedInvestigationSubjectSet,
     PlanStep,
     StepExecutionInputs,
     StepRouteProvenance,
@@ -105,6 +107,8 @@ def classify_investigation_mode(
     req: BuildInvestigationPlanRequest | InvestigationReportRequest,
     *,
     has_resolved_target: bool = False,
+    has_subject_candidates: bool = False,
+    subject_resolution_status: str = "unresolved",
 ) -> InvestigationMode:
     if req.alertname:
         return "alert_rca"
@@ -112,7 +116,12 @@ def classify_investigation_mode(
         return "factual_analysis"
     if has_resolved_target:
         return "targeted_rca"
-    if getattr(req, "question", None) and not req.target:
+    if (
+        getattr(req, "question", None)
+        and not req.target
+        and not has_subject_candidates
+        and subject_resolution_status == "unresolved"
+    ):
         return "factual_analysis"
     return "targeted_rca"
 
@@ -134,6 +143,7 @@ def investigation_target_from_normalized(
         profile=normalized.profile,
         lookback_minutes=normalized.lookback_minutes,
         normalization_notes=list(normalized.normalization_notes),
+        subject_context=normalized.subject_context.model_copy(deep=True) if normalized.subject_context else None,
     )
 
 
@@ -141,16 +151,19 @@ def normalized_request(
     req: InvestigationReportRequest,
     deps: PlannerDeps,
 ) -> NormalizedInvestigationRequest:
-    subject_set = _normalized_subject_set(req, deps)
-    return normalized_request_from_subject_set(subject_set, _ingress_deps(deps))
+    _, normalized = _subject_set_and_normalized(req, deps)
+    if normalized is None:
+        raise ValueError("no canonical investigation subject could be resolved from ingress input")
+    return normalized
 
 
 def resolve_primary_target(
     req: InvestigationReportRequest,
     deps: PlannerDeps,
 ) -> InvestigationTarget:
-    subject_set = _normalized_subject_set(req, deps)
-    normalized = normalized_request_from_subject_set(subject_set, _ingress_deps(deps))
+    subject_set, normalized = _subject_set_and_normalized(req, deps)
+    if normalized is None:
+        raise ValueError("no canonical investigation subject could be resolved from ingress input")
     requested_target = canonical_focus_ref(subject_set, req.target) or normalized.target
     return investigation_target_from_normalized(normalized, requested_target=requested_target)
 
@@ -161,6 +174,25 @@ def _normalized_subject_set(
 ):
     ingress_req = ingress_request_from_report_request(req)
     return normalize_ingress_request(ingress_req, _ingress_deps(deps))
+
+
+def _subject_set_and_normalized(
+    req: InvestigationReportRequest,
+    deps: PlannerDeps,
+) -> tuple[NormalizedInvestigationSubjectSet, NormalizedInvestigationRequest | None]:
+    subject_set = _normalized_subject_set(req, deps)
+    try:
+        return subject_set, normalized_request_from_subject_set(subject_set, _ingress_deps(deps))
+    except ValueError as exc:
+        if _is_subject_resolution_error(str(exc)):
+            return subject_set, None
+        raise
+
+
+def _is_subject_resolution_error(message: str) -> bool:
+    return message.startswith("bounded ingress ambiguity:") or message == (
+        "no canonical investigation subject could be resolved from ingress input"
+    )
 
 
 def resolve_vague_workload_target(
@@ -600,6 +632,8 @@ def _step_execution_inputs(
     target: InvestigationTarget,
     incident: BuildInvestigationPlanRequest,
 ) -> StepExecutionInputs:
+    primary_subject = target.subject_context.primary_subject if target.subject_context else None
+    related_subjects = list(target.subject_context.related_subjects) if target.subject_context else []
     if step.id == "collect-alert-evidence":
         return StepExecutionInputs(
             request_kind="alert_context",
@@ -613,6 +647,8 @@ def _step_execution_inputs(
             alertname=incident.alertname,
             labels=dict(incident.labels),
             annotations=dict(incident.annotations),
+            primary_subject=primary_subject,
+            related_subjects=related_subjects,
         )
     if step.id == "collect-change-candidates":
         request = _change_candidates_request(target)
@@ -626,6 +662,8 @@ def _step_execution_inputs(
             lookback_minutes=request.lookback_minutes,
             anchor_timestamp=request.anchor_timestamp,
             limit=request.limit,
+            primary_subject=primary_subject,
+            related_subjects=related_subjects,
         )
     if step.id == "collect-service-follow-up-evidence":
         return StepExecutionInputs(
@@ -636,6 +674,8 @@ def _step_execution_inputs(
             profile="service",
             service_name=target.service_name,
             lookback_minutes=target.lookback_minutes,
+            primary_subject=primary_subject,
+            related_subjects=related_subjects,
         )
     if step.id == "collect-target-evidence" and (
         target.scope == "service"
@@ -650,6 +690,8 @@ def _step_execution_inputs(
             profile="service",
             service_name=target.service_name,
             lookback_minutes=target.lookback_minutes,
+            primary_subject=primary_subject,
+            related_subjects=related_subjects,
         )
     request = _target_collect_request(target)
     return StepExecutionInputs(
@@ -661,6 +703,8 @@ def _step_execution_inputs(
         service_name=getattr(request, "service_name", None),
         node_name=getattr(request, "node_name", None),
         lookback_minutes=request.lookback_minutes,
+        primary_subject=primary_subject,
+        related_subjects=related_subjects,
     )
 
 
@@ -1460,13 +1504,24 @@ def build_investigation_plan(
     deps: PlannerDeps,
 ) -> InvestigationPlan:
     report_req = _report_request_from_plan_request(req)
-    resolved_target: InvestigationTarget | None = None
-    try:
-        resolved_target = resolve_primary_target(report_req, deps)
-    except ValueError as exc:
-        if str(exc) != "no canonical investigation subject could be resolved from ingress input":
-            raise
-    mode = classify_investigation_mode(req, has_resolved_target=resolved_target is not None)
+    subject_set, normalized = _subject_set_and_normalized(report_req, deps)
+    resolved_target = (
+        investigation_target_from_normalized(
+            normalized,
+            requested_target=canonical_focus_ref(subject_set, report_req.target) or normalized.target,
+        )
+        if normalized is not None
+        else None
+    )
+    subject_context = subject_context_from_subject_set(subject_set)
+    mode = classify_investigation_mode(
+        req,
+        has_resolved_target=resolved_target is not None,
+        has_subject_candidates=bool(subject_set.candidate_refs),
+        subject_resolution_status=subject_context.resolution_status,
+    )
+    if mode != "factual_analysis" and resolved_target is None and subject_context.resolution_status != "unresolved":
+        normalized_request_from_subject_set(subject_set, _ingress_deps(deps))
 
     if mode == "alert_rca":
         if resolved_target is None:

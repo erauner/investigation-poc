@@ -25,6 +25,7 @@ def normalized_request_from_target(target: InvestigationTarget) -> NormalizedInv
         profile=target.profile,
         lookback_minutes=target.lookback_minutes,
         normalization_notes=list(target.normalization_notes),
+        subject_context=target.subject_context.model_copy(deep=True) if target.subject_context else None,
     )
 
 
