@@ -949,6 +949,49 @@ def test_normalize_alert_input_expands_explicit_workload_shorthand(monkeypatch) 
     assert "resolved vague workload target to pod/crashy-abc123" in normalized.normalization_notes
 
 
+def test_normalize_alert_input_expands_explicit_workload_shorthand_with_service_profile(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "find_unhealthy_pod",
+        lambda req: type(
+            "UnhealthyPodResponse",
+            (),
+            {"candidate": type("Candidate", (), {"target": "pod/crashy-abc123"})()},
+        )(),
+    )
+
+    normalized = normalize_alert_input(
+        CollectAlertContextRequest(
+            alertname="WorkloadAlert",
+            namespace="operator-smoke",
+            target="workload",
+            profile="service",
+            service_name="api",
+        )
+    )
+
+    assert normalized.scope == "workload"
+    assert normalized.target == "pod/crashy-abc123"
+    assert "resolved vague workload target to pod/crashy-abc123" in normalized.normalization_notes
+
+
+def test_normalize_alert_input_explicit_workload_shorthand_raises_when_no_candidate_exists(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "find_unhealthy_pod",
+        lambda req: type("UnhealthyPodResponse", (), {"candidate": None})(),
+    )
+
+    with pytest.raises(ValueError, match="no unhealthy pod found in namespace"):
+        normalize_alert_input(
+            CollectAlertContextRequest(
+                alertname="WorkloadAlert",
+                namespace="operator-smoke",
+                target="workload",
+            )
+        )
+
+
 def test_normalize_alert_input_resolves_explicit_backend_target(monkeypatch) -> None:
     monkeypatch.setattr(tools_module, "get_backend_cr", lambda namespace, name, cluster=None: {})
 

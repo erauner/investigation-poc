@@ -14,6 +14,16 @@ from .models import (
     PlannerSeedExecutionFocus,
 )
 
+_VAGUE_WORKLOAD_TOKENS = {
+    "pod",
+    "pods",
+    "workload",
+    "workloads",
+    "unhealthy",
+    "unhealthy-pod",
+    "unhealthy-workload",
+}
+
 
 @dataclass(frozen=True)
 class PlannerSeedDeps:
@@ -128,15 +138,7 @@ def apply_post_seed_normalization(
         return normalized
 
     lowered = normalized.target.strip().lower()
-    if lowered not in {
-        "pod",
-        "pods",
-        "workload",
-        "workloads",
-        "unhealthy",
-        "unhealthy-pod",
-        "unhealthy-workload",
-    }:
+    if lowered not in _VAGUE_WORKLOAD_TOKENS:
         return normalized
     if not normalized.namespace:
         raise ValueError("namespace is required when resolving a vague workload target")
@@ -157,7 +159,7 @@ def is_vague_workload_subject(subject: InvestigationSubjectRef | None) -> bool:
     return bool(
         subject is not None
         and subject.kind == "resource_hint"
-        and "vague_workload" in subject.sources
+        and subject.name.strip().lower() in _VAGUE_WORKLOAD_TOKENS
     )
 
 

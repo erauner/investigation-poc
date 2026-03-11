@@ -255,6 +255,40 @@ def test_vague_workload_hint_stays_workload_scoped_even_with_service_profile() -
     assert seed.execution_focus.target == "workload"
 
 
+def test_explicit_workload_shorthand_stays_workload_scoped_even_with_service_profile() -> None:
+    focus = InvestigationSubjectRef(
+        kind="resource_hint",
+        name="workload",
+        cluster="erauner-home",
+        namespace="default",
+        confidence="high",
+        sources=["explicit_target"],
+    )
+    subject_set = _subject_set(focus=focus)
+    subject_set = subject_set.model_copy(
+        update={
+            "ingress": subject_set.ingress.model_copy(
+                update={
+                    "target": "workload",
+                    "profile_hint": "service",
+                    "service_name": "api",
+                }
+            ),
+            "candidate_refs": [focus],
+        }
+    )
+
+    seed = planner_seed_from_subject_set(
+        subject_set,
+        subject_context=subject_context_from_subject_set(subject_set),
+        deps=_deps(),
+    )
+
+    assert seed.execution_focus is not None
+    assert seed.execution_focus.scope == "workload"
+    assert seed.execution_focus.target == "workload"
+
+
 def test_apply_post_seed_normalization_raises_when_no_unhealthy_pod_exists() -> None:
     normalized = normalized_request_from_planner_seed(
         planner_seed_from_subject_set(
