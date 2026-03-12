@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp validate-loki-phase1 validate-loki-phase1-deterministic kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-build-loki-mcp-image kind-load-loki-mcp-image kind-build-alertmanager-mcp-image kind-load-alertmanager-mcp-image kind-build-slack-bot-image kind-load-slack-bot-image kind-build-slack-mcp-image kind-load-slack-mcp-image kind-enable-http-debug kind-enable-loki-debug kind-enable-alertmanager-debug kind-enable-slack-a2a kind-enable-slack-mcp kind-enable-slack kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-loki-complementary kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
+.PHONY: install test run run-mcp validate-loki-phase1 validate-loki-phase1-deterministic kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-build-loki-mcp-image kind-load-loki-mcp-image kind-build-alertmanager-mcp-image kind-load-alertmanager-mcp-image kind-build-slack-bot-image kind-load-slack-bot-image kind-build-slack-mcp-image kind-load-slack-mcp-image kind-enable-http-debug kind-enable-loki-debug kind-enable-alertmanager-debug kind-enable-slack-a2a kind-enable-slack-mcp kind-enable-slack slack-alert-thread-fixture slack-generic-thread-fixture kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-loki-complementary kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -252,6 +252,7 @@ kind-enable-slack-a2a:
 		$$(if [ -n "$$SLACK_USER_TOKEN" ]; then printf '%s' "--from-literal=SLACK_USER_TOKEN=$$SLACK_USER_TOKEN "; fi) \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -k k8s/optional-slack-a2a
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/kagent-slack-bot >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/slack-a2a-agent --timeout=240s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-slack-bot --timeout=240s
 
@@ -299,9 +300,16 @@ kind-enable-slack:
 		--from-literal=SLACK_CHANNEL_IDS="$$SLACK_CHANNEL_IDS" \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -k "$(SLACK_OVERLAY)"
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/kagent-slack-bot >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-slack-bot --timeout=240s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/slack-mcp --timeout=240s
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/slack-a2a-agent --timeout=240s
+
+slack-alert-thread-fixture:
+	@bash ./scripts/post-slack-thread-fixture.sh alert
+
+slack-generic-thread-fixture:
+	@bash ./scripts/post-slack-thread-fixture.sh generic
 
 kind-preflight-clean:
 	@./scripts/kind-preflight-clean.sh

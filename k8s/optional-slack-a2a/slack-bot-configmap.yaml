@@ -50,6 +50,13 @@ data:
 
     THREAD_CONTEXTS = {}
     SHOW_USAGE = os.environ.get("SLACK_SHOW_USAGE", "").lower() == "true"
+    THREAD_FETCH_LIMIT = 20
+    THREAD_FETCH_MAX_PAGES = 3
+    THREAD_TRANSCRIPT_RENDER_LIMIT = 10
+    ENTRYPOINT_PREFIX = "[INVESTIGATION_ENTRYPOINT]="
+    GENERIC_ENTRYPOINT = "[INVESTIGATION_ENTRYPOINT]=generic"
+    ALERT_ENTRYPOINT = "[INVESTIGATION_ENTRYPOINT]=alert"
+    OPERATOR_TARGET_PREFIXES = ("Backend/", "Frontend/", "Cluster/")
     PLACEHOLDER_TEXTS = {
         "Reviewing the thread...",
         "Checking recent signals...",
@@ -176,6 +183,28 @@ data:
         return "Working on it..."
 
 
+    def _extract_explicit_alertname(text: str) -> str | None:
+        patterns = [
+            re.compile(r"\balertname\s*[:=]\s*([^\s,.;]+)", re.IGNORECASE),
+            re.compile(r"^\s*Investigate\s+alert\s+([^\s,.;:]+)", re.IGNORECASE),
+        ]
+
+        for pattern in patterns:
+            match = pattern.search(text or "")
+            if not match:
+                continue
+            candidate = (match.group(1) or "").strip()
+            if not candidate:
+                continue
+            if "/" in candidate:
+                return None
+            if any(candidate.startswith(prefix) for prefix in OPERATOR_TARGET_PREFIXES):
+                return None
+            return candidate
+
+        return None
+
+
     def _run_slack_command(
         client: WebClient,
         ack: Ack,
@@ -213,7 +242,11 @@ data:
             return
 
         try:
-            response, usage_info, _ = run_a2a(agent_url, text, logger)
+            prompt_text = _build_prefixed_prompt(
+                text,
+                "alert" if _extract_explicit_alertname(text) else "generic",
+            )
+            response, usage_info, _ = run_a2a(agent_url, prompt_text, logger)
             if not response:
                 response = "No response received from the agent."
 
@@ -303,31 +336,243 @@ data:
         return text.startswith("/kind-kagent ") or text.startswith("/kind-shadow ")
 
 
-    def _speaker_for_message(message: dict, bot_user_id: str | None) -> str:
+    def _message_key(message: dict) -> str:
+        return (
+            message.get("ts")
+            or message.get("client_msg_id")
+            or f"{message.get('subtype', 'message')}:{message.get('user', 'unknown')}:{_message_text(message)[:40]}"
+        )
+
+
+    def _message_sort_key(message: dict) -> tuple[float, str]:
+        ts = str(message.get("ts") or "")
+        try:
+            numeric_ts = float(ts)
+        except (TypeError, ValueError):
+            numeric_ts = 0.0
+        return numeric_ts, ts
+
+
+    def _is_current_bot_message(
+        message: dict,
+        bot_user_id: str | None,
+        bot_app_id: str | None = None,
+    ) -> bool:
+        if bot_user_id and message.get("user") == bot_user_id:
+            return True
+        if bot_app_id and message.get("app_id") == bot_app_id:
+            return True
+        return False
+
+
+    def _speaker_for_message(
+        message: dict,
+        bot_user_id: str | None,
+        bot_app_id: str | None = None,
+    ) -> str:
         user_id = message.get("user")
-        if bot_user_id and user_id == bot_user_id:
+        if _is_current_bot_message(message, bot_user_id, bot_app_id):
             return "assistant"
         if message.get("subtype") == "bot_message":
-            return "assistant"
+            return "system"
         if user_id:
             return "user"
         return "system"
 
 
-    def _format_thread_transcript(messages: list[dict], bot_user_id: str | None) -> str:
-        lines = []
-        for message in messages[-10:]:
+    def _classify_thread_entrypoint(
+        messages: list[dict],
+        bot_user_id: str | None,
+        bot_app_id: str | None = None,
+    ) -> tuple[str, list[str], set[str]]:
+        signal_ids = []
+        matched_keys = set()
+        alertname_pattern = re.compile(r"\balertname\s*[:=]\s*([^\s,.;]+)", re.IGNORECASE)
+        status_pattern = re.compile(r"\bstatus\s*[:=]\s*(firing|resolved)\b", re.IGNORECASE)
+        summary_pattern = re.compile(
+            r"\b([A-Za-z][A-Za-z0-9_]+)\s+(firing|resolved)\s+for\s+(pod|service|deployment|statefulset|node)/[^\s,.;]+",
+            re.IGNORECASE,
+        )
+
+        for message in messages:
             text = _message_text(message)
             if _is_noise_message(text):
                 continue
+            if _is_current_bot_message(message, bot_user_id, bot_app_id):
+                continue
 
+            lowered = text.lower()
+            matched_here = []
+            has_alertname = bool(alertname_pattern.search(text))
+            has_status = bool(status_pattern.search(text))
+            has_payload_field = any(marker in text for marker in ("startsAt", "endsAt", "generatorURL"))
+            has_labels_annotations = "labels:" in lowered and "annotations:" in lowered
+            has_structured_summary = bool(summary_pattern.search(text))
+
+            if has_alertname:
+                matched_here.append("alertname_marker")
+            if has_status:
+                matched_here.append("status_marker")
+            if has_payload_field:
+                matched_here.append("payload_field_marker")
+            if has_labels_annotations and (has_alertname or has_status or has_payload_field):
+                matched_here.append("labels_annotations_block_marker")
+            if has_structured_summary:
+                matched_here.append("structured_summary_marker")
+
+            if not matched_here:
+                continue
+
+            matched_keys.add(_message_key(message))
+            for signal_id in matched_here:
+                if signal_id not in signal_ids:
+                    signal_ids.append(signal_id)
+
+        return ("alert" if signal_ids else "generic"), signal_ids, matched_keys
+
+
+    def _select_thread_messages(
+        messages: list[dict],
+        bot_user_id: str | None,
+        matched_message_keys: set[str] | None = None,
+        bot_app_id: str | None = None,
+    ) -> list[dict]:
+        matched_message_keys = matched_message_keys or set()
+        relevant = []
+        root_candidate = None
+
+        for index, message in enumerate(messages):
+            text = _message_text(message)
+            if _is_noise_message(text):
+                continue
+            if _is_current_bot_message(message, bot_user_id, bot_app_id):
+                continue
+
+            entry = {
+                "index": index,
+                "key": _message_key(message),
+                "message": message,
+            }
+            relevant.append(entry)
+            if index == 0:
+                root_candidate = entry
+
+        if not relevant:
+            return []
+
+        selected = {}
+        if root_candidate:
+            selected[root_candidate["key"]] = root_candidate
+
+        for entry in relevant:
+            if entry["key"] in matched_message_keys:
+                selected[entry["key"]] = entry
+
+        for entry in reversed(relevant):
+            if len(selected) >= THREAD_TRANSCRIPT_RENDER_LIMIT:
+                break
+            selected.setdefault(entry["key"], entry)
+
+        ordered = sorted(selected.values(), key=lambda item: item["index"])
+        if len(ordered) <= THREAD_TRANSCRIPT_RENDER_LIMIT:
+            return [item["message"] for item in ordered]
+
+        if root_candidate and root_candidate["key"] in selected:
+            tail = ordered[-(THREAD_TRANSCRIPT_RENDER_LIMIT - 1):]
+            kept = [root_candidate]
+            for item in tail:
+                if item["key"] != root_candidate["key"]:
+                    kept.append(item)
+            return [item["message"] for item in kept[:THREAD_TRANSCRIPT_RENDER_LIMIT]]
+
+        return [item["message"] for item in ordered[-THREAD_TRANSCRIPT_RENDER_LIMIT:]]
+
+
+    def _format_thread_transcript(
+        messages: list[dict],
+        bot_user_id: str | None,
+        matched_message_keys: set[str] | None = None,
+        bot_app_id: str | None = None,
+    ) -> str:
+        lines = []
+        for message in _select_thread_messages(messages, bot_user_id, matched_message_keys, bot_app_id):
+            text = _message_text(message)
             if len(text) > 400:
                 text = text[:400].rstrip() + "..."
 
-            speaker = _speaker_for_message(message, bot_user_id)
+            speaker = _speaker_for_message(message, bot_user_id, bot_app_id)
             lines.append(f"{speaker}: {text}")
 
         return "\n".join(lines).strip()
+
+
+    def _build_prefixed_prompt(
+        latest_request: str,
+        mode: str,
+        transcript: str | None = None,
+    ) -> str:
+        entrypoint = ALERT_ENTRYPOINT if mode == "alert" else GENERIC_ENTRYPOINT
+        lines = [entrypoint, ""]
+        if transcript:
+            lines.extend(
+                [
+                    "Slack thread transcript:",
+                    transcript,
+                    "",
+                    "Use the thread transcript as context. Focus on the latest user request and avoid repeating long prior lists unless asked.",
+                    "",
+                ]
+            )
+        lines.extend(["Latest user request:", latest_request])
+        return "\n".join(lines)
+
+
+    def _fetch_thread_messages(
+        history_client: WebClient,
+        channel_id: str,
+        thread_ts: str,
+        latest_ts: str,
+    ) -> list[dict]:
+        combined = {}
+        root_history = history_client.conversations_replies(
+            channel=channel_id,
+            ts=thread_ts,
+            oldest=thread_ts,
+            latest=thread_ts,
+            inclusive=True,
+            limit=1,
+        )
+        for message in root_history.get("messages") or []:
+            combined[_message_key(message)] = message
+
+        try:
+            thread_floor = float(thread_ts)
+            latest_cursor = float(latest_ts)
+        except (TypeError, ValueError):
+            return sorted(combined.values(), key=_message_sort_key)
+
+        range_span = 3600.0
+
+        for _ in range(THREAD_FETCH_MAX_PAGES):
+            oldest_cursor = max(thread_floor, latest_cursor - range_span)
+            history = history_client.conversations_replies(
+                channel=channel_id,
+                ts=thread_ts,
+                oldest=f"{oldest_cursor:.6f}",
+                latest=f"{latest_cursor:.6f}",
+                inclusive=True,
+                limit=THREAD_FETCH_LIMIT,
+            )
+            batch = history.get("messages") or []
+            for message in batch:
+                combined[_message_key(message)] = message
+
+            if oldest_cursor <= thread_floor or len(batch) < THREAD_FETCH_LIMIT:
+                break
+
+            range_span *= 4
+
+        return sorted(combined.values(), key=_message_sort_key)
 
 
     def build_thread_aware_prompt(
@@ -335,34 +580,69 @@ data:
         body: dict,
         logger: Logger,
     ) -> str:
+        latest_request = (text or "").strip()
+        explicit_alertname = _extract_explicit_alertname(latest_request)
+        default_mode = "alert" if explicit_alertname else "generic"
         user_token = os.environ.get("SLACK_USER_TOKEN")
+        bot_user_id = body.get("authorizations", [{}])[0].get("user_id")
+        bot_app_id = body.get("api_app_id")
         if not user_token:
-            return text
+            logger.info(
+                "Slack ingress mode=%s source=latest-request thread_history=disabled",
+                default_mode,
+            )
+            return _build_prefixed_prompt(latest_request, default_mode)
 
         event = body.get("event", {}) or {}
         channel_id = event.get("channel")
         thread_ts = event.get("thread_ts") or event.get("ts")
         if not channel_id or not thread_ts:
-            return text
+            logger.info(
+                "Slack ingress mode=%s source=latest-request thread_history=unavailable",
+                default_mode,
+            )
+            return _build_prefixed_prompt(latest_request, default_mode)
 
         try:
             history_client = WebClient(token=user_token)
-            history = history_client.conversations_replies(channel=channel_id, ts=thread_ts, limit=20)
-            messages = history.get("messages") or []
-            transcript = _format_thread_transcript(messages, body.get("authorizations", [{}])[0].get("user_id"))
-            if not transcript:
-                return text
+            messages = _fetch_thread_messages(history_client, channel_id, thread_ts, event.get("ts") or thread_ts)
+            mode = default_mode
+            matched_signal_ids = []
+            matched_message_keys = set()
 
-            return (
-                "Slack thread transcript:\n"
-                f"{transcript}\n\n"
-                "Use the thread transcript as context. Focus on the latest user request and avoid repeating long prior lists unless asked.\n\n"
-                "Latest user request:\n"
-                f"{text}"
+            if mode != "alert":
+                mode, matched_signal_ids, matched_message_keys = _classify_thread_entrypoint(
+                    messages,
+                    bot_user_id,
+                    bot_app_id,
+                )
+
+            transcript = _format_thread_transcript(
+                messages,
+                bot_user_id,
+                matched_message_keys,
+                bot_app_id,
             )
+            logger.info(
+                "Slack ingress mode=%s source=%s matched_signals=%s fetched_messages=%s rendered_transcript=%s",
+                mode,
+                "latest-request" if default_mode == "alert" else "thread",
+                ",".join(matched_signal_ids) or "none",
+                len(messages),
+                bool(transcript),
+            )
+            return _build_prefixed_prompt(latest_request, mode, transcript or None)
         except SlackApiError as error:
             logger.warning("Failed to read Slack thread history: %s", error)
-            return text
+            return _build_prefixed_prompt(latest_request, default_mode)
+        except Exception as error:
+            logger.warning(
+                "Failed to read Slack thread history via generic client error: error_type=%s channel=%s thread_ts=%s",
+                type(error).__name__,
+                channel_id,
+                thread_ts,
+            )
+            return _build_prefixed_prompt(latest_request, default_mode)
 
 
     def handle_app_mention_events(body, client: WebClient, logger: Logger):
