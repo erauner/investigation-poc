@@ -268,6 +268,43 @@ But it should not defer cluster and destination awareness in the evidence model.
 
 This keeps ArgoCD aligned with the existing cluster-registry and target-resolution approach without forcing multi-Argo-endpoint routing into phase 1.
 
+## Future Provenance Constraints
+
+If the product later grows a broader change-history capability, it should treat exact resource identity as the primary lookup key rather than Argo application identity.
+
+That means a canonical key like:
+
+- `(cluster_alias, api_group, kind, namespace, name)`
+
+should remain the stable join surface for:
+
+- Argo ownership and desired-state provenance
+- Kubernetes audit-backed applied-state history
+- SCM commit and PR enrichment
+- any product-owned logical service or tenant grouping
+
+Argo should therefore be treated as a delivery-state and ownership source, not as the universal identity layer.
+A later provenance capability should prefer explicit ownership metadata and stable tracking fields over naming inference.
+
+Good future constraints to preserve now:
+
+- ambiguity is an acceptable result and better than guessing
+- ownership should come from explicit tracking metadata where possible
+- logical application identity should stay distinct from Argo `Application` identity
+- multi-source and multi-cluster Argo topologies should be represented honestly, including conflicting or ambiguous ownership
+
+A future provenance or change-history plane will likely need a product-owned index that joins:
+
+- exact Kubernetes resource identity
+- owning Argo application identity
+- destination cluster and namespace
+- resolved source repo/path/chart and revision
+- optional logical app or tenant identifier
+- audit-backed write history
+
+This ADR does not expand Argo phase 1 to include that broader provenance system.
+It only records those constraints so the bounded Argo delivery-state slice does not accidentally lock the product into a weaker resource-to-app model later.
+
 ## Validation Goals
 
 The local validation lane should be able to prove all of these:
