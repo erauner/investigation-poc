@@ -443,7 +443,7 @@ def test_collect_service_logs_builds_loki_query_from_matched_pods(monkeypatch) -
             calls[0][1],
         )
     ]
-    assert calls[0][1]["query"] == '{namespace="operator-smoke",pod=~"api\\-abc123|api\\-def456"}'
+    assert calls[0][1]["query"] == '{namespace="operator-smoke",pod=~"^(api-abc123|api-def456)$"}'
     assert calls[0][1]["limit"] == 200
     assert re.fullmatch(r".+Z", str(calls[0][1]["start"]))
     assert re.fullmatch(r".+Z", str(calls[0][1]["end"]))
@@ -459,7 +459,7 @@ def test_collect_service_logs_falls_back_to_selector_app_query_when_pod_query_is
         calls.append((tool_name, args))
         if tool_name != "loki_query":
             raise AssertionError(f"unexpected tool {tool_name}")
-        if args["query"] == '{namespace="operator-smoke",pod=~"api\\-abc123"}':
+        if args["query"] == '{namespace="operator-smoke",pod=~"^(api-abc123)$"}':
             return {"data": {"result": []}}
         if args["query"] == '{namespace="operator-smoke",app="api"}':
             return {"data": {"result": [{"values": [["1", "error: upstream returned 500"]]}]}}
@@ -494,7 +494,7 @@ def test_collect_service_logs_falls_back_to_selector_app_query_when_pod_query_is
     )
 
     assert [args["query"] for _tool_name, args in calls] == [
-        '{namespace="operator-smoke",pod=~"api\\-abc123"}',
+        '{namespace="operator-smoke",pod=~"^(api-abc123)$"}',
         '{namespace="operator-smoke",app="api"}',
     ]
     assert snapshot.log_excerpt == "error: upstream returned 500"

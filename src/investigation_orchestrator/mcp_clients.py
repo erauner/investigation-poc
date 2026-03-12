@@ -362,8 +362,8 @@ def _build_service_loki_queries(target: TargetRef, object_state: dict[str, Any] 
     queries: list[str] = []
     pod_candidates = _service_loki_pod_candidates(object_state)
     if pod_candidates:
-        escaped = "|".join(re.escape(name) for name in pod_candidates)
-        queries.append(f'{{namespace="{target.namespace}",pod=~"{escaped}"}}')
+        alternation = "|".join(name.replace("\\", "\\\\").replace('"', '\\"') for name in pod_candidates)
+        queries.append(f'{{namespace="{target.namespace}",pod=~"^({alternation})$"}}')
     for app_candidate in _service_loki_app_candidates(object_state, target):
         queries.append(f'{{namespace="{target.namespace}",app="{app_candidate}"}}')
     return tuple(dict.fromkeys(queries))
