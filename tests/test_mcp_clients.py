@@ -265,6 +265,86 @@ def test_collect_node_top_pods_parses_resources_list_payload(monkeypatch) -> Non
     ]
 
 
+def test_collect_service_runtime_parses_yaml_service_payload_for_topology(monkeypatch) -> None:
+    client = KubernetesMcpClient(url="http://kubernetes-mcp.example/mcp")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _call_tool(_self, _session, tool_name: str, args: dict[str, object]):
+        calls.append((tool_name, args))
+        if tool_name == "resources_get":
+            return """
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy-proxy-metrics
+  namespace: envoy-gateway-system
+spec:
+  selector:
+    app.kubernetes.io/component: proxy
+    app.kubernetes.io/managed-by: envoy-gateway
+    app.kubernetes.io/name: envoy
+"""
+        if tool_name == "pods_list_in_namespace":
+            return """
+- apiVersion: v1
+  kind: Pod
+  metadata:
+    name: envoy-public-abc123
+    labels:
+      app.kubernetes.io/component: proxy
+      app.kubernetes.io/managed-by: envoy-gateway
+      app.kubernetes.io/name: envoy
+    ownerReferences:
+      - kind: ReplicaSet
+        name: envoy-public-6d4c8b7f5
+  status:
+    containerStatuses:
+      - ready: true
+        restartCount: 0
+"""
+        if tool_name == "events_list":
+            return {"items": []}
+        raise AssertionError(f"unexpected tool {tool_name}")
+
+    monkeypatch.setattr(mcp_clients.httpx, "AsyncClient", _DummyAsyncClient)
+    monkeypatch.setattr(mcp_clients, "streamable_http_client", _dummy_streamable_http_client)
+    monkeypatch.setattr(mcp_clients, "ClientSession", _DummySession)
+    monkeypatch.setattr(
+        mcp_clients,
+        "resolve_cluster",
+        lambda _cluster: SimpleNamespace(alias="local-kind", kube_context=None, kubeconfig_path=None),
+    )
+    monkeypatch.setattr(KubernetesMcpClient, "_call_tool", _call_tool)
+
+    snapshot = client.collect_service_runtime(
+        StepExecutionInputs(
+            request_kind="service_context",
+            namespace="envoy-gateway-system",
+            target="service/envoy-proxy-metrics",
+            profile="service",
+            service_name="envoy-proxy-metrics",
+            lookback_minutes=15,
+        )
+    )
+
+    assert [tool_name for tool_name, _args in calls] == ["resources_get", "pods_list_in_namespace", "events_list"]
+    assert snapshot.object_state["selector"] == {
+        "app.kubernetes.io/component": "proxy",
+        "app.kubernetes.io/managed-by": "envoy-gateway",
+        "app.kubernetes.io/name": "envoy",
+    }
+    assert snapshot.object_state["matchedPodCount"] == 1
+    assert snapshot.object_state["matchedPods"] == [
+        {
+            "name": "envoy-public-abc123",
+            "phase": None,
+            "ready": True,
+            "restartCount": 0,
+            "workload": {"kind": "deployment", "name": "envoy-public"},
+        }
+    ]
+
+
 def test_collect_workload_logs_normalizes_loki_payload(monkeypatch) -> None:
     client = LokiMcpClient(url="http://loki-mcp.example/mcp")
     calls: list[tuple[str, dict[str, object]]] = []

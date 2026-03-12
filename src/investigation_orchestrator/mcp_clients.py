@@ -6,6 +6,7 @@ import json
 import math
 import re
 import threading
+import yaml
 
 import anyio
 import httpx
@@ -502,6 +503,38 @@ def _normalize_object_state(
     return normalize_k8s_object_payload(raw_object_state, target, runtime_pod=runtime_pod)
 
 
+def _parsed_k8s_object(raw_object_state: Any) -> dict[str, Any]:
+    if isinstance(raw_object_state, dict):
+        return raw_object_state
+    if isinstance(raw_object_state, str):
+        try:
+            parsed = yaml.safe_load(raw_object_state)
+        except yaml.YAMLError:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _parsed_k8s_items(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, dict):
+        items = raw.get("items") or raw.get("pods") or []
+        return [item for item in items if isinstance(item, dict)]
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, dict)]
+    if isinstance(raw, str):
+        try:
+            parsed = yaml.safe_load(raw)
+        except yaml.YAMLError:
+            return []
+        if isinstance(parsed, list):
+            return [item for item in parsed if isinstance(item, dict)]
+        if isinstance(parsed, dict):
+            items = parsed.get("items") or parsed.get("pods") or []
+            return [item for item in items if isinstance(item, dict)]
+    return []
+
+
 class KubernetesMcpClient:
     def __init__(self, *, url: str | None = None, timeout_seconds: float | None = None):
         self.url = url or get_kubernetes_mcp_url()
@@ -728,15 +761,10 @@ class KubernetesMcpClient:
                             {"namespace": namespace},
                         )
                         tool_path.append("pods_list_in_namespace")
-                        pods = []
-                        if isinstance(pods_raw, dict):
-                            pods = pods_raw.get("items") or pods_raw.get("pods") or []
-                        elif isinstance(pods_raw, list):
-                            pods = pods_raw
                         object_state.update(
                             summarize_service_topology(
-                                raw_object_state if isinstance(raw_object_state, dict) else {},
-                                [pod for pod in pods if isinstance(pod, dict)],
+                                _parsed_k8s_object(raw_object_state),
+                                _parsed_k8s_items(pods_raw),
                             )
                         )
                     except PeerMcpError:
