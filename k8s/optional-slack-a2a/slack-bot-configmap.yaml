@@ -403,16 +403,21 @@ data:
 
             lowered = text.lower()
             matched_here = []
+            has_alertname = bool(alertname_pattern.search(text))
+            has_status = bool(status_pattern.search(text))
+            has_payload_field = any(marker in text for marker in ("startsAt", "endsAt", "generatorURL"))
+            has_labels_annotations = "labels:" in lowered and "annotations:" in lowered
+            has_structured_summary = bool(summary_pattern.search(text))
 
-            if alertname_pattern.search(text):
+            if has_alertname:
                 matched_here.append("alertname_marker")
-            if status_pattern.search(text):
+            if has_status:
                 matched_here.append("status_marker")
-            if any(marker in text for marker in ("startsAt", "endsAt", "generatorURL")):
+            if has_payload_field:
                 matched_here.append("payload_field_marker")
-            if "labels:" in lowered and "annotations:" in lowered:
+            if has_labels_annotations and (has_alertname or has_status or has_payload_field):
                 matched_here.append("labels_annotations_block_marker")
-            if summary_pattern.search(text):
+            if has_structured_summary:
                 matched_here.append("structured_summary_marker")
 
             if not matched_here:
@@ -526,23 +531,46 @@ data:
         history_client: WebClient,
         channel_id: str,
         thread_ts: str,
+        latest_ts: str,
     ) -> list[dict]:
         combined = {}
-        cursor = None
+        root_history = history_client.conversations_replies(
+            channel=channel_id,
+            ts=thread_ts,
+            oldest=thread_ts,
+            latest=thread_ts,
+            inclusive=True,
+            limit=1,
+        )
+        for message in root_history.get("messages") or []:
+            combined[_message_key(message)] = message
+
+        try:
+            thread_floor = float(thread_ts)
+            latest_cursor = float(latest_ts)
+        except (TypeError, ValueError):
+            return sorted(combined.values(), key=_message_sort_key)
+
+        range_span = 3600.0
 
         for _ in range(THREAD_FETCH_MAX_PAGES):
+            oldest_cursor = max(thread_floor, latest_cursor - range_span)
             history = history_client.conversations_replies(
                 channel=channel_id,
                 ts=thread_ts,
+                oldest=f"{oldest_cursor:.6f}",
+                latest=f"{latest_cursor:.6f}",
+                inclusive=True,
                 limit=THREAD_FETCH_LIMIT,
-                cursor=cursor,
             )
-            for message in history.get("messages") or []:
+            batch = history.get("messages") or []
+            for message in batch:
                 combined[_message_key(message)] = message
 
-            cursor = ((history.get("response_metadata") or {}).get("next_cursor") or "").strip()
-            if not cursor:
+            if oldest_cursor <= thread_floor or len(batch) < THREAD_FETCH_LIMIT:
                 break
+
+            range_span *= 4
 
         return sorted(combined.values(), key=_message_sort_key)
 
@@ -577,7 +605,7 @@ data:
 
         try:
             history_client = WebClient(token=user_token)
-            messages = _fetch_thread_messages(history_client, channel_id, thread_ts)
+            messages = _fetch_thread_messages(history_client, channel_id, thread_ts, event.get("ts") or thread_ts)
             mode = default_mode
             matched_signal_ids = []
             matched_message_keys = set()

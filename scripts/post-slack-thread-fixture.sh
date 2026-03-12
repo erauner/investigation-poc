@@ -13,8 +13,17 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -z "${SLACK_BOT_TOKEN:-}" ]]; then
-  echo "SLACK_BOT_TOKEN is required" >&2
+FIXTURE_TOKEN="${SLACK_FIXTURE_TOKEN:-${SLACK_USER_TOKEN:-}}"
+ALLOW_SELF_BOT_FIXTURE="${ALLOW_SELF_BOT_FIXTURE:-false}"
+
+if [[ -z "${FIXTURE_TOKEN}" ]]; then
+  echo "SLACK_FIXTURE_TOKEN or SLACK_USER_TOKEN is required" >&2
+  exit 1
+fi
+
+if [[ "${FIXTURE_TOKEN}" == "${SLACK_BOT_TOKEN:-}" ]] && [[ "${ALLOW_SELF_BOT_FIXTURE}" != "true" ]]; then
+  echo "Refusing to post fixture with the investigation bot token." >&2
+  echo "Set SLACK_FIXTURE_TOKEN to a different identity, or ALLOW_SELF_BOT_FIXTURE=true to override." >&2
   exit 1
 fi
 
@@ -72,7 +81,7 @@ PAYLOAD="$(jq -n \
   '{channel: $channel, text: $text}')"
 
 RESPONSE="$(curl -sS https://slack.com/api/chat.postMessage \
-  -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+  -H "Authorization: Bearer ${FIXTURE_TOKEN}" \
   -H "Content-Type: application/json; charset=utf-8" \
   -d "${PAYLOAD}")"
 
