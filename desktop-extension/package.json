@@ -1,5 +1,5 @@
 {
-  "name": "homelab-investigation-remote-extension",
+  "name": "investigation-remote-extension",
   "version": "0.1.6",
   "private": true,
   "type": "module",

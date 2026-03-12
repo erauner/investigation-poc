@@ -55,9 +55,9 @@
     "remote_mcp_url": {
       "type": "string",
       "title": "Remote MCP URL",
-      "description": "Reachable controller MCP endpoint, for example https://mcp.example.com/mcp.",
+      "description": "Reachable controller MCP endpoint, for example https://controller-mcp.example.com/mcp.",
       "required": true,
-      "default": "https://mcp.example.com/mcp"
+      "default": "https://controller-mcp.example.com/mcp"
     },
     "remote_mcp_bearer_token": {
       "type": "string",

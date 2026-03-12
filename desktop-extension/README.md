@@ -15,7 +15,7 @@ The extension follows the product path:
 
 `Claude Desktop -> local .mcpb proxy -> kagent-controller -> incident-triage -> investigation-mcp-server`
 
-That is why `remote_mcp_url` should point at the controller route, for example `https://kagent-mcp.erauner.dev/mcp`.
+That is why `remote_mcp_url` should point at the controller route, for example `https://controller-mcp.example.com/mcp`.
 
 ## Why this exists
 
@@ -48,7 +48,7 @@ The raw `alertname=...` forms still work, but they are primarily for debug or st
 
 For Desktop callers that want full control, the tool also accepts optional `mode`, `alertname`, `labels`, and `annotations` arguments.
 
-If you want more tools later, add them in [server/index.js](/Users/erauner/git/side/investigation-poc/desktop-extension/server/index.js) and [manifest.json](/Users/erauner/git/side/investigation-poc/desktop-extension/manifest.json).
+If you want more tools later, add them in [server/index.js](server/index.js) and [manifest.json](manifest.json).
 
 ## Build
 
@@ -72,10 +72,10 @@ That will:
 3. Import the generated `.mcpb`.
 4. Set `remote_mcp_url` to your reachable controller MCP endpoint.
 
-Typical homelab value:
+Example value:
 
 ```text
-https://kagent-mcp.erauner.dev/mcp
+https://controller-mcp.example.com/mcp
 ```
 
 If your endpoint requires auth, set `remote_mcp_bearer_token`.
@@ -94,7 +94,7 @@ To create the standard bundle plus a versioned release copy with SHA256 output:
 ./scripts/release-desktop-extension.sh
 ```
 
-Admin handoff notes live in [ADMIN_HANDOFF.md](/Users/erauner/git/side/investigation-poc/desktop-extension/ADMIN_HANDOFF.md).
+Admin handoff notes live in [ADMIN_HANDOFF.md](ADMIN_HANDOFF.md).
 
 ## Notes
 

@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXT_DIR="${ROOT_DIR}/desktop-extension"
 OUT_DIR="${EXT_DIR}/dist"
 CACHE_DIR="${NPM_CONFIG_CACHE:-${ROOT_DIR}/.npm-cache}"
-OUTPUT_FILE="${OUT_DIR}/homelab-investigation-remote.mcpb"
+OUTPUT_FILE="${OUT_DIR}/investigation-remote.mcpb"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }

@@ -73,7 +73,7 @@ For the first operator-backed validation path in the same kind cluster, use:
 OPENAI_API_KEY=sk-... make kind-validate-operator
 ```
 
-This reuses the existing investigation stack, builds and installs `homelab-operator` from `../homelab-operator`, applies a minimal `operator-smoke` fixture, and validates the same five-section report contract against an unhealthy operator-managed pod.
+This reuses the existing investigation stack, builds and installs the example local operator from `../homelab-operator`, applies a minimal `operator-smoke` fixture, and validates the same five-section report contract against an unhealthy operator-managed pod.
 
 ## Example investigate request
 
@@ -91,7 +91,7 @@ kubectl apply -k k8s-overlays/local-kind
 
 This applies the MCP server path used by the agent (`RemoteMCPServer -> investigation-mcp-server`).
 The legacy HTTP debug API manifests are isolated in `k8s/optional-http/`.
-For `make kind-install-kagent`, `make kind-validate`, and `make kind-validate-operator`, the local kind flow now builds `investigation-poc:local` from the current checkout, loads it into kind, and rewrites the local overlay to use that image instead of `ghcr.io/erauner/investigation-poc:latest`.
+For `make kind-install-kagent`, `make kind-validate`, and `make kind-validate-operator`, the local kind flow now builds `investigation-poc:local` from the current checkout, loads it into kind, and rewrites the local overlay to use that image instead of the repo's published default image reference.
 The default `local-kind` overlay now also includes an in-cluster Prometheus plus kube-state-metrics bundle. If you want the older host-backed path instead, use `K8S_OVERLAY=k8s-overlays/local-kind-host-prometheus`.
 If you are running with the Prometheus Operator CRD available and want `ServiceMonitor` scraping for the peer MCP servers, use `K8S_OVERLAY=k8s-overlays/local-kind-servicemonitors`.
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export INVESTIGATION_REMOTE_MCP_URL="${INVESTIGATION_REMOTE_MCP_URL:-https://kagent-mcp.erauner.dev/mcp}"
+export INVESTIGATION_REMOTE_MCP_URL="${INVESTIGATION_REMOTE_MCP_URL:-https://controller-mcp.example.com/mcp}"
 export INVESTIGATION_DEFAULT_AGENT_REF="${INVESTIGATION_DEFAULT_AGENT_REF:-kagent/incident-triage}"
 export TASK="${TASK:-Investigate the unhealthy pod in namespace kagent-smoke.}"
 export MODE="${MODE:-auto}"

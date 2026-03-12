@@ -1,6 +1,6 @@
 # Desktop Extension Admin Handoff
 
-This package is the Claude Desktop distribution path for the homelab investigation MCP tools.
+This package is the Claude Desktop distribution path for the investigation MCP tools.
 
 ## Artifact
 
@@ -12,11 +12,11 @@ Build the bundle with:
 
 Primary output:
 
-- `desktop-extension/dist/homelab-investigation-remote.mcpb`
+- `desktop-extension/dist/investigation-remote.mcpb`
 
 Versioned release copy:
 
-- `desktop-extension/dist/releases/homelab-investigation-remote-<version>.mcpb`
+- `desktop-extension/dist/releases/investigation-remote-<version>.mcpb`
 
 ## What it does
 
@@ -38,7 +38,7 @@ Expected call path:
 ## Required user configuration
 
 - `remote_mcp_url`
-  Example: `https://kagent-mcp.erauner.dev/mcp`
+  Example: `https://controller-mcp.example.com/mcp`
 
 - `default_agent_ref`
   Example: `kagent/incident-triage`
