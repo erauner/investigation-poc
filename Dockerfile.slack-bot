@@ -1,0 +1,17 @@
+FROM python:3.12-slim-bookworm
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN python -m pip install --no-cache-dir --upgrade pip && \
+    python -m pip install --no-cache-dir \
+      'a2a-sdk==0.3.2' \
+      'aiohttp==3.13.0' \
+      'httpx==0.28.1' \
+      'httpx-sse==0.4.1' \
+      'pydantic==2.11.4' \
+      'slack-bolt==1.26.0'
+
+CMD ["python", "/app/main.py"]

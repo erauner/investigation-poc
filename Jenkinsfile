@@ -57,6 +57,8 @@ spec:
         SHADOW_IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/investigation-shadow-runtime'
         LOKI_MCP_IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/loki-mcp-server'
         ALERTMANAGER_MCP_IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/alertmanager-mcp-server'
+        SLACK_BOT_IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/kagent-slack-bot'
+        SLACK_MCP_IMAGE_NAME = 'docker.nexus.erauner.dev/homelab/slack-mcp-server'
         DOCKER_CONFIG = '/kaniko/.docker'
     }
 
@@ -121,6 +123,26 @@ spec:
                                 --destination=${ALERTMANAGER_MCP_IMAGE_NAME}:latest \
                                 --cache=true \
                                 --cache-repo=${ALERTMANAGER_MCP_IMAGE_NAME}-cache \
+                                --skip-tls-verify-registry=docker.nexus.erauner.dev \
+                                --custom-platform=linux/amd64
+
+                            /kaniko/executor \
+                                --dockerfile=Dockerfile.slack-bot \
+                                --context=dir://. \
+                                --destination=${SLACK_BOT_IMAGE_NAME}:${shortCommit} \
+                                --destination=${SLACK_BOT_IMAGE_NAME}:latest \
+                                --cache=true \
+                                --cache-repo=${SLACK_BOT_IMAGE_NAME}-cache \
+                                --skip-tls-verify-registry=docker.nexus.erauner.dev \
+                                --custom-platform=linux/amd64
+
+                            /kaniko/executor \
+                                --dockerfile=Dockerfile.slack-mcp \
+                                --context=dir://. \
+                                --destination=${SLACK_MCP_IMAGE_NAME}:${shortCommit} \
+                                --destination=${SLACK_MCP_IMAGE_NAME}:latest \
+                                --cache=true \
+                                --cache-repo=${SLACK_MCP_IMAGE_NAME}-cache \
                                 --skip-tls-verify-registry=docker.nexus.erauner.dev \
                                 --custom-platform=linux/amd64
 

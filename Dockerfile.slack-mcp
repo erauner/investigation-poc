@@ -1,0 +1,8 @@
+FROM node:20-bookworm-slim
+
+ENV NODE_ENV=production
+
+RUN npm install -g @modelcontextprotocol/server-slack@2025.4.25 && \
+    npm cache clean --force
+
+CMD ["mcp-server-slack"]

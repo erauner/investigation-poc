@@ -147,6 +147,43 @@ OPENAI_API_KEY=sk-... make kind-validate-shadow
 
 This keeps the existing declarative `incident-triage` lane intact and adds `incident-triage-shadow` as an additive BYO host for parity checks.
 
+### 4c. Enable the Slack demo path
+
+Use [slack-app-manifest-a2a.yaml](/Users/erauner/git/side/investigation-poc/slack-app-manifest-a2a.yaml) to create a dedicated Slack app with:
+
+- Socket Mode enabled
+- `/kind-kagent`
+- `/kind-shadow`
+- `app_mention` events
+
+Then export the required tokens before installing or enabling Slack:
+
+```bash
+export SLACK_BOT_TOKEN=xoxb-...
+export SLACK_APP_TOKEN=xapp-...
+export SLACK_USER_TOKEN=xoxp-...
+export SLACK_TEAM_ID=T...
+export SLACK_CHANNEL_IDS=C...
+```
+
+If those env vars are set before `OPENAI_API_KEY=sk-... make kind-install-kagent`, the install now brings up:
+
+- `kagent-slack-bot`
+- `slack-a2a-agent`
+- `slack-mcp`
+
+You can also enable it afterwards:
+
+```bash
+make kind-enable-slack
+```
+
+Expected Slack paths:
+
+- `/kind-kagent what namespaces exist in this cluster`
+- `/kind-shadow investigate the unhealthy pod in namespace kagent-smoke`
+- `@kagent-kind-demo summarize this thread so far`
+
 ### 5. Cleanup
 
 ```bash

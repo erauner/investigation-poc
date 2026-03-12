@@ -1,0 +1,13 @@
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: slack-mcp
+  namespace: kagent
+spec:
+  deployment:
+    image: "slack-mcp-server:local"
+    port: 3000
+    cmd: "mcp-server-slack"
+    secretRefs:
+      - name: slack-mcp-credentials
+  transportType: "stdio"
