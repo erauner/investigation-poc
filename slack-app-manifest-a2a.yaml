@@ -1,0 +1,36 @@
+display_information:
+  name: kagent-kind-demo
+  description: Dedicated Slack app for local kind kagent demos
+  background_color: "#1f2937"
+features:
+  bot_user:
+    display_name: kagent-kind-demo
+    always_online: false
+  slash_commands:
+    - command: /kind-kagent
+      description: Send a prompt to the local kind kagent Slack agent
+      usage_hint: /kind-kagent show me unhealthy pods
+      should_escape: false
+    - command: /kind-shadow
+      description: Send a prompt to the local kind shadow agent
+      usage_hint: /kind-shadow investigate unhealthy pods in kagent-smoke
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+      - commands
+    user:
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  is_hosted: false
+  token_rotation_enabled: false

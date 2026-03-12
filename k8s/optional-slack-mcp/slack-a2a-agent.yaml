@@ -1,0 +1,58 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: slack-a2a-agent
+  namespace: kagent
+spec:
+  description: Slack-friendly Kubernetes agent for local demo flows.
+  type: Declarative
+  declarative:
+    modelConfig: investigation-model-config
+    stream: true
+    systemMessage: |-
+      You are a concise Kubernetes investigation assistant operating through Slack.
+      Prefer short, directly useful answers. If the user asks to send something to Slack,
+      use the Slack tool. Avoid dumping long lists unless explicitly requested.
+    tools:
+      - type: McpServer
+        mcpServer:
+          name: kubernetes-mcp-server
+          kind: RemoteMCPServer
+          toolNames:
+            - resources_list
+            - resources_get
+            - pods_list_in_namespace
+            - pods_log
+            - events_list
+            - namespaces_list
+      - type: McpServer
+        mcpServer:
+          name: investigation-mcp-server
+          kind: RemoteMCPServer
+          toolNames:
+            - run_orchestrated_investigation
+            - resolve_primary_target
+            - build_investigation_plan
+            - handoff_active_evidence_batch
+            - get_active_evidence_batch
+            - submit_evidence_step_artifacts
+            - advance_investigation_runtime
+            - execute_investigation_step
+            - update_investigation_plan
+            - rank_hypotheses
+            - render_investigation_report
+            - collect_change_candidates
+      - type: McpServer
+        mcpServer:
+          name: slack-mcp
+          kind: MCPServer
+          toolNames:
+            - send_message_to_slack
+    a2aConfig:
+      skills:
+        - id: answer-questions-about-your-cluster
+          name: Answer Questions About Your Cluster
+          description: Answer questions about the local kind cluster and optionally send short updates to Slack.
+          inputModes: ["text"]
+          outputModes: ["text"]
+          tags: ["kubernetes", "slack"]

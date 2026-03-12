@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../k8s-overlays/local-kind
+  - ../../k8s/optional-slack-a2a
+  - ../../k8s/optional-slack-mcp

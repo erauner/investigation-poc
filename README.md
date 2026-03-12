@@ -154,6 +154,57 @@ Use [DEMO.md](/Users/erauner/git/side/investigation-poc/DEMO.md) as the repo-loc
 - the planner-led investigation prompts
 - expected output semantics for Evidence, Related Data, and Limitations
 
+## Local Slack demo
+
+The local kind stack can also run the same Slack-facing pieces used in homelab:
+
+- Socket Mode Slack bot inside the cluster
+- `/kind-kagent` routed to `slack-a2a-agent`
+- `/kind-shadow` routed to `incident-triage-shadow`
+- optional `send_message_to_slack` support through the Slack MCP server
+
+Use the Slack app manifest in [slack-app-manifest-a2a.yaml](/Users/erauner/git/side/investigation-poc/slack-app-manifest-a2a.yaml).
+
+Minimum env vars for Slack -> kagent:
+
+```bash
+export SLACK_BOT_TOKEN=xoxb-...
+export SLACK_APP_TOKEN=xapp-...
+```
+
+Optional env var for thread-history reads:
+
+```bash
+export SLACK_USER_TOKEN=xoxp-...
+```
+
+Additional env vars for kagent -> Slack message sending:
+
+```bash
+export SLACK_TEAM_ID=T...
+export SLACK_CHANNEL_IDS=C...
+```
+
+Then install the local stack:
+
+```bash
+make kind-up
+OPENAI_API_KEY=sk-... make kind-install-kagent
+OPENAI_API_KEY=sk-... make kind-install-kagent-shadow
+```
+
+If the Slack env vars are already set when `make kind-install-kagent` runs, the repo now enables the Slack bot automatically. If `SLACK_TEAM_ID` and `SLACK_CHANNEL_IDS` are also set, it enables the Slack MCP server and the `slack-a2a-agent` automatically as well.
+
+You can also enable either half explicitly later:
+
+```bash
+make kind-enable-slack-a2a
+make kind-enable-slack-mcp
+make kind-enable-slack
+```
+
+The local secret shape is shown in [slack-credentials.secret.example.yaml](/Users/erauner/git/side/investigation-poc/k8s/slack-credentials.secret.example.yaml).
+
 This repo should be sufficient for local validation. The production GitOps rollout still happens from `homelab-k8s`, but the fast feedback loop should stay here.
 
 If you are preparing to fork this into a non-homelab environment, use [PRE_FORK_PLAN.md](/Users/erauner/git/side/investigation-poc/PRE_FORK_PLAN.md) as the repo-local checklist for separating platform code, runtime overlays, and domain-specific behavior.

@@ -1,0 +1,442 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kagent-slack-bot
+  namespace: kagent
+data:
+  main.py: |
+    import logging
+    import os
+
+    from slack_bolt import App
+    from slack_bolt.adapter.socket_mode import SocketModeHandler
+
+    from handlers import register_handlers
+
+
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+    app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
+
+
+    def error_handler(error, body, logger):
+        logging.error("Slack bot error: %s body=%s", error, body)
+
+
+    app.error(error_handler)
+    register_handlers(app)
+
+
+    def main():
+        logging.info("Starting kagent Slack bot")
+        SocketModeHandler(app, os.environ.get("SLACK_APP_TOKEN")).start()
+
+
+    if __name__ == "__main__":
+        main()
+  handlers.py: |
+    import asyncio
+    import os
+    import re
+    import uuid
+    from logging import Logger
+
+    import httpx
+    from a2a.client import A2AClient
+    from a2a.types import Message, MessageSendParams, SendMessageRequest, TextPart
+    from slack_bolt import Ack, App, Say
+    from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
+
+
+    THREAD_CONTEXTS = {}
+    SHOW_USAGE = os.environ.get("SLACK_SHOW_USAGE", "").lower() == "true"
+
+
+    def _extract_text_from_parts(parts) -> str:
+        texts = []
+        for part in parts or []:
+            kind = getattr(part, "kind", None)
+            if kind == "text":
+                value = getattr(part, "text", "")
+                if value:
+                    texts.append(value)
+                continue
+
+            if kind != "data":
+                continue
+
+            data = getattr(part, "data", None) or {}
+            name = data.get("name")
+            args = data.get("args", {}) or {}
+
+            if name == "adk_request_confirmation":
+                hint = ((args.get("toolConfirmation") or {}).get("hint") or "").strip()
+                if hint:
+                    texts.append(f"Confirmation required: {hint}")
+                    continue
+
+            if name == "ask_user":
+                questions = args.get("questions") or []
+                for question in questions:
+                    prompt = (question.get("question") or "").strip()
+                    if prompt:
+                        texts.append(f"Input required: {prompt}")
+
+        return "\n".join(texts).strip()
+
+
+    async def invoke_a2a_agent(agent_url: str, user_input: str, logger: Logger, context_id: str | None = None):
+        client = A2AClient(
+            url=agent_url,
+            httpx_client=httpx.AsyncClient(timeout=600.0),
+        )
+        text_part = TextPart(text=user_input)
+        message = Message(
+            role="user",
+            parts=[text_part],
+            message_id=str(uuid.uuid4()),
+            context_id=context_id,
+        )
+        payload = MessageSendParams(
+            message=message,
+            message_id=str(uuid.uuid4()),
+        )
+
+        logger.info("Invoking kagent A2A agent at %s", agent_url)
+        response = await client.send_message(
+            SendMessageRequest(id=str(uuid.uuid4()), params=payload)
+        )
+
+        text = ""
+        usage = ""
+
+        if response.root and response.root.result:
+            task = response.root.result
+            if hasattr(task, "artifacts") and task.artifacts:
+                for artifact in task.artifacts:
+                    if hasattr(artifact, "parts") and artifact.parts:
+                        for part in artifact.parts:
+                            if hasattr(part, "root") and hasattr(part.root, "text"):
+                                text += part.root.text
+                usage = extract_usage_info(task)
+            elif hasattr(task, "status") and getattr(task.status, "message", None):
+                message = task.status.message
+                text = _extract_text_from_parts(getattr(message, "parts", None))
+            else:
+                text = "No artifacts found in the response"
+        else:
+            text = "No response from the agent"
+
+        next_context_id = None
+        if response.root and response.root.result:
+            next_context_id = getattr(response.root.result, "context_id", None) or getattr(response.root.result, "contextId", None)
+
+        return text.strip(), usage, next_context_id
+
+
+    def run_a2a(agent_url: str, user_input: str, logger: Logger, context_id: str | None = None):
+        return asyncio.run(invoke_a2a_agent(agent_url, user_input, logger, context_id))
+
+
+    def extract_usage_info(task) -> str:
+        try:
+            metadata = getattr(task, "metadata", None) or {}
+            usage_meta = metadata.get("adk_usage_metadata") or metadata.get("kagent_usage_metadata")
+            if not usage_meta:
+                return ""
+            prompt_tokens = usage_meta.get("promptTokenCount", 0)
+            response_tokens = usage_meta.get("candidatesTokenCount", 0)
+            total_tokens = usage_meta.get("totalTokenCount", 0)
+            return (
+                f"Token usage: prompt={prompt_tokens:,} "
+                f"response={response_tokens:,} total={total_tokens:,}"
+            )
+        except Exception:
+            return ""
+
+
+    def placeholder_text_for_prompt(text: str) -> str:
+        lowered = (text or "").lower()
+        if "summary" in lowered or "summarize" in lowered:
+            return "Reviewing the thread..."
+        if "event" in lowered or "log" in lowered:
+            return "Checking recent signals..."
+        if "namespace" in lowered or "pod" in lowered or "deployment" in lowered or "cluster" in lowered:
+            return "Checking the cluster..."
+        if "slack" in lowered or "send" in lowered or "post" in lowered:
+            return "Preparing the update..."
+        return "Working on it..."
+
+
+    def _run_slack_command(
+        client: WebClient,
+        ack: Ack,
+        command,
+        logger: Logger,
+        context,
+        agent_url: str | None,
+        usage_hint: str,
+    ):
+        ack()
+
+        user_id = context["user_id"]
+        channel_id = context["channel_id"]
+        text = (command.get("text") or "").strip()
+
+        if not text:
+            client.chat_postEphemeral(
+                channel=channel_id,
+                user=user_id,
+                text=usage_hint,
+            )
+            return
+
+        client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text=placeholder_text_for_prompt(text),
+        )
+
+        if not agent_url:
+            client.chat_postMessage(
+                channel=channel_id,
+                text="The target A2A URL is not configured for this Slack command.",
+            )
+            return
+
+        try:
+            response, usage_info, _ = run_a2a(agent_url, text, logger)
+            if not response:
+                response = "No response received from the agent."
+
+            blocks = [
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Query:* {text}"
+                        }
+                    ]
+                },
+                {
+                    "type": "divider"
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": response[:2900]
+                    }
+                }
+            ]
+
+            if usage_info and SHOW_USAGE:
+                blocks.extend(
+                    [
+                        {"type": "divider"},
+                        {
+                            "type": "context",
+                            "elements": [{"type": "mrkdwn", "text": usage_info}],
+                        },
+                    ]
+                )
+
+            client.chat_postMessage(
+                channel=channel_id,
+                blocks=blocks,
+                text=response[:200],
+            )
+        except Exception as error:
+            logger.exception("Failed to invoke kagent from Slack")
+            client.chat_postMessage(
+                channel=channel_id,
+                text=f"Slack command failed: {error}",
+            )
+
+
+    def kind_kagent_command(
+        client: WebClient, ack: Ack, command, say: Say, logger: Logger, context
+    ):
+        agent_url = os.getenv("KAGENT_A2A_URL")
+        _run_slack_command(client, ack, command, logger, context, agent_url, "Usage: /kind-kagent <prompt>")
+
+
+    def kind_shadow_command(
+        client: WebClient, ack: Ack, command, say: Say, logger: Logger, context
+    ):
+        agent_url = os.getenv("KAGENT_SHADOW_A2A_URL")
+        _run_slack_command(client, ack, command, logger, context, agent_url, "Usage: /kind-shadow <prompt>")
+
+
+    def _strip_bot_mentions(text: str) -> str:
+        return re.sub(r"<@[A-Z0-9]+>", "", text or "").strip()
+
+
+    def _thread_key(team_id: str | None, channel_id: str, thread_ts: str) -> str:
+        return f"{team_id or 'unknown'}:{channel_id}:{thread_ts}"
+
+
+    def _normalize_slack_text(text: str) -> str:
+        text = _strip_bot_mentions(text or "")
+        text = re.sub(r"Token usage:.*$", "", text, flags=re.MULTILINE).strip()
+        return text
+
+
+    def _message_text(message: dict) -> str:
+        return _normalize_slack_text(message.get("text") or "")
+
+
+    def _is_noise_message(text: str) -> bool:
+        if not text:
+            return True
+        if text in {"Thinking...", "Working on it..."}:
+            return True
+        return text.startswith("/kind-kagent ") or text.startswith("/kind-shadow ")
+
+
+    def _speaker_for_message(message: dict, bot_user_id: str | None) -> str:
+        user_id = message.get("user")
+        if bot_user_id and user_id == bot_user_id:
+            return "assistant"
+        if message.get("subtype") == "bot_message":
+            return "assistant"
+        if user_id:
+            return "user"
+        return "system"
+
+
+    def _format_thread_transcript(messages: list[dict], bot_user_id: str | None) -> str:
+        lines = []
+        for message in messages[-10:]:
+            text = _message_text(message)
+            if _is_noise_message(text):
+                continue
+
+            if len(text) > 400:
+                text = text[:400].rstrip() + "..."
+
+            speaker = _speaker_for_message(message, bot_user_id)
+            lines.append(f"{speaker}: {text}")
+
+        return "\n".join(lines).strip()
+
+
+    def build_thread_aware_prompt(
+        text: str,
+        body: dict,
+        logger: Logger,
+    ) -> str:
+        user_token = os.environ.get("SLACK_USER_TOKEN")
+        if not user_token:
+            return text
+
+        event = body.get("event", {}) or {}
+        channel_id = event.get("channel")
+        thread_ts = event.get("thread_ts") or event.get("ts")
+        if not channel_id or not thread_ts:
+            return text
+
+        try:
+            history_client = WebClient(token=user_token)
+            history = history_client.conversations_replies(channel=channel_id, ts=thread_ts, limit=20)
+            messages = history.get("messages") or []
+            transcript = _format_thread_transcript(messages, body.get("authorizations", [{}])[0].get("user_id"))
+            if not transcript:
+                return text
+
+            return (
+                "Slack thread transcript:\n"
+                f"{transcript}\n\n"
+                "Use the thread transcript as context. Focus on the latest user request and avoid repeating long prior lists unless asked.\n\n"
+                "Latest user request:\n"
+                f"{text}"
+            )
+        except SlackApiError as error:
+            logger.warning("Failed to read Slack thread history: %s", error)
+            return text
+
+
+    def handle_app_mention_events(body, client: WebClient, logger: Logger):
+        event = body.get("event", {}) or {}
+        if event.get("subtype") == "bot_message":
+            return
+
+        channel_id = event["channel"]
+        text = _strip_bot_mentions(event.get("text") or "")
+        if not text:
+            return
+        prompt_text = build_thread_aware_prompt(text, body, logger)
+
+        thread_ts = event.get("thread_ts") or event["ts"]
+        team_id = body.get("team_id")
+        cache_key = _thread_key(team_id, channel_id, thread_ts)
+        context_id = THREAD_CONTEXTS.get(cache_key)
+        agent_url = os.getenv("KAGENT_A2A_URL")
+
+        if not agent_url:
+            client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text="KAGENT_A2A_URL is not configured for the Slack bot.",
+            )
+            return
+
+        placeholder = client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            text=placeholder_text_for_prompt(text),
+        )
+
+        try:
+            response, usage_info, next_context_id = run_a2a(
+                agent_url,
+                prompt_text,
+                logger,
+                context_id=context_id,
+            )
+            if next_context_id:
+                THREAD_CONTEXTS[cache_key] = next_context_id
+            if not response:
+                response = "No response received from the agent."
+
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": response[:2900]
+                    }
+                }
+            ]
+
+            if usage_info and SHOW_USAGE:
+                blocks.extend(
+                    [
+                        {"type": "divider"},
+                        {
+                            "type": "context",
+                            "elements": [{"type": "mrkdwn", "text": usage_info}],
+                        },
+                    ]
+                )
+
+            client.chat_update(
+                channel=channel_id,
+                ts=placeholder["ts"],
+                blocks=blocks,
+                text=response[:200],
+            )
+        except Exception as error:
+            logger.exception("Failed to handle app mention")
+            client.chat_update(
+                channel=channel_id,
+                ts=placeholder["ts"],
+                text=f"@mention failed: {error}",
+            )
+
+
+    def register_handlers(app: App):
+        app.command("/kind-kagent")(kind_kagent_command)
+        app.command("/kind-shadow")(kind_shadow_command)
+        app.event("app_mention")(handle_app_mention_events)

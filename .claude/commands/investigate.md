@@ -4,8 +4,6 @@ argument-hint: [task]
 allowed-tools: mcp__kagent__invoke_agent
 ---
 
-Use the `mcp__kagent__invoke_agent` tool.
-
 - Set `agent` to `kagent/incident-triage`.
 - Treat this command as the only primary investigation entrypoint for the declarative lane.
 - Build `task` as this deterministic wrapper, then append the user's arguments verbatim under `Original user request:`.

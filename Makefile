@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp validate-loki-phase1 validate-loki-phase1-deterministic kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-build-loki-mcp-image kind-load-loki-mcp-image kind-build-alertmanager-mcp-image kind-load-alertmanager-mcp-image kind-enable-http-debug kind-enable-loki-debug kind-enable-alertmanager-debug kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-loki-complementary kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
+.PHONY: install test run run-mcp validate-loki-phase1 validate-loki-phase1-deterministic kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-build-loki-mcp-image kind-load-loki-mcp-image kind-build-alertmanager-mcp-image kind-load-alertmanager-mcp-image kind-enable-http-debug kind-enable-loki-debug kind-enable-alertmanager-debug kind-enable-slack-a2a kind-enable-slack-mcp kind-enable-slack kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-loki-complementary kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -166,6 +166,16 @@ kind-install-kagent:
 	fi
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-mcp-server --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/incident-triage --timeout=180s
+	@if [ -n "$$SLACK_BOT_TOKEN" ] && [ -n "$$SLACK_APP_TOKEN" ]; then \
+		$(MAKE) kind-enable-slack-a2a; \
+	else \
+		echo "Slack A2A bot not enabled. Set SLACK_BOT_TOKEN and SLACK_APP_TOKEN before running kind-install-kagent to enable it."; \
+	fi
+	@if [ -n "$$SLACK_BOT_TOKEN" ] && [ -n "$$SLACK_APP_TOKEN" ] && [ -n "$$SLACK_TEAM_ID" ] && [ -n "$$SLACK_CHANNEL_IDS" ]; then \
+		$(MAKE) kind-enable-slack-mcp; \
+	else \
+		echo "Slack MCP send-message path not enabled. Set SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_TEAM_ID, and SLACK_CHANNEL_IDS to enable it."; \
+	fi
 
 kind-install-kagent-shadow:
 	@if [ "$$(kubectl config current-context)" != "$(KIND_CONTEXT)" ]; then \
@@ -207,6 +217,58 @@ kind-enable-alertmanager-debug:
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/alertmanager-mcp-server --timeout=180s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/investigation-service >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/investigation-service --timeout=180s
+
+kind-enable-slack-a2a:
+	@if [ "$$(kubectl config current-context)" != "$(KIND_CONTEXT)" ]; then \
+		echo "Current context is '$$(kubectl config current-context)'; expected '$(KIND_CONTEXT)'"; \
+		echo "Run: make kind-up"; \
+		exit 1; \
+	fi
+	@if [ -z "$$SLACK_BOT_TOKEN" ] || [ -z "$$SLACK_APP_TOKEN" ]; then \
+		echo "SLACK_BOT_TOKEN and SLACK_APP_TOKEN are required"; \
+		echo "Example: SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... make kind-enable-slack-a2a"; \
+		exit 1; \
+	fi
+	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-credentials \
+		--from-literal=SLACK_BOT_TOKEN="$$SLACK_BOT_TOKEN" \
+		--from-literal=SLACK_APP_TOKEN="$$SLACK_APP_TOKEN" \
+		$$(if [ -n "$$SLACK_USER_TOKEN" ]; then printf '%s' "--from-literal=SLACK_USER_TOKEN=$$SLACK_USER_TOKEN "; fi) \
+		$$(if [ -n "$$SLACK_TEAM_ID" ]; then printf '%s' "--from-literal=SLACK_TEAM_ID=$$SLACK_TEAM_ID "; fi) \
+		$$(if [ -n "$$SLACK_CHANNEL_IDS" ]; then printf '%s' "--from-literal=SLACK_CHANNEL_IDS=$$SLACK_CHANNEL_IDS "; fi) \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@kubectl apply -k k8s/optional-slack-a2a
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-slack-bot --timeout=240s
+
+kind-enable-slack-mcp:
+	@if [ "$$(kubectl config current-context)" != "$(KIND_CONTEXT)" ]; then \
+		echo "Current context is '$$(kubectl config current-context)'; expected '$(KIND_CONTEXT)'"; \
+		echo "Run: make kind-up"; \
+		exit 1; \
+	fi
+	@if [ -z "$$SLACK_BOT_TOKEN" ] || [ -z "$$SLACK_TEAM_ID" ] || [ -z "$$SLACK_CHANNEL_IDS" ]; then \
+		echo "SLACK_BOT_TOKEN, SLACK_TEAM_ID, and SLACK_CHANNEL_IDS are required"; \
+		echo "Example: SLACK_BOT_TOKEN=xoxb-... SLACK_TEAM_ID=T... SLACK_CHANNEL_IDS=C... make kind-enable-slack-mcp"; \
+		exit 1; \
+	fi
+	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-credentials \
+		--from-literal=SLACK_BOT_TOKEN="$$SLACK_BOT_TOKEN" \
+		$$(if [ -n "$$SLACK_APP_TOKEN" ]; then printf '%s' "--from-literal=SLACK_APP_TOKEN=$$SLACK_APP_TOKEN "; fi) \
+		$$(if [ -n "$$SLACK_USER_TOKEN" ]; then printf '%s' "--from-literal=SLACK_USER_TOKEN=$$SLACK_USER_TOKEN "; fi) \
+		--from-literal=SLACK_TEAM_ID="$$SLACK_TEAM_ID" \
+		--from-literal=SLACK_CHANNEL_IDS="$$SLACK_CHANNEL_IDS" \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@kubectl apply -k k8s/optional-slack-mcp
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/slack-mcp --timeout=240s
+	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/slack-a2a-agent --timeout=240s
+
+kind-enable-slack:
+	@if [ -z "$$SLACK_BOT_TOKEN" ] || [ -z "$$SLACK_APP_TOKEN" ] || [ -z "$$SLACK_TEAM_ID" ] || [ -z "$$SLACK_CHANNEL_IDS" ]; then \
+		echo "SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_TEAM_ID, and SLACK_CHANNEL_IDS are required"; \
+		echo "Example: SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... SLACK_TEAM_ID=T... SLACK_CHANNEL_IDS=C... make kind-enable-slack"; \
+		exit 1; \
+	fi
+	@$(MAKE) kind-enable-slack-a2a
+	@$(MAKE) kind-enable-slack-mcp
 
 kind-preflight-clean:
 	@./scripts/kind-preflight-clean.sh
