@@ -102,7 +102,7 @@ def test_alert_thread_root_routes_vague_reply_to_alert(monkeypatch) -> None:
         def __init__(self, token):
             self.token = token
 
-        def conversations_replies(self, channel, ts, limit):
+        def conversations_replies(self, channel, ts, limit, cursor=None):
             return {
                 "messages": [
                     {
@@ -135,7 +135,7 @@ def test_non_alert_thread_stays_generic(monkeypatch) -> None:
         def __init__(self, token):
             self.token = token
 
-        def conversations_replies(self, channel, ts, limit):
+        def conversations_replies(self, channel, ts, limit, cursor=None):
             return {
                 "messages": [
                     {"ts": "171.0001", "user": "U111", "text": "prod is broken"},
@@ -158,7 +158,7 @@ def test_explicit_alert_payload_in_thread_routes_to_alert(monkeypatch) -> None:
         def __init__(self, token):
             self.token = token
 
-        def conversations_replies(self, channel, ts, limit):
+        def conversations_replies(self, channel, ts, limit, cursor=None):
             return {
                 "messages": [
                     {"ts": "171.0001", "user": "U111", "text": "please take a look"},
@@ -205,7 +205,7 @@ def test_long_thread_keeps_root_alert_summary(monkeypatch) -> None:
         def __init__(self, token):
             self.token = token
 
-        def conversations_replies(self, channel, ts, limit):
+        def conversations_replies(self, channel, ts, limit, cursor=None):
             return {"messages": messages}
 
     monkeypatch.setattr(module, "WebClient", FakeWebClient)
@@ -216,10 +216,72 @@ def test_long_thread_keeps_root_alert_summary(monkeypatch) -> None:
     assert "follow-up message 15" in prompt
 
 
+def test_long_thread_fetches_multiple_pages_and_keeps_recent_context(monkeypatch) -> None:
+    module = _load_handlers_module(monkeypatch)
+    monkeypatch.setenv("SLACK_USER_TOKEN", "xoxp-test")
+
+    messages = [
+        {
+            "ts": "171.0001",
+            "subtype": "bot_message",
+            "app_id": "AALERTBOT",
+            "text": "PodCrashLooping firing for pod/crashy in namespace kagent-smoke",
+        }
+    ]
+    for index in range(2, 36):
+        messages.append(
+            {
+                "ts": f"171.{index:04d}",
+                "user": f"U{index}",
+                "text": f"follow-up message {index}",
+            }
+        )
+
+    class FakeWebClient:
+        def __init__(self, token):
+            self.token = token
+
+        def conversations_replies(self, channel, ts, limit, cursor=None):
+            if not cursor:
+                batch = messages[:20]
+                next_cursor = "cursor-2"
+            else:
+                batch = messages[20:]
+                next_cursor = ""
+            return {
+                "messages": batch,
+                "response_metadata": {"next_cursor": next_cursor},
+            }
+
+    monkeypatch.setattr(module, "WebClient", FakeWebClient)
+    prompt = module.build_thread_aware_prompt("investigate this", _body(), logging.getLogger("test"))
+
+    assert prompt.startswith("[INVESTIGATION_ENTRYPOINT]=alert\n")
+    assert "PodCrashLooping firing for pod/crashy in namespace kagent-smoke" in prompt
+    assert "follow-up message 35" in prompt
+
+
 def test_missing_user_token_falls_back_to_prefixed_generic(monkeypatch) -> None:
     module = _load_handlers_module(monkeypatch)
     monkeypatch.delenv("SLACK_USER_TOKEN", raising=False)
 
+    prompt = module.build_thread_aware_prompt("investigate this", _body(), logging.getLogger("test"))
+
+    assert prompt == "[INVESTIGATION_ENTRYPOINT]=generic\n\nLatest user request:\ninvestigate this"
+
+
+def test_generic_history_read_failure_falls_back_to_prefixed_mode(monkeypatch) -> None:
+    module = _load_handlers_module(monkeypatch)
+    monkeypatch.setenv("SLACK_USER_TOKEN", "xoxp-test")
+
+    class FakeWebClient:
+        def __init__(self, token):
+            self.token = token
+
+        def conversations_replies(self, channel, ts, limit, cursor=None):
+            raise RuntimeError("transport timeout")
+
+    monkeypatch.setattr(module, "WebClient", FakeWebClient)
     prompt = module.build_thread_aware_prompt("investigate this", _body(), logging.getLogger("test"))
 
     assert prompt == "[INVESTIGATION_ENTRYPOINT]=generic\n\nLatest user request:\ninvestigate this"

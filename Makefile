@@ -252,6 +252,7 @@ kind-enable-slack-a2a:
 		$$(if [ -n "$$SLACK_USER_TOKEN" ]; then printf '%s' "--from-literal=SLACK_USER_TOKEN=$$SLACK_USER_TOKEN "; fi) \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -k k8s/optional-slack-a2a
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/kagent-slack-bot >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/slack-a2a-agent --timeout=240s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-slack-bot --timeout=240s
 
@@ -299,6 +300,7 @@ kind-enable-slack:
 		--from-literal=SLACK_CHANNEL_IDS="$$SLACK_CHANNEL_IDS" \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -k "$(SLACK_OVERLAY)"
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout restart deploy/kagent-slack-bot >/dev/null 2>&1 || true
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-slack-bot --timeout=240s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/slack-mcp --timeout=240s
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/slack-a2a-agent --timeout=240s

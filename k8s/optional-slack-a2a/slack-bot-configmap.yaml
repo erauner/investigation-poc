@@ -51,6 +51,7 @@ data:
     THREAD_CONTEXTS = {}
     SHOW_USAGE = os.environ.get("SLACK_SHOW_USAGE", "").lower() == "true"
     THREAD_FETCH_LIMIT = 20
+    THREAD_FETCH_MAX_PAGES = 3
     THREAD_TRANSCRIPT_RENDER_LIMIT = 10
     ENTRYPOINT_PREFIX = "[INVESTIGATION_ENTRYPOINT]="
     GENERIC_ENTRYPOINT = "[INVESTIGATION_ENTRYPOINT]=generic"
@@ -343,6 +344,15 @@ data:
         )
 
 
+    def _message_sort_key(message: dict) -> tuple[float, str]:
+        ts = str(message.get("ts") or "")
+        try:
+            numeric_ts = float(ts)
+        except (TypeError, ValueError):
+            numeric_ts = 0.0
+        return numeric_ts, ts
+
+
     def _is_current_bot_message(
         message: dict,
         bot_user_id: str | None,
@@ -512,6 +522,31 @@ data:
         return "\n".join(lines)
 
 
+    def _fetch_thread_messages(
+        history_client: WebClient,
+        channel_id: str,
+        thread_ts: str,
+    ) -> list[dict]:
+        combined = {}
+        cursor = None
+
+        for _ in range(THREAD_FETCH_MAX_PAGES):
+            history = history_client.conversations_replies(
+                channel=channel_id,
+                ts=thread_ts,
+                limit=THREAD_FETCH_LIMIT,
+                cursor=cursor,
+            )
+            for message in history.get("messages") or []:
+                combined[_message_key(message)] = message
+
+            cursor = ((history.get("response_metadata") or {}).get("next_cursor") or "").strip()
+            if not cursor:
+                break
+
+        return sorted(combined.values(), key=_message_sort_key)
+
+
     def build_thread_aware_prompt(
         text: str,
         body: dict,
@@ -542,12 +577,7 @@ data:
 
         try:
             history_client = WebClient(token=user_token)
-            history = history_client.conversations_replies(
-                channel=channel_id,
-                ts=thread_ts,
-                limit=THREAD_FETCH_LIMIT,
-            )
-            messages = history.get("messages") or []
+            messages = _fetch_thread_messages(history_client, channel_id, thread_ts)
             mode = default_mode
             matched_signal_ids = []
             matched_message_keys = set()
@@ -576,6 +606,14 @@ data:
             return _build_prefixed_prompt(latest_request, mode, transcript or None)
         except SlackApiError as error:
             logger.warning("Failed to read Slack thread history: %s", error)
+            return _build_prefixed_prompt(latest_request, default_mode)
+        except Exception as error:
+            logger.warning(
+                "Failed to read Slack thread history via generic client error: error_type=%s channel=%s thread_ts=%s",
+                type(error).__name__,
+                channel_id,
+                thread_ts,
+            )
             return _build_prefixed_prompt(latest_request, default_mode)
 
 
