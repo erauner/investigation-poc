@@ -5,12 +5,9 @@ metadata:
   namespace: kagent
 spec:
   deployment:
-    image: "node:20-bookworm-slim"
+    image: "slack-mcp-server:local"
     port: 3000
-    cmd: "npx"
-    args:
-      - -y
-      - "@modelcontextprotocol/server-slack"
+    cmd: "mcp-server-slack"
     secretRefs:
       - name: slack-mcp-credentials
   transportType: "stdio"

@@ -1,4 +1,4 @@
-.PHONY: install test run run-mcp validate-loki-phase1 validate-loki-phase1-deterministic kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-build-loki-mcp-image kind-load-loki-mcp-image kind-build-alertmanager-mcp-image kind-load-alertmanager-mcp-image kind-enable-http-debug kind-enable-loki-debug kind-enable-alertmanager-debug kind-enable-slack-a2a kind-enable-slack-mcp kind-enable-slack kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-loki-complementary kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
+.PHONY: install test run run-mcp validate-loki-phase1 validate-loki-phase1-deterministic kind-build-investigation-image kind-load-investigation-image kind-build-shadow-image kind-load-shadow-image kind-sync-shadow-runtime kind-build-metrics-smoke-image kind-load-metrics-smoke-image kind-build-loki-mcp-image kind-load-loki-mcp-image kind-build-alertmanager-mcp-image kind-load-alertmanager-mcp-image kind-build-slack-bot-image kind-load-slack-bot-image kind-build-slack-mcp-image kind-load-slack-mcp-image kind-enable-http-debug kind-enable-loki-debug kind-enable-alertmanager-debug kind-enable-slack-a2a kind-enable-slack-mcp kind-enable-slack kind-preflight-clean kagent-smoke-apply kagent-smoke-test kagent-shadow-test kagent-smoke-clean kagent-smoke-loop metrics-smoke-apply metrics-smoke-clean kind-up kind-install-kagent kind-install-kagent-shadow kind-install-operator kind-setup kind-smoke-loop operator-smoke-apply operator-smoke-clean operator-metrics-smoke-apply operator-metrics-smoke-clean kind-validate kind-validate-shadow kind-validate-metrics kind-validate-service-metrics kind-validate-service-scout kind-validate-service-scout-debug kind-validate-loki-complementary kind-validate-node kind-validate-operator kind-validate-alert-entry kind-validate-operator-service-metrics kind-validate-multi kind-down
 
 PYTHON ?= python3
 KIND_CLUSTER_NAME ?= investigation
@@ -13,6 +13,9 @@ SHADOW_IMAGE ?= investigation-shadow-runtime:local
 METRICS_SMOKE_IMAGE ?= metrics-smoke-app:local
 LOKI_MCP_IMAGE ?= loki-mcp-server:local
 ALERTMANAGER_MCP_IMAGE ?= alertmanager-mcp-server:local
+SLACK_BOT_IMAGE ?= kagent-slack-bot:local
+SLACK_MCP_IMAGE ?= slack-mcp-server:local
+SLACK_OVERLAY ?= k8s-overlays/local-kind-slack
 HOMELAB_OPERATOR_DIR ?= ../homelab-operator
 OPERATOR_IMAGE ?= homelab-operator:local
 
@@ -91,6 +94,18 @@ kind-build-alertmanager-mcp-image:
 
 kind-load-alertmanager-mcp-image:
 	@kind load docker-image "$(ALERTMANAGER_MCP_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
+
+kind-build-slack-bot-image:
+	@docker build -f Dockerfile.slack-bot -t "$(SLACK_BOT_IMAGE)" .
+
+kind-load-slack-bot-image:
+	@kind load docker-image "$(SLACK_BOT_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
+
+kind-build-slack-mcp-image:
+	@docker build -f Dockerfile.slack-mcp -t "$(SLACK_MCP_IMAGE)" .
+
+kind-load-slack-mcp-image:
+	@kind load docker-image "$(SLACK_MCP_IMAGE)" --name "$(KIND_CLUSTER_NAME)"
 
 kagent-smoke-apply:
 	@./scripts/smoke-workload.sh apply
@@ -229,6 +244,8 @@ kind-enable-slack-a2a:
 		echo "Example: SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... make kind-enable-slack-a2a"; \
 		exit 1; \
 	fi
+	@$(MAKE) kind-build-slack-bot-image
+	@$(MAKE) kind-load-slack-bot-image
 	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-bot-credentials \
 		--from-literal=SLACK_BOT_TOKEN="$$SLACK_BOT_TOKEN" \
 		--from-literal=SLACK_APP_TOKEN="$$SLACK_APP_TOKEN" \
@@ -249,6 +266,8 @@ kind-enable-slack-mcp:
 		echo "Example: SLACK_BOT_TOKEN=xoxb-... SLACK_TEAM_ID=T... SLACK_CHANNEL_IDS=C... make kind-enable-slack-mcp"; \
 		exit 1; \
 	fi
+	@$(MAKE) kind-build-slack-mcp-image
+	@$(MAKE) kind-load-slack-mcp-image
 	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-mcp-credentials \
 		--from-literal=SLACK_BOT_TOKEN="$$SLACK_BOT_TOKEN" \
 		--from-literal=SLACK_TEAM_ID="$$SLACK_TEAM_ID" \
@@ -265,8 +284,24 @@ kind-enable-slack:
 		echo "Example: SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... SLACK_TEAM_ID=T... SLACK_CHANNEL_IDS=C... make kind-enable-slack"; \
 		exit 1; \
 	fi
-	@$(MAKE) kind-enable-slack-a2a
-	@$(MAKE) kind-enable-slack-mcp
+	@$(MAKE) kind-build-slack-bot-image
+	@$(MAKE) kind-load-slack-bot-image
+	@$(MAKE) kind-build-slack-mcp-image
+	@$(MAKE) kind-load-slack-mcp-image
+	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-bot-credentials \
+		--from-literal=SLACK_BOT_TOKEN="$$SLACK_BOT_TOKEN" \
+		--from-literal=SLACK_APP_TOKEN="$$SLACK_APP_TOKEN" \
+		$$(if [ -n "$$SLACK_USER_TOKEN" ]; then printf '%s' "--from-literal=SLACK_USER_TOKEN=$$SLACK_USER_TOKEN "; fi) \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-mcp-credentials \
+		--from-literal=SLACK_BOT_TOKEN="$$SLACK_BOT_TOKEN" \
+		--from-literal=SLACK_TEAM_ID="$$SLACK_TEAM_ID" \
+		--from-literal=SLACK_CHANNEL_IDS="$$SLACK_CHANNEL_IDS" \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@kubectl apply -k "$(SLACK_OVERLAY)"
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-slack-bot --timeout=240s
+	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/slack-mcp --timeout=240s
+	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/slack-a2a-agent --timeout=240s
 
 kind-preflight-clean:
 	@./scripts/kind-preflight-clean.sh
