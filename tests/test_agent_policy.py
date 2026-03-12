@@ -247,9 +247,8 @@ def test_skill_configmap_stops_teaching_report_first_or_hidden_tools() -> None:
 def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
     wrapper_paths = [
         ".claude/commands/investigate.md",
-        ".claude/commands/investigate-alert.md",
+        ".claude/commands/investigate-shadow.md",
         "claude-code-marketplace/investigation-tools/commands/investigate.md",
-        "claude-code-marketplace/investigation-tools/commands/investigate-alert.md",
     ]
     required_phrases = [
         "run_orchestrated_investigation",
@@ -272,22 +271,30 @@ def test_local_and_packaged_wrappers_teach_planner_led_sequence() -> None:
             assert phrase in text, path
         for phrase in SHARED_RUNTIME_REQUIRED_PHRASES:
             assert phrase in text, path
-        if "alert" in path.lower():
-            assert ALERT_CONTEXT_REQUIRED_PHRASE in text.lower(), path
-            assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE in text.lower(), path
-            assert ALERT_EXTRACTION_REQUIRED_PHRASE in text.lower(), path
-            assert ALERT_NAMESPACE_GUARDRAIL_REQUIRED_PHRASE in text.lower(), path
-            assert ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE in text.lower(), path
-            assert ALERT_FIVE_SECTION_REQUIRED_PHRASE in text.lower(), path
-        else:
-            assert ALERT_CONTEXT_REQUIRED_PHRASE not in text.lower(), path
-            assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE not in text.lower(), path
-            assert ALERT_EXTRACTION_REQUIRED_PHRASE not in text.lower(), path
-            assert ALERT_NAMESPACE_GUARDRAIL_REQUIRED_PHRASE not in text.lower(), path
-            assert ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE not in text.lower(), path
-            assert ALERT_FIVE_SECTION_REQUIRED_PHRASE not in text.lower(), path
+        assert "[INVESTIGATION_ENTRYPOINT]=generic" in text, path
+        assert "[INVESTIGATION_ENTRYPOINT]=alert" in text, path
+        assert "Investigate alert <AlertName>" in text, path
+        assert "alertname=<AlertName>" in text, path
+        assert "alertname: <AlertName>" in text, path
+        assert ALERT_CONTEXT_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_TARGET_VERBATIM_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_EXTRACTION_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_NAMESPACE_GUARDRAIL_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_FREEFORM_TARGET_GUARDRAIL_REQUIRED_PHRASE in text.lower(), path
+        assert ALERT_FIVE_SECTION_REQUIRED_PHRASE in text.lower(), path
         for phrase in banned_phrases:
             assert phrase not in text, path
+
+
+def test_separate_alert_command_files_are_removed() -> None:
+    removed_paths = [
+        ROOT / ".claude/commands/investigate-alert.md",
+        ROOT / ".claude/commands/investigate-alert-shadow.md",
+        ROOT / "claude-code-marketplace/investigation-tools/commands/investigate-alert.md",
+    ]
+
+    for path in removed_paths:
+        assert not path.exists(), path
 
 
 def test_skill_and_desktop_extension_keep_shared_runtime_block_with_parse_only_alert_delta() -> None:

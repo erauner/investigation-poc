@@ -217,7 +217,12 @@ This repo also includes a repo-local Claude Code plugin marketplace for testing 
 The included plugin is intentionally thin:
 
 - shared plugin command: `/investigation-tools:investigate`
-- shared plugin alert command: `/investigation-tools:investigate-alert`
+- explicit alert-form requests now also use `/investigation-tools:investigate`
+
+Breaking change:
+- old local alert command: `/investigate-alert ...`
+- old plugin alert command: `/investigation-tools:investigate-alert ...`
+- new shape: `/investigate Investigate alert ...` and `/investigation-tools:investigate Investigate alert ...`
 - MCP path: `kagent-controller`
 - agent path: `kagent/incident-triage`
 - explicit alert command routes through the alert-specific top-level backend path
@@ -253,7 +258,7 @@ export INVESTIGATION_REMOTE_MCP_URL="http://127.0.0.1:8083/mcp"
 Alert-shaped example:
 
 ```text
-/investigation-tools:investigate-alert Investigate PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
+/investigation-tools:investigate Investigate alert PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
 ```
 
 For faster project-local iteration without plugin namespacing, this repo also includes a standalone command:
@@ -262,10 +267,10 @@ For faster project-local iteration without plugin namespacing, this repo also in
 /investigate Investigate the unhealthy pod in namespace kagent-smoke.
 ```
 
-The local alert command is:
+Alert-shaped example:
 
 ```text
-/investigate-alert Investigate PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
+/investigate Investigate alert PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
 ```
 
 That local command lives at [.claude/commands/investigate.md](/Users/erauner/git/side/investigation-poc/.claude/commands/investigate.md). Per the current Claude Code behavior we just tested, `.claude/commands/` is the right path for user-invoked plain slash commands, while plugins are the right path once you want something shareable and versioned.
