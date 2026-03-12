@@ -350,3 +350,28 @@ process.stdout.write(JSON.stringify({{ genericTask, inferredAlertTask, explicitA
     assert "alertname: PodCrashLooping" in payload["explicitAlertTask"]
     for phrase in BANNED_PROMPT_PHRASES:
         assert phrase not in payload["explicitAlertTask"]
+
+
+def test_slack_runtime_uses_shared_entrypoint_directives_without_copying_backend_prompt_block() -> None:
+    config = _load_yaml("k8s/optional-slack-a2a/slack-bot-configmap.yaml")
+    text = config["data"]["handlers.py"]
+
+    required_phrases = [
+        "[INVESTIGATION_ENTRYPOINT]=generic",
+        "[INVESTIGATION_ENTRYPOINT]=alert",
+        "Investigate\\s+alert",
+        "alertname\\s*[:=]",
+        "Backend/",
+        "Frontend/",
+        "Cluster/",
+    ]
+    banned_phrases = [
+        "extract alertname, labels, annotations, namespace, pod, service, instance, severity, and status",
+        "Use exactly these Markdown headings verbatim",
+        "run_orchestrated_investigation keeps batch selection",
+    ]
+
+    for phrase in required_phrases:
+        assert phrase in text
+    for phrase in banned_phrases:
+        assert phrase not in text
