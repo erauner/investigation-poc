@@ -89,8 +89,9 @@ They should be reached through `resolve_primary_target`, `build_investigation_pl
 
 Clients should preserve one small, deterministic routing rule before handing work to the controller-backed agent path.
 
-- route to the alert entrypoint only when the request includes an explicit alert form
-- otherwise keep the generic entrypoint
+- use one primary `Investigate` entrypoint
+- route explicit alert forms to alert mode inside that entrypoint
+- otherwise keep generic mode inside that same entrypoint
 
 Preferred alert form:
 
@@ -119,9 +120,7 @@ The wrapper should still include the original user request and should remain rea
 Use these names as the primary surface:
 
 - Claude Code local: `/investigate`
-- Claude Code local alert path: `/investigate-alert`
 - Claude Code plugin: `/investigation-tools:investigate`
-- Claude Code plugin alert path: `/investigation-tools:investigate-alert`
 - Claude Desktop tool: `investigate`
 
 Do not lead with internal names like:

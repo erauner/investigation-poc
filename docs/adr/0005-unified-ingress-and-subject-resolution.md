@@ -153,6 +153,26 @@ The exact type name is less important than the architectural rule:
 
 Existing generic and alert-specific wrappers may remain as thin compatibility aliases, but they should not own separate subject-resolution logic.
 
+## Exit Criteria For Removing The Dedicated Alert Wrapper
+
+The intended end-state remains one primary user-facing `Investigate` action.
+Once the generic `Investigate` entrypoint can auto-route explicit alert forms reliably, the dedicated alert wrapper should be removed rather than preserved as a long-lived compatibility surface.
+
+Removing a dedicated alert wrapper such as `/investigate-alert` is appropriate only when all of the following are true:
+
+- the generic user-facing `Investigate` entrypoint can reliably detect explicit alert-shaped input without relying on vague prose heuristics
+- explicit alert inputs and generic workload inputs both normalize through the same internal subject-resolution pipeline
+- alert-specific extraction rules remain backend-owned rather than being reimplemented in each host wrapper
+- the generic entrypoint can prepend the correct ingress directive automatically, such as `[INVESTIGATION_ENTRYPOINT]=alert` vs `[INVESTIGATION_ENTRYPOINT]=generic`
+- alert-shaped requests preserve the current guardrails around alertname, labels, annotations, namespace, and exact original target strings such as `pod/crashy`
+- the generic entrypoint proves reliable enough in practice that the alert wrapper is no longer serving as a safety rail for operators
+
+Given those constraints, the preferred milestone is:
+
+- make `/investigate` capable of auto-routing explicit alert forms
+- remove `/investigate-alert` once the generic entrypoint carries the same alert guardrails and semantics
+- avoid retaining parallel alert-only public wrappers longer than necessary
+
 ## Subject-Centric Normalization
 
 Ingress should normalize into a subject set rather than one single target string.

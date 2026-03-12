@@ -35,10 +35,10 @@ After install, restart Claude Code and run:
 /investigation-tools:investigate Investigate the unhealthy pod in namespace kagent-smoke.
 ```
 
-If you want the alert-specific path, use the alert command:
+The same command should also handle explicit alert-form input:
 
 ```text
-/investigation-tools:investigate-alert Investigate PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
+/investigation-tools:investigate Investigate alert PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
 ```
 
 ## Architecture
@@ -60,7 +60,7 @@ That gives you an un-namespaced local command:
 The local alert command is:
 
 ```text
-/investigate-alert Investigate PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
+/investigate Investigate alert PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
 ```
 
 Use the standalone command for quick iteration, then use the plugin marketplace path for packaging and sharing.

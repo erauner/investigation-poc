@@ -176,7 +176,7 @@ Resolve the target if needed, build a plan, execute one bounded evidence batch, 
 ### Alert-shaped workload prompt
 
 ```text
-/investigate-alert Investigate PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
+/investigate Investigate alert PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke. Return Diagnosis, Evidence, Related Data, Limitations, and Recommended next step.
 ```
 
 For Claude Code, the alert command is the preferred user-facing way to preserve alert-shaped routing without teaching report-first tool usage.
