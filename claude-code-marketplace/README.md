@@ -9,10 +9,17 @@ This directory is a repo-local Claude Code plugin marketplace for testing the in
 That plugin is intentionally thin:
 
 - it defines a slash command for investigation
-- it defines a slash command for alert investigation
+- it handles explicit alert-form input through the unified investigate command
 - it provides plugin-scoped MCP wiring to the `kagent-controller` endpoint
 - it keeps the actual investigation logic in the controller + agent + backend path
-- it steers both commands into the same planner-led resolve -> plan -> bounded execution -> update -> render-late model
+- it steers generic and explicit alert-form requests into the same planner-led resolve -> plan -> bounded execution -> update -> render-late model
+
+## Breaking change
+
+The separate alert-specific command was removed.
+
+- old: `/investigation-tools:investigate-alert ...`
+- new: `/investigation-tools:investigate Investigate alert ...`
 
 ## Local install flow
 
@@ -57,7 +64,7 @@ That gives you an un-namespaced local command:
 /investigate Investigate the unhealthy pod in namespace kagent-smoke.
 ```
 
-The local alert command is:
+Alert-shaped example:
 
 ```text
 /investigate Investigate alert PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
