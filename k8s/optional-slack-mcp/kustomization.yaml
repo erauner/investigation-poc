@@ -3,4 +3,3 @@ kind: Kustomization
 
 resources:
   - slack-mcpserver.yaml
-  - slack-a2a-agent.yaml

@@ -229,14 +229,13 @@ kind-enable-slack-a2a:
 		echo "Example: SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... make kind-enable-slack-a2a"; \
 		exit 1; \
 	fi
-	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-credentials \
+	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-bot-credentials \
 		--from-literal=SLACK_BOT_TOKEN="$$SLACK_BOT_TOKEN" \
 		--from-literal=SLACK_APP_TOKEN="$$SLACK_APP_TOKEN" \
 		$$(if [ -n "$$SLACK_USER_TOKEN" ]; then printf '%s' "--from-literal=SLACK_USER_TOKEN=$$SLACK_USER_TOKEN "; fi) \
-		$$(if [ -n "$$SLACK_TEAM_ID" ]; then printf '%s' "--from-literal=SLACK_TEAM_ID=$$SLACK_TEAM_ID "; fi) \
-		$$(if [ -n "$$SLACK_CHANNEL_IDS" ]; then printf '%s' "--from-literal=SLACK_CHANNEL_IDS=$$SLACK_CHANNEL_IDS "; fi) \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -k k8s/optional-slack-a2a
+	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/slack-a2a-agent --timeout=240s
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/kagent-slack-bot --timeout=240s
 
 kind-enable-slack-mcp:
@@ -250,14 +249,13 @@ kind-enable-slack-mcp:
 		echo "Example: SLACK_BOT_TOKEN=xoxb-... SLACK_TEAM_ID=T... SLACK_CHANNEL_IDS=C... make kind-enable-slack-mcp"; \
 		exit 1; \
 	fi
-	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-credentials \
+	@kubectl -n "$(KAGENT_NAMESPACE)" create secret generic slack-mcp-credentials \
 		--from-literal=SLACK_BOT_TOKEN="$$SLACK_BOT_TOKEN" \
-		$$(if [ -n "$$SLACK_APP_TOKEN" ]; then printf '%s' "--from-literal=SLACK_APP_TOKEN=$$SLACK_APP_TOKEN "; fi) \
-		$$(if [ -n "$$SLACK_USER_TOKEN" ]; then printf '%s' "--from-literal=SLACK_USER_TOKEN=$$SLACK_USER_TOKEN "; fi) \
 		--from-literal=SLACK_TEAM_ID="$$SLACK_TEAM_ID" \
 		--from-literal=SLACK_CHANNEL_IDS="$$SLACK_CHANNEL_IDS" \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@kubectl apply -k k8s/optional-slack-mcp
+	@kubectl apply -f k8s/optional-slack-mcp/slack-a2a-agent.yaml
 	@kubectl -n "$(KAGENT_NAMESPACE)" rollout status deploy/slack-mcp --timeout=240s
 	@kubectl -n "$(KAGENT_NAMESPACE)" wait --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True agent/slack-a2a-agent --timeout=240s
 

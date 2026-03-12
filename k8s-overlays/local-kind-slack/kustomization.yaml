@@ -5,3 +5,11 @@ resources:
   - ../../k8s-overlays/local-kind
   - ../../k8s/optional-slack-a2a
   - ../../k8s/optional-slack-mcp
+
+patches:
+  - path: patch-slack-a2a-agent.yaml
+    target:
+      group: kagent.dev
+      version: v1alpha2
+      kind: Agent
+      name: slack-a2a-agent

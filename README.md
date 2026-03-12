@@ -203,7 +203,7 @@ make kind-enable-slack-mcp
 make kind-enable-slack
 ```
 
-The local secret shape is shown in [slack-credentials.secret.example.yaml](/Users/erauner/git/side/investigation-poc/k8s/slack-credentials.secret.example.yaml).
+The local Slack secret shapes are shown in [slack-credentials.secret.example.yaml](/Users/erauner/git/side/investigation-poc/k8s/slack-credentials.secret.example.yaml).
 
 This repo should be sufficient for local validation. The production GitOps rollout still happens from `homelab-k8s`, but the fast feedback loop should stay here.
 

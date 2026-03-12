@@ -58,17 +58,17 @@ spec:
             - name: SLACK_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: slack-credentials
+                  name: slack-bot-credentials
                   key: SLACK_BOT_TOKEN
             - name: SLACK_APP_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: slack-credentials
+                  name: slack-bot-credentials
                   key: SLACK_APP_TOKEN
             - name: SLACK_USER_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: slack-credentials
+                  name: slack-bot-credentials
                   key: SLACK_USER_TOKEN
                   optional: true
             - name: KAGENT_A2A_URL

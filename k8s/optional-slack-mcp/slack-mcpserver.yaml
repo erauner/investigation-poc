@@ -12,5 +12,5 @@ spec:
       - -y
       - "@modelcontextprotocol/server-slack"
     secretRefs:
-      - name: slack-credentials
+      - name: slack-mcp-credentials
   transportType: "stdio"

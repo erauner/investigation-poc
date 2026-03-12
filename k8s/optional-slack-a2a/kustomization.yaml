@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - slack-bot-configmap.yaml
   - slack-bot-deployment.yaml
+  - slack-a2a-agent.yaml
