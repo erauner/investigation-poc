@@ -1,12 +1,12 @@
 {
   "manifest_version": "0.3",
-  "name": "homelab-investigation-reference",
-  "display_name": "Homelab Investigation Reference",
+  "name": "investigation-reference",
+  "display_name": "Investigation Reference",
   "version": "0.1.0",
   "description": "Minimal reference Desktop extension used to validate Claude Desktop MCPB runtime behavior.",
   "author": {
-    "name": "Evan Rauner",
-    "url": "https://github.com/erauner/investigation-poc"
+    "name": "Investigation Platform Team",
+    "url": "https://github.example.com/your-org/investigation-platform"
   },
   "server": {
     "type": "node",

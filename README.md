@@ -2,6 +2,14 @@
 
 Minimal v1 scaffold for pod/workload investigation with an MCP-first cluster path.
 
+## Transfer note
+
+This repository is safe to use as a local demo and platform starting point, but some deeper overlays and examples still reflect a personal lab environment.
+
+- Treat `kind-*`, Slack demo manifests, and any `homelab-*` naming as local examples, not required production defaults.
+- Prefer repo-relative docs and configurable environment values when adapting this codebase into another organization.
+- Use [PRE_FORK_PLAN.md](PRE_FORK_PLAN.md) as the checklist before the first internal push.
+
 ## Local run
 
 ```bash
@@ -85,7 +93,7 @@ This applies the MCP server path used by the agent (`RemoteMCPServer -> investig
 The legacy HTTP debug API manifests are isolated in `k8s/optional-http/`.
 For `make kind-install-kagent`, `make kind-validate`, and `make kind-validate-operator`, the local kind flow now builds `investigation-poc:local` from the current checkout, loads it into kind, and rewrites the local overlay to use that image instead of `ghcr.io/erauner/investigation-poc:latest`.
 The default `local-kind` overlay now also includes an in-cluster Prometheus plus kube-state-metrics bundle. If you want the older host-backed path instead, use `K8S_OVERLAY=k8s-overlays/local-kind-host-prometheus`.
-If you are running with the Prometheus Operator CRD available and want homelab-style `ServiceMonitor` scraping for the peer MCP servers, use `K8S_OVERLAY=k8s-overlays/local-kind-servicemonitors`.
+If you are running with the Prometheus Operator CRD available and want `ServiceMonitor` scraping for the peer MCP servers, use `K8S_OVERLAY=k8s-overlays/local-kind-servicemonitors`.
 
 ## MCP topology
 
@@ -147,7 +155,7 @@ Host-routed multi-cluster validation:
 make kind-validate-multi
 ```
 
-Use [DEMO.md](/Users/erauner/git/side/investigation-poc/DEMO.md) as the repo-local source of truth for:
+Use [DEMO.md](DEMO.md) as the repo-local source of truth for:
 
 - the end-to-end kind demo
 - the single-run local validation entrypoint
@@ -156,14 +164,14 @@ Use [DEMO.md](/Users/erauner/git/side/investigation-poc/DEMO.md) as the repo-loc
 
 ## Local Slack demo
 
-The local kind stack can also run the same Slack-facing pieces used in homelab:
+The local kind stack can also run the Slack-facing demo pieces:
 
 - Socket Mode Slack bot inside the cluster
 - `/kind-kagent` routed to `slack-a2a-agent`
 - `/kind-shadow` routed to `incident-triage-shadow`
 - optional `send_message_to_slack` support through the Slack MCP server
 
-Use the Slack app manifest in [slack-app-manifest-a2a.yaml](/Users/erauner/git/side/investigation-poc/slack-app-manifest-a2a.yaml).
+Use the Slack app manifest in [slack-app-manifest-a2a.yaml](slack-app-manifest-a2a.yaml).
 
 Minimum env vars for Slack -> kagent:
 
@@ -203,17 +211,17 @@ make kind-enable-slack-mcp
 make kind-enable-slack
 ```
 
-The local Slack secret shapes are shown in [slack-credentials.secret.example.yaml](/Users/erauner/git/side/investigation-poc/k8s/slack-credentials.secret.example.yaml).
+The local Slack secret shapes are shown in [k8s/slack-credentials.secret.example.yaml](k8s/slack-credentials.secret.example.yaml).
 
-This repo should be sufficient for local validation. The production GitOps rollout still happens from `homelab-k8s`, but the fast feedback loop should stay here.
+This repo should be sufficient for local validation. If you are moving it into another environment, treat any separate GitOps repo references as historical local context rather than required architecture.
 
-If you are preparing to fork this into a non-homelab environment, use [PRE_FORK_PLAN.md](/Users/erauner/git/side/investigation-poc/PRE_FORK_PLAN.md) as the repo-local checklist for separating platform code, runtime overlays, and domain-specific behavior.
+If you are preparing to fork this into another environment, use [PRE_FORK_PLAN.md](PRE_FORK_PLAN.md) as the repo-local checklist for separating platform code, runtime overlays, and domain-specific behavior.
 
-Shared client-facing semantics for Desktop and Claude Code live in [docs/interface-contract.md](/Users/erauner/git/side/investigation-poc/docs/interface-contract.md).
+Shared client-facing semantics for Desktop and Claude Code live in [docs/interface-contract.md](docs/interface-contract.md).
 
-The current architecture direction for the investigation workflow is documented in [docs/adr/0001-artifact-oriented-investigation-workflow.md](/Users/erauner/git/side/investigation-poc/docs/adr/0001-artifact-oriented-investigation-workflow.md).
+The current architecture direction for the investigation workflow is documented in [docs/adr/0001-artifact-oriented-investigation-workflow.md](docs/adr/0001-artifact-oriented-investigation-workflow.md).
 
-The next local metrics implementation phase is tracked in [docs/prometheus-kind-checklist.md](/Users/erauner/git/side/investigation-poc/docs/prometheus-kind-checklist.md).
+The next local metrics implementation phase is tracked in [docs/prometheus-kind-checklist.md](docs/prometheus-kind-checklist.md).
 
 ## Use from Claude Code
 
@@ -223,7 +231,7 @@ After `make kind-install-kagent`, port-forward the controller MCP endpoint:
 ./scripts/port-forward-controller-mcp.sh
 ```
 
-This repo includes a local Claude Code MCP config in [.mcp.json](/Users/erauner/git/side/investigation-poc/.mcp.json) that points at `http://127.0.0.1:8083/mcp`.
+This repo includes a local Claude Code MCP config in [.mcp.json](.mcp.json) that points at `http://127.0.0.1:8083/mcp`.
 
 From the repo root, launch Claude Code:
 
@@ -263,7 +271,7 @@ make kind-enable-http-debug
 
 This repo also includes a repo-local Claude Code plugin marketplace for testing a slash-command entrypoint before any future fork:
 
-- [claude-code-marketplace/README.md](/Users/erauner/git/side/investigation-poc/claude-code-marketplace/README.md)
+- [claude-code-marketplace/README.md](claude-code-marketplace/README.md)
 
 The included plugin is intentionally thin:
 
@@ -324,9 +332,9 @@ Alert-shaped example:
 /investigate Investigate alert PodCrashLooping for pod crashy-abc123 in namespace kagent-smoke.
 ```
 
-That local command lives at [.claude/commands/investigate.md](/Users/erauner/git/side/investigation-poc/.claude/commands/investigate.md). Per the current Claude Code behavior we just tested, `.claude/commands/` is the right path for user-invoked plain slash commands, while plugins are the right path once you want something shareable and versioned.
+That local command lives at [.claude/commands/investigate.md](.claude/commands/investigate.md). Per the current Claude Code behavior we just tested, `.claude/commands/` is the right path for user-invoked plain slash commands, while plugins are the right path once you want something shareable and versioned.
 
-This repo also includes an optional skill form at [.claude/skills/investigation-helper/SKILL.md](/Users/erauner/git/side/investigation-poc/.claude/skills/investigation-helper/SKILL.md) if you want Claude to auto-discover the capability from natural-language requests, but that is not the primary manual entrypoint.
+This repo also includes an optional skill form at [.claude/skills/investigation-helper/SKILL.md](.claude/skills/investigation-helper/SKILL.md) if you want Claude to auto-discover the capability from natural-language requests, but that is not the primary manual entrypoint.
 
 Once the standalone command UX is stable, the next local packaging test should use a plugin directory directly:
 
@@ -342,7 +350,7 @@ Then invoke the namespaced plugin command:
 
 ## Claude Desktop extension
 
-This repo now also includes a Desktop packaging path in [desktop-extension/README.md](/Users/erauner/git/side/investigation-poc/desktop-extension/README.md).
+This repo now also includes a Desktop packaging path in [desktop-extension/README.md](desktop-extension/README.md).
 
 Use that path when you want Claude Desktop to reach a remote MCP server through an installable `.mcpb` bundle. The extension is intentionally thin: it proxies a narrow investigation tool surface to the `kagent-controller` MCP endpoint and leaves diagnosis logic in the controller + agent + Python backend path.
 
@@ -360,7 +368,7 @@ For a versioned release artifact plus SHA256 output:
 
 For this repo, the two client paths are:
 
-- `Claude Code`: keep using [.mcp.json](/Users/erauner/git/side/investigation-poc/.mcp.json) or a managed remote MCP configuration pointed at the controller MCP endpoint.
+- `Claude Code`: keep using [.mcp.json](.mcp.json) or a managed remote MCP configuration pointed at the controller MCP endpoint.
 - `Claude Desktop`: install the generated `.mcpb` and point it at the controller MCP URL you want Desktop users to reach.
 
 For the homelab deployment, that controller URL is the published route for `kagent-controller`, not the raw `investigation-mcp-server` service.

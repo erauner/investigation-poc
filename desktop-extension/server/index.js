@@ -385,7 +385,7 @@ async function ensureRemoteInitialized() {
     protocolVersion: "2025-11-25",
     capabilities: {},
     clientInfo: {
-      name: "homelab-investigation-remote",
+      name: "investigation-remote",
       version: "0.1.6"
     }
   });
@@ -450,7 +450,7 @@ async function handleMessage(message) {
         tools: {}
       },
       serverInfo: {
-        name: "homelab-investigation-remote",
+        name: "investigation-remote",
         version: "0.1.6"
       }
     });

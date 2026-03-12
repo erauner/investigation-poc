@@ -2,6 +2,8 @@
 
 This document is the repo-local demo and validation guide for the `investigation-poc` stack.
 
+Use this file as a local validation guide, not as a production architecture contract. If you move this repository into another organization, treat the local cluster names, Slack app names, and overlay choices here as examples to adapt.
+
 Use this repo when you want to prove the full local path with kind:
 
 `kind` -> `kagent` -> `incident-triage` -> `investigation-mcp-server`
@@ -149,7 +151,7 @@ This keeps the existing declarative `incident-triage` lane intact and adds `inci
 
 ### 4c. Enable the Slack demo path
 
-Use [slack-app-manifest-a2a.yaml](/Users/erauner/git/side/investigation-poc/slack-app-manifest-a2a.yaml) to create a dedicated Slack app with:
+Use [slack-app-manifest-a2a.yaml](slack-app-manifest-a2a.yaml) to create a dedicated Slack app with:
 
 - Socket Mode enabled
 - `/kind-kagent`
@@ -234,5 +236,5 @@ Investigate high latency for service/whoami in namespace kagent-smoke. Return Di
 
 ## Notes
 
-- This local kind flow is the preferred place to validate prompt, contract, and report-composition changes before rolling them into `homelab-k8s`.
-- Production GitOps manifests still live in `homelab-k8s`, but the fast feedback loop should stay here.
+- This local kind flow is the preferred place to validate prompt, contract, and report-composition changes before adapting them into a separate deployment repo.
+- Any reference to a separate GitOps repo should be treated as historical local workflow, not a required default for a new environment.

@@ -9,7 +9,7 @@ import {
 
 const server = new Server(
   {
-    name: "homelab-investigation-reference",
+    name: "investigation-reference",
     version: "0.1.0"
   },
   {

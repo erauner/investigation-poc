@@ -1,22 +1,22 @@
 {
   "manifest_version": "0.3",
-  "name": "homelab-investigation-remote",
-  "display_name": "Homelab Investigation Remote",
+  "name": "investigation-remote",
+  "display_name": "Investigation Remote",
   "version": "0.1.6",
   "description": "Thin Claude Desktop extension that proxies planner-led investigation requests to a remote streamable HTTP MCP server with deterministic alert-vs-generic routing.",
-  "long_description": "Claude Desktop extension for the homelab investigation stack. This bundle runs a local Node MCP server over stdio and forwards high-level investigation requests to the kagent controller MCP endpoint. The proxy adds a deterministic planner-led wrapper so alert-shaped requests preserve alert extraction while generic investigations follow the same resolve, plan, bounded execution, update, and late-render path through the same agent.",
+  "long_description": "Claude Desktop extension for a controller-backed investigation stack. This bundle runs a local Node MCP server over stdio and forwards high-level investigation requests to the kagent controller MCP endpoint. The proxy adds a deterministic planner-led wrapper so alert-shaped requests preserve alert extraction while generic investigations follow the same resolve, plan, bounded execution, update, and late-render path through the same agent.",
   "author": {
-    "name": "Evan Rauner",
-    "email": "raunerevan@gmail.com",
-    "url": "https://github.com/erauner/investigation-poc"
+    "name": "Investigation Platform Team",
+    "email": "team@example.com",
+    "url": "https://github.example.com/your-org/investigation-platform"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/erauner/investigation-poc.git"
+    "url": "https://github.example.com/your-org/investigation-platform.git"
   },
-  "homepage": "https://github.com/erauner/investigation-poc",
-  "documentation": "https://github.com/erauner/investigation-poc/blob/main/desktop-extension/README.md",
-  "support": "https://github.com/erauner/investigation-poc/issues",
+  "homepage": "https://github.example.com/your-org/investigation-platform",
+  "documentation": "https://github.example.com/your-org/investigation-platform/blob/main/desktop-extension/README.md",
+  "support": "https://github.example.com/your-org/investigation-platform/issues",
   "icon": "icon.png",
   "server": {
     "type": "node",
@@ -49,15 +49,15 @@
     "kubernetes",
     "incident-response",
     "observability",
-    "homelab"
+    "investigation"
   ],
   "user_config": {
     "remote_mcp_url": {
       "type": "string",
       "title": "Remote MCP URL",
-      "description": "Reachable controller MCP endpoint, for example https://kagent-mcp.erauner.dev/mcp.",
+      "description": "Reachable controller MCP endpoint, for example https://mcp.example.com/mcp.",
       "required": true,
-      "default": "https://kagent-mcp.erauner.dev/mcp"
+      "default": "https://mcp.example.com/mcp"
     },
     "remote_mcp_bearer_token": {
       "type": "string",

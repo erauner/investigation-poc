@@ -2,6 +2,10 @@
 
 This document is the concrete cleanup plan before creating a Medallia-oriented fork from this repo.
 
+Historical note:
+- Some file references below still use local absolute paths from the original working copy.
+- Treat those as repo-relative pointers during the fork, not as required local filesystem layout.
+
 The goal is not to add more features here. The goal is to make the current repo easier to fork cleanly by separating:
 
 - reusable investigation platform code
@@ -61,7 +65,7 @@ Primary targets:
 
 Examples to review:
 - `incident-triage`
-- `homelab-investigation-remote`
+- `investigation-remote`
 
 Acceptance check:
 - Reusable docs and clients read as neutral platform assets instead of copied homelab artifacts.
